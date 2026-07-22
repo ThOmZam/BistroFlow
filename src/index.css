@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Utility to hide scrollbars on scrollable containers */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

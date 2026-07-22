@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user (waiter, cook, or admin)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "waiter", "cook"] },
+        "pin": { "type": "string", "description": "4-digit login PIN" }
+      },
+      "required": ["uid", "name", "role", "pin"]
+    },
+    "Table": {
+      "title": "Table",
+      "description": "Physical table in the restaurant",
+      "type": "object",
+      "properties": {
+        "number": { "type": "number" },
+        "status": { "type": "string", "enum": ["free", "occupied", "waiting_bill"] },
+        "x": { "type": "number", "description": "Horizontal position in map (%)" },
+        "y": { "type": "number", "description": "Vertical position in map (%)" }
+      },
+      "required": ["number", "status", "x", "y"]
+    },
+    "Session": {
+      "title": "Dining Session",
+      "description": "A single group dining at a table",
+      "type": "object",
+      "properties": {
+        "tableId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "totalAmount": { "type": "number" }
+      },
+      "required": ["tableId", "startTime", "status"]
+    },
+    "Account": {
+      "title": "Sub-Account",
+      "description": "Individual account within a session for split billing",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "label": { "type": "string", "description": "e.g., 'Person A' or 'Seat 1'" }
+      },
+      "required": ["sessionId", "label"]
+    },
+    "Order": {
+      "title": "Order Item",
+      "description": "Specific item ordered by a person",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string" },
+        "menuItemId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "ready", "delivered"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "note": { "type": "string" }
+      },
+      "required": ["accountId", "menuItemId", "quantity", "status", "timestamp"]
+    },
+    "MenuItem": {
+      "title": "Menu Item",
+      "description": "Dish or drink available in the menu",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "image": { "type": "string" },
+        "recipe": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ingredientId": { "type": "string" },
+              "quantity": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["name", "price", "category"]
+    },
+    "Ingredient": {
+      "title": "Ingredient",
+      "description": "Raw material in inventory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "unit": { "type": "string" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" }
+      },
+      "required": ["name", "unit", "stock"]
+    },
+    "Transaction": {
+      "title": "Financial Transaction",
+      "description": "Payment record",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string", "enum": ["cash", "digital"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "amount", "method", "timestamp"]
+    },
+    "Promotion": {
+      "title": "Promotion Banner",
+      "description": "Featured promotion or highlight banner shown to clients",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "description": { "type": "string" },
+        "badge": { "type": "string" },
+        "image": { "type": "string" },
+        "actionText": { "type": "string" },
+        "filterCategory": { "type": "string" },
+        "filterQuery": { "type": "string" },
+        "accentColor": { "type": "string" },
+        "badgeBg": { "type": "string" },
+        "badgeText": { "type": "string" }
+      },
+      "required": ["title", "subtitle", "description", "badge", "image"]
+    },
+    "Schedule": {
+      "title": "Work Schedule",
+      "description": "Predefined work shift or schedule",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "timeStart": { "type": "string" },
+        "timeEnd": { "type": "string" },
+        "days": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "timeStart", "timeEnd"]
+    },
+    "Attendance": {
+      "title": "Employee Attendance",
+      "description": "Check-in and check-out tracking for staff",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeRole": { "type": "string" },
+        "date": { "type": "string" },
+        "checkIn": { "type": "string", "format": "date-time" },
+        "checkOut": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["checked_in", "checked_out"] },
+        "hoursWorked": { "type": "number" }
+      },
+      "required": ["employeeId", "employeeName", "date", "checkIn", "status"]
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "System users" },
+    "tables": { "schema": "Table", "description": "Restaurant tables" },
+    "sessions": { "schema": "Session", "description": "Active and past dining sessions" },
+    "sessions/{sessionId}/accounts": { "schema": "Account", "description": "Sub-accounts within a session" },
+    "sessions/{sessionId}/accounts/{accountId}/orders": { "schema": "Order", "description": "Items ordered in an account" },
+    "menu": { "schema": "MenuItem", "description": "Restaurant menu items" },
+    "inventory": { "schema": "Ingredient", "description": "Inventory stock" },
+    "transactions": { "schema": "Transaction", "description": "Payments received" },
+    "promotions": { "schema": "Promotion", "description": "Active highlights and banners" },
+    "schedules": { "schema": "Schedule", "description": "Predefined shift schedules" },
+    "attendance": { "schema": "Attendance", "description": "Employee attendance check-ins" }
+  }
+}

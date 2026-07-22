@@ -1,0 +1,2192 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  LogOut, 
+  ShoppingBag, 
+  MapPin, 
+  User as UserIcon, 
+  CheckCircle2, 
+  Navigation, 
+  ArrowRight, 
+  Phone, 
+  Search, 
+  Trash2, 
+  ChevronRight, 
+  Clock, 
+  Check, 
+  CreditCard,
+  KeyRound,
+  Sparkles,
+  Info,
+  Minus,
+  Plus,
+  X,
+  Download,
+  MessageCircle,
+  ExternalLink
+} from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { db, auth } from '../lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
+import { useRestaurantData } from '../hooks/useRestaurantData';
+import { logAction } from '../lib/logger';
+import { MenuItem } from '../types';
+import PromotionsBanner from '../components/PromotionsBanner';
+import { getMenuItemStockAlert } from '../lib/stockUtils';
+
+export default function ClientView({ onLogout }: { onLogout: () => void }) {
+  const { menu, settings, promotions, ingredients, tables, activeSessions } = useRestaurantData();
+  const exchangeRate = settings?.exchangeRate || 40;
+
+  // Retrieve table parameter from URL to support QR self-service
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const tableIdParam = urlParams.get('table') || urlParams.get('mesa') || urlParams.get('tableId');
+  const qrTable = useMemo(() => {
+    if (!tableIdParam || !tables) return null;
+    return tables.find(t => t.id === tableIdParam || t.number.toString() === tableIdParam);
+  }, [tableIdParam, tables]);
+
+  // Real-time table session monitoring
+  const currentTableSession = useMemo(() => {
+    if (!qrTable || !activeSessions) return null;
+    return activeSessions.find(s => s.tableId === qrTable.id && s.status === 'active');
+  }, [qrTable, activeSessions]);
+
+  const [tableOrders, setTableOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!currentTableSession?.id) {
+      setTableOrders([]);
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, 'sessions', currentTableSession.id, 'accounts', 'default', 'orders'),
+      (snap) => {
+        setTableOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+    );
+    return () => unsub();
+  }, [currentTableSession?.id]);
+
+  // Shopping Cart State
+  const [cart, setCart] = useState<{ item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[] }[]>([]);
+  const [excludedIds, setExcludedIds] = useState<string[]>([]);
+  const [extraNote, setExtraNote] = useState<string>('');
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [category, setCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showUnavailableItems, setShowUnavailableItems] = useState(false);
+  
+  // Checkout Wizard State
+  const [isOrdering, setIsOrdering] = useState(false);
+  const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [whatsappLocation, setWhatsappLocation] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'pagomovil' | 'zelle' | 'cash'>('pagomovil');
+  const [paymentReference, setPaymentReference] = useState('');
+
+  // Voucher / Receipt Success State
+  const [submittedVoucher, setSubmittedVoucher] = useState<{
+    id: string;
+    customerName: string;
+    customerPhone: string;
+    deliveryType: 'delivery' | 'pickup';
+    customerAddress: string;
+    whatsappLocation: string;
+    paymentMethod: 'pagomovil' | 'zelle' | 'cash';
+    paymentReference: string;
+    items: { name: string; qty: number; price: number }[];
+    totalAmount: number;
+    timestamp: string;
+  } | null>(null);
+
+  // Live Tracker drawer state
+  const [isTrackerDrawerOpen, setIsTrackerDrawerOpen] = useState(false);
+
+  // Active tracked session
+  const [trackedSessionId, setTrackedSessionId] = useState<string | null>(
+    localStorage.getItem('tracked_delivery_session_id')
+  );
+  const [trackedSession, setTrackedSession] = useState<any | null>(null);
+
+  // Staff Login Modal State
+  const [isStaffLoginOpen, setIsStaffLoginOpen] = useState(false);
+  const [pin, setPin] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  // Submitting state to prevent double clicks/submissions
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Selected item details modal state
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+  const [modalQty, setModalQty] = useState(1);
+
+  // Real-time listener for current order session
+  useEffect(() => {
+    if (!trackedSessionId) {
+      setTrackedSession(null);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(db, 'sessions', trackedSessionId), (docSnap) => {
+      if (docSnap.exists()) {
+        setTrackedSession({ id: docSnap.id, ...docSnap.data() });
+      } else {
+        // Session was deleted or finished
+        setTrackedSession(null);
+        localStorage.removeItem('tracked_delivery_session_id');
+        setTrackedSessionId(null);
+      }
+    }, (err) => {
+      console.error('Error tracking session:', err);
+    });
+
+    return () => unsub();
+  }, [trackedSessionId]);
+
+  // Auto-clear tracker after it's been completed or closed for a while (e.g. 20 seconds)
+  useEffect(() => {
+    if (trackedSession && (trackedSession.status === 'completed' || trackedSession.status === 'closed')) {
+      const timer = setTimeout(() => {
+        localStorage.removeItem('tracked_delivery_session_id');
+        setTrackedSessionId(null);
+        setTrackedSession(null);
+      }, 20000); // 20 seconds of showing final status before auto-clearing
+      return () => clearTimeout(timer);
+    }
+  }, [trackedSession]);
+
+  // Synchronize default delivery type based on restaurant settings
+  useEffect(() => {
+    if (settings) {
+      if (settings.deliveryEnabled === false && settings.pickupEnabled !== false) {
+        setDeliveryType('pickup');
+      } else if (settings.pickupEnabled === false && settings.deliveryEnabled !== false) {
+        setDeliveryType('delivery');
+      }
+    }
+  }, [settings]);
+
+  // Synchronize default payment method based on what is active
+  useEffect(() => {
+    if (settings) {
+      const pm = settings.paymentMethods || {};
+      if (pm.pagoMovil !== false) setPaymentMethod('pagomovil');
+      else if (pm.zelle !== false) setPaymentMethod('zelle');
+      else if (pm.cash !== false) setPaymentMethod('cash');
+    }
+  }, [settings]);
+
+  const { isRestaurantOpen, restaurantCloseReason } = useMemo(() => {
+    if (!settings) return { isRestaurantOpen: true, restaurantCloseReason: '' };
+    
+    // 1. Check store status manual override
+    if (settings.storeStatus === 'open') {
+      return { isRestaurantOpen: true, restaurantCloseReason: '' };
+    }
+    if (settings.storeStatus === 'closed') {
+      return { isRestaurantOpen: false, restaurantCloseReason: 'La tienda online está cerrada temporalmente por el administrador.' };
+    }
+    
+    // 2. If automatic status or default, evaluate based on menu blocks schedule
+    if (settings.storeStatus === 'auto' || !settings.storeStatus) {
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, '0');
+      const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeString = `${currentHours}:${currentMinutes}`;
+      
+      const bStart = (settings as any).breakfastStart || '06:00';
+      const bEnd = (settings as any).breakfastEnd || '09:00';
+      const lStart = (settings as any).lunchStart || '11:00';
+      const lEnd = (settings as any).lunchEnd || '15:00';
+      const dStart = (settings as any).dinnerStart || '18:00';
+      const dEnd = (settings as any).dinnerEnd || '23:00';
+
+      const checkInBlock = (start: string, end: string) => {
+        if (start <= end) {
+          return currentTimeString >= start && currentTimeString <= end;
+        } else {
+          // Overnight scheduling
+          return currentTimeString >= start || currentTimeString <= end;
+        }
+      };
+
+      const isBreakfastNow = checkInBlock(bStart, bEnd);
+      const isLunchNow = checkInBlock(lStart, lEnd);
+      const isDinnerNow = checkInBlock(dStart, dEnd);
+
+      const isOpenNow = isBreakfastNow || isLunchNow || isDinnerNow;
+      
+      if (!isOpenNow) {
+        return { 
+          isRestaurantOpen: false, 
+          restaurantCloseReason: `Fuera del horario de atención al público. Atendemos de Desayuno (${bStart} a ${bEnd}), Almuerzo (${lStart} a ${lEnd}) y Cena (${dStart} a ${dEnd}).` 
+        };
+      }
+    }
+    
+    return { isRestaurantOpen: true, restaurantCloseReason: '' };
+  }, [settings]);
+
+  const getMenuItemAvailability = (item: MenuItem): { isAvailable: boolean; timingLabel?: string } => {
+    const type = item.scheduleType || 'always';
+    if (type === 'always') return { isAvailable: true };
+    
+    const now = new Date();
+    const currentHours = String(now.getHours()).padStart(2, '0');
+    const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+    const currentTimeString = `${currentHours}:${currentMinutes}`;
+    
+    let start = '';
+    let end = '';
+    let label = '';
+    
+    if (type === 'breakfast') {
+      start = (settings as any)?.breakfastStart || '06:00';
+      end = (settings as any)?.breakfastEnd || '09:00';
+      label = `Desayuno (${start} - ${end})`;
+    } else if (type === 'lunch') {
+      start = (settings as any)?.lunchStart || '11:00';
+      end = (settings as any)?.lunchEnd || '15:00';
+      label = `Almuerzo (${start} - ${end})`;
+    } else if (type === 'dinner') {
+      start = (settings as any)?.dinnerStart || '18:00';
+      end = (settings as any)?.dinnerEnd || '23:00';
+      label = `Cena (${start} - ${end})`;
+    } else if (type === 'custom') {
+      start = item.availableFrom || '08:00';
+      end = item.availableTo || '22:00';
+      label = `Especial (${start} - ${end})`;
+    }
+    
+    let isAvailable = false;
+    if (start <= end) {
+      isAvailable = currentTimeString >= start && currentTimeString <= end;
+    } else {
+      isAvailable = currentTimeString >= start || currentTimeString <= end;
+    }
+    
+    return { isAvailable, timingLabel: label };
+  };
+
+  // Handle addition to cart
+  const addToCart = (item: MenuItem, qty: number = 1, note: string = '', excludedIngredientIds: string[] = []) => {
+    setCart(prev => {
+      const existing = prev.find(i => 
+        i.item.id === item.id && 
+        (i.note || '') === note && 
+        JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds)
+      );
+      if (existing) {
+        return prev.map(i => 
+          (i.item.id === item.id && 
+           (i.note || '') === note && 
+           JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds))
+            ? { ...i, qty: i.qty + qty }
+            : i
+        );
+      }
+      return [...prev, { item, qty, note, excludedIngredientIds }];
+    });
+  };
+
+  const updateCartQty = (index: number, delta: number) => {
+    setCart(prev => {
+      return prev.map((item, idx) => {
+        if (idx === index) {
+          const newQty = item.qty + delta;
+          return newQty > 0 ? { ...item, qty: newQty } : null;
+        }
+        return item;
+      }).filter(Boolean) as { item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[] }[];
+    });
+  };
+
+  // Get matching category emoji
+  const getCategoryEmoji = (catName: string) => {
+    const name = catName.toLowerCase();
+    if (name.includes('burg') || name.includes('hambur')) return '🍔';
+    if (name.includes('perr') || name.includes('dog')) return '🌭';
+    if (name.includes('beb') || name.includes('refres') || name.includes('soda')) return '🥤';
+    if (name.includes('pap') || name.includes('acompañ')) return '🍟';
+    if (name.includes('post') || name.includes('dulc')) return '🍰';
+    return '🍕';
+  };
+
+  const categories: string[] = ['All'];
+  menu.forEach(item => {
+    if (item.category && !categories.includes(item.category)) {
+      categories.push(item.category);
+    }
+  });
+
+  const handlePromoClick = (filterCategory: string, filterQuery: string) => {
+    const matchedCategory = categories.find(
+      cat => cat.toLowerCase().includes(filterCategory.toLowerCase())
+    );
+    
+    if (filterCategory === 'All') {
+      setCategory('All');
+    } else if (matchedCategory) {
+      setCategory(matchedCategory);
+    } else {
+      setCategory('All');
+    }
+    
+    setSearchQuery(filterQuery);
+    
+    setTimeout(() => {
+      const element = document.getElementById('menu-listings');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+  };
+
+  const filteredMenu = menu.filter(item => {
+    const matchesCategory = category === 'All' || item.category === category;
+    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          item.category.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const { isAvailable } = getMenuItemAvailability(item);
+    const matchesSchedule = showUnavailableItems || isAvailable;
+    
+    return matchesCategory && matchesSearch && matchesSchedule;
+  });
+
+  const cartTotal = cart.reduce((acc, entry) => acc + (entry.item.price * entry.qty), 0);
+
+  // Submit delivery or QR self-service order
+  const submitOrder = async () => {
+    if (isSubmitting || !isRestaurantOpen) return;
+
+    // Check if QR mode is active
+    if (qrTable) {
+      if (settings?.qrOrderingEnabled === false) {
+        alert('Los pedidos por QR están desactivados temporalmente por el restaurante.');
+        return;
+      }
+      if (!customerName.trim() || cart.length === 0) return;
+
+      setIsSubmitting(true);
+      try {
+        const orderItemsForVoucher = cart.map(c => ({
+          name: c.item.name,
+          qty: c.qty,
+          price: c.item.price
+        }));
+
+        let sessionToUseId = '';
+        const existingSession = activeSessions.find(s => s.tableId === qrTable.id && s.status === 'active');
+        if (existingSession) {
+          sessionToUseId = existingSession.id;
+        } else {
+          // Create a new active session for the table
+          const sessionDocRef = await addDoc(collection(db, 'sessions'), {
+            tableId: qrTable.id,
+            startTime: new Date().toISOString(),
+            status: 'active',
+            totalAmount: cartTotal,
+            customerName: customerName.trim(),
+            accounts: [{ id: 'default', name: customerName.trim(), status: 'active' }]
+          });
+          await updateDoc(doc(db, 'tables', qrTable.id), { status: 'occupied' });
+          sessionToUseId = sessionDocRef.id;
+
+          // Log table opening by client via QR
+          await logAction('order', customerName.trim(), 'Abrió mesa por QR', `Mesa ${qrTable.number} iniciada por el comensal`);
+        }
+
+        // Add the order items to the session's default account
+        const ordersRef = collection(db, 'sessions', sessionToUseId, 'accounts', 'default', 'orders');
+        const batchId = Date.now().toString();
+
+        for (const entry of cart) {
+          await addDoc(ordersRef, {
+            menuItemId: entry.item.id,
+            itemName: entry.item.name,
+            price: entry.item.price,
+            quantity: entry.qty,
+            status: 'pending', // Dine-in table orders go directly to 'pending' to be cooked
+            timestamp: new Date().toISOString(),
+            note: entry.note || '',
+            excludedIngredientIds: entry.excludedIngredientIds || [],
+            batchId,
+            tableName: 'MESA ' + qrTable.number,
+            customerName: customerName.trim()
+          });
+        }
+
+        // Log order sent by client via QR
+        const itemNames = cart.map(c => `${c.qty}x ${c.item.name}`).join(', ');
+        await logAction('order', customerName.trim(), 'Pidió por QR', `Mesa ${qrTable.number}: ${itemNames}`);
+
+        // Set voucher representation for successful receipt screen
+        setSubmittedVoucher({
+          id: sessionToUseId,
+          customerName: customerName.trim(),
+          customerPhone: 'N/A (Mesa ' + qrTable.number + ')',
+          deliveryType: 'pickup', // fallback
+          customerAddress: 'Mesa ' + qrTable.number,
+          whatsappLocation: '',
+          paymentMethod: 'cash', // dine-in fallback
+          paymentReference: '',
+          items: orderItemsForVoucher,
+          totalAmount: cartTotal,
+          timestamp: new Date().toLocaleString()
+        });
+
+        // Clear cart and checkout inputs
+        setCart([]);
+        setIsOrdering(false);
+        setIsCartOpen(false);
+
+        // Notify client
+        alert('¡Pedido enviado a cocina con éxito! Puedes ver el progreso en tiempo real abajo.');
+      } catch (err) {
+        console.error(err);
+        alert('Error al enviar el pedido a la cocina.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    const isDelivery = deliveryType === 'delivery';
+    if (!customerName.trim() || !customerPhone.trim() || (isDelivery && !customerAddress.trim()) || cart.length === 0) return;
+
+    setIsSubmitting(true);
+    try {
+      const orderItemsForVoucher = cart.map(c => ({
+        name: c.item.name,
+        qty: c.qty,
+        price: c.item.price
+      }));
+
+      // 1. Create delivery session with paymentStatus = 'pending_validation'
+      const sessionDocRef = await addDoc(collection(db, 'sessions'), {
+        tableId: 'delivery-' + Date.now(),
+        startTime: new Date().toISOString(),
+        status: 'active',
+        type: 'delivery',
+        deliveryType,
+        orderNumber: Math.floor(1000 + Math.random() * 9000),
+        whatsappLocation: isDelivery ? whatsappLocation : '',
+        customerName,
+        customerPhone,
+        customerAddress: isDelivery ? customerAddress : 'Retiro en Local (Pick Up)',
+        paymentStatus: 'pending_validation',
+        paymentMethod,
+        paymentReference: paymentMethod === 'cash' ? '' : paymentReference,
+        totalAmount: cartTotal
+      });
+
+      // 2. Create order items with status = 'pending_payment_validation'
+      const accountId = 'default';
+      const ordersRef = collection(db, 'sessions', sessionDocRef.id, 'accounts', accountId, 'orders');
+      const batchId = Date.now().toString();
+
+      for (const entry of cart) {
+        await addDoc(ordersRef, {
+          menuItemId: entry.item.id,
+          itemName: entry.item.name,
+          price: entry.item.price,
+          quantity: entry.qty,
+          status: 'pending_payment_validation', // Does not show up on KDS until Cashier validates
+          timestamp: new Date().toISOString(),
+          note: entry.note || '',
+          excludedIngredientIds: entry.excludedIngredientIds || [],
+          batchId,
+          tableName: 'Delivery',
+          customerName: customerName
+        });
+      }
+
+      // Log delivery/pickup order creation
+      const deliveryItemNames = cart.map(c => `${c.qty}x ${c.item.name}`).join(', ');
+      await logAction('order', customerName, `Pidió ${deliveryType === 'delivery' ? 'Delivery' : 'Pick Up'}`, `${deliveryItemNames} | Total: $${cartTotal.toFixed(2)}`);
+
+      // Save the voucher data for the success receipt screen
+      setSubmittedVoucher({
+        id: sessionDocRef.id,
+        customerName,
+        customerPhone,
+        deliveryType,
+        customerAddress: isDelivery ? customerAddress : 'Retiro en Local (Pick Up)',
+        whatsappLocation: isDelivery ? whatsappLocation : '',
+        paymentMethod,
+        paymentReference: paymentMethod === 'cash' ? '' : paymentReference,
+        items: orderItemsForVoucher,
+        totalAmount: cartTotal,
+        timestamp: new Date().toLocaleString()
+      });
+
+      // Clear cart & checkout flow inputs
+      setCart([]);
+      setIsOrdering(false);
+      setIsCartOpen(false);
+
+      // Save tracking details locally
+      localStorage.setItem('tracked_delivery_session_id', sessionDocRef.id);
+      setTrackedSessionId(sessionDocRef.id);
+
+    } catch (err) {
+      console.error(err);
+      alert('Error al enviar el pedido. Intente nuevamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Staff Login handler
+  const handlePinClick = (num: string) => {
+    if (pin.length < 4) {
+      setPin(prev => prev + num);
+      setLoginError('');
+    }
+  };
+
+  const handlePinDelete = () => {
+    setPin(prev => prev.slice(0, -1));
+    setLoginError('');
+  };
+
+  const handleStaffLogin = async () => {
+    setLoginError('');
+    let role: string | null = null;
+    let name: string | null = null;
+    let employeeId: string | null = null;
+
+    // Check custom employees from Firestore first
+    try {
+      const q = query(collection(db, 'employees'), where('pin', '==', pin));
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const employeeDoc = snap.docs[0];
+        const employee = employeeDoc.data();
+        if (employee.status === 'inactive') {
+          setLoginError('Usuario inactivo en nómina.');
+          setPin('');
+          return;
+        }
+        role = employee.role;
+        name = employee.name;
+        employeeId = employeeDoc.id;
+      }
+    } catch (err) {
+      console.error('Error checking employees collection in ClientView:', err);
+    }
+
+    // Default hardcoded pins fallback if not found in Firestore
+    if (!role) {
+      if (pin === '1111') {
+        role = 'admin';
+        name = 'Admin';
+        employeeId = 'fallback-admin';
+      } else if (pin === '2222') {
+        role = 'waiter';
+        name = 'Mesero';
+        employeeId = 'fallback-waiter';
+      } else if (pin === '3333') {
+        role = 'cook';
+        name = 'Cocina';
+        employeeId = 'fallback-cook';
+      } else if (pin === '4444') {
+        role = 'finance';
+        name = 'Caja';
+        employeeId = 'fallback-finance';
+      }
+    }
+
+    if (role) {
+      try {
+        localStorage.setItem('demo_role', role);
+        if (employeeId) {
+          localStorage.setItem('demo_employee_id', employeeId);
+        }
+        if (name) {
+          localStorage.setItem('demo_user_name', name);
+        } else {
+          localStorage.removeItem('demo_user_name');
+        }
+        await signInAnonymously(auth);
+        
+        // Log staff login to System Kernel
+        await logAction('auth', name || 'Cliente', 'Inició sesión', `Rol: ${role.toUpperCase()}`);
+        
+        setIsStaffLoginOpen(false);
+        // Refresh page or trigger callback to let App.tsx pick up the role
+        window.location.reload();
+      } catch (err) {
+        // Fallback for offline environments
+        localStorage.setItem('demo_fallback_role', role);
+        if (employeeId) {
+          localStorage.setItem('demo_employee_id', employeeId);
+        }
+        if (name) {
+          localStorage.setItem('demo_user_name', name);
+        } else {
+          localStorage.removeItem('demo_user_name');
+        }
+        
+        // Log staff login to System Kernel (Offline fallback)
+        try {
+          await logAction('auth', name || 'Cliente', 'Inició sesión (Offline)', `Rol: ${role.toUpperCase()}`);
+        } catch (logErr) {
+          console.error('Error logging offline staff login:', logErr);
+        }
+
+        setIsStaffLoginOpen(false);
+        window.location.reload();
+      }
+    } else {
+      setLoginError('PIN incorrecto. Intente nuevamente.');
+      setPin('');
+    }
+  };
+
+  // Get tracker UI step index
+  const getTrackerStep = () => {
+    if (!trackedSession) return 0;
+    
+    // Status is complete / closed
+    if (trackedSession.status === 'closed' || trackedSession.status === 'completed') {
+      return 4; // Delivered
+    }
+
+    // Payment validation pending
+    if (trackedSession.paymentStatus === 'pending_validation') {
+      return 1; // Payment verification
+    }
+
+    // Payment validated, checking if all items are prepared
+    if (trackedSession.paymentStatus === 'validated') {
+      // In this demo, we can consider it ready if preparation status is updated, or transition to prep
+      return 2; // In preparation
+    }
+
+    return 3; // Ready for delivery
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-black font-sans pb-32">
+      {/* HEADER */}
+      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 px-6 py-4 flex justify-between items-center max-w-7xl mx-auto rounded-b-[24px] shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-black/10">
+            {(settings?.restaurantName || 'BistroFlow').charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <span className="font-bold text-xl tracking-tight block">{settings?.restaurantName || 'BistroFlow'}</span>
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              {qrTable ? `Mesa ${qrTable.number} • Auto-servicio` : 'Express Delivery'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {trackedSessionId && (
+            <button 
+              onClick={() => {
+                setIsTrackerDrawerOpen(true);
+              }}
+              className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors border border-indigo-100"
+            >
+              <Navigation size={14} className="animate-pulse" />
+              Ver Tracker
+            </button>
+          )}
+
+          <button 
+            onClick={() => {
+              setPin('');
+              setLoginError('');
+              setIsStaffLoginOpen(true);
+            }} 
+            className="p-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-600 transition-colors flex items-center gap-2 text-xs font-bold border border-slate-100"
+            title="Acceso Personal"
+          >
+            <KeyRound size={16} />
+            <span className="hidden sm:inline">Acceso Personal</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Tracking will render in a floating bottom banner + drawer sheet */}
+
+      {/* HERO HERO SECTION */}
+      <main className="max-w-4xl mx-auto p-6">
+        <div className="mb-8 bg-black text-white rounded-[32px] p-8 md:p-12 relative overflow-hidden shadow-xl">
+          {/* Decorative background shape */}
+          <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/5 rounded-full translate-x-10 translate-y-10" />
+          <div className="relative z-10 max-w-md">
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block mb-2 flex items-center gap-1">
+              <Sparkles size={12} className="text-yellow-400 fill-yellow-400" />
+              {qrTable ? `Autoservicio Mesa ${qrTable.number}` : 'UberEats Experience'}
+            </span>
+            <h1 className="text-3xl md:text-5xl font-black tracking-tight leading-tight">
+              {qrTable ? `¡Ordena desde tu mesa en ${settings?.restaurantName || 'BistroFlow'}!` : `¡Pide lo que quieras en ${settings?.restaurantName || 'BistroFlow'}!`}
+            </h1>
+            <p className="text-slate-400 text-xs md:text-sm mt-3">
+              {qrTable 
+                ? `Estás en la Mesa ${qrTable.number}. Escoge tus platillos, agrégalos al pedido y disfruta directo de la cocina.`
+                : 'Selecciona tus hamburguesas supremas, acompañantes crujientes y bebidas heladas directo a tu puerta con sincronización de pago y tracker real-time.'}
+            </p>
+          </div>
+        </div>
+
+        {/* QR WELCOME OR DIGITAL MENU CATALOGUE ONLY BANNERS */}
+        {qrTable && (
+          settings?.qrOrderingEnabled === false ? (
+            <div className="mb-6 bg-amber-50 border border-amber-200 rounded-[24px] p-5 flex items-start gap-4 text-amber-950 shadow-sm animate-fade-in">
+              <span className="text-2xl mt-0.5">📋</span>
+              <div>
+                <h4 className="font-bold text-sm">Menú Digital Activo (Catálogo)</h4>
+                <p className="text-xs text-amber-800 mt-1">
+                  Puedes explorar nuestra carta digital con precios y descripciones. La opción de ordenar directamente desde tu celular mediante código QR está desactivada en este momento.
+                </p>
+                <p className="text-[10px] text-amber-700 mt-1 font-semibold uppercase tracking-wider">
+                  ¡Por favor indica tu pedido a uno de nuestros meseros!
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-6 bg-indigo-50 border border-indigo-200 rounded-[24px] p-5 flex items-start gap-4 text-indigo-950 shadow-sm animate-fade-in">
+              <span className="text-2xl mt-0.5">⚡</span>
+              <div>
+                <h4 className="font-bold text-sm">¡Bienvenido a la Mesa {qrTable.number}!</h4>
+                <p className="text-xs text-indigo-800 mt-1">
+                  Estás usando nuestro sistema de auto-servicio QR. Explora el menú, agrega tus platillos favoritos y ordénalos directamente a cocina sin esperar.
+                </p>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* REAL-TIME DINE-IN ORDERS TRACKER FOR THE TABLE */}
+        {qrTable && tableOrders.length > 0 && (
+          <div className="mb-8 bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm animate-fade-in">
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-50">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                  <span>🍽️</span> Tu Consumo en Mesa {qrTable.number}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Sigue en tiempo real los platillos ordenados desde esta mesa.</p>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider text-[9px]">Total Consumido</span>
+                <span className="font-black text-lg text-black">
+                  ${tableOrders.reduce((sum, o) => sum + (o.price * o.quantity), 0).toFixed(2)}
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold block">
+                  Bs. {(tableOrders.reduce((sum, o) => sum + (o.price * o.quantity), 0) * exchangeRate).toFixed(2)}
+                </span>
+              </div>
+            </div>
+            
+            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+              {tableOrders.map((order, idx) => {
+                let statusBadgeClass = 'bg-slate-50 text-slate-500 border-slate-100';
+                let statusLabel = 'Recibido';
+                if (order.status === 'preparing') {
+                  statusBadgeClass = 'bg-amber-50 text-amber-700 border-amber-100';
+                  statusLabel = '🍳 En Cocina';
+                } else if (order.status === 'ready') {
+                  statusBadgeClass = 'bg-green-50 text-green-700 border-green-100 animate-pulse';
+                  statusLabel = '🔔 ¡Listo!';
+                } else if (order.status === 'delivered') {
+                  statusBadgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-100';
+                  statusLabel = '✅ Servido';
+                }
+                
+                return (
+                  <div key={order.id || idx} className="flex items-center justify-between p-3 bg-slate-50/60 rounded-2xl border border-slate-100/50 animate-fade-in">
+                    <div className="flex items-center gap-3">
+                      <span className="w-6 h-6 bg-slate-100 rounded-lg flex items-center justify-center font-black text-xs text-slate-800">
+                        {order.quantity}x
+                      </span>
+                      <div>
+                        <span className="font-bold text-xs text-slate-900 block">{order.itemName}</span>
+                        {order.note && (
+                          <span className="text-[10px] text-slate-400 block mt-0.5">Nota: {order.note}</span>
+                        )}
+                        {order.customerName && (
+                          <span className="text-[9px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded mt-1 inline-block">
+                            Para: {order.customerName}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-black text-slate-800">
+                        ${(order.price * order.quantity).toFixed(2)}
+                      </span>
+                      <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${statusBadgeClass}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {!isRestaurantOpen && (
+          <div className="mb-6 bg-rose-50 border border-rose-200 rounded-[24px] p-5 flex items-start gap-4 text-rose-950 shadow-sm">
+            <span className="text-2xl mt-0.5">🕒</span>
+            <div>
+              <h4 className="font-bold text-sm">Tienda Cerrada Temporalmente</h4>
+              <p className="text-xs text-rose-800 mt-1">
+                {restaurantCloseReason || 'La tienda online está cerrada en este momento fuera de su horario de trabajo.'}
+              </p>
+              <p className="text-[10px] text-rose-600 mt-1 font-semibold uppercase tracking-wider">
+                Aún puedes ver el menú, pero los pedidos están inhabilitados en este momento.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* PROMOTIONS BANNER SECTION */}
+        <PromotionsBanner onPromoClick={handlePromoClick} categories={categories} promotions={promotions} />
+
+        {/* SEARCH BAR & FILTERS */}
+        <div className="flex flex-col md:flex-row gap-4 mb-8">
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="Buscar por plato, ingredientes o categorías..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-12 pr-4 py-4 bg-white border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors shadow-sm text-sm font-medium"
+            />
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            {categories.map(cat => (
+              <button 
+                key={cat}
+                onClick={() => setCategory(cat)}
+                className={`px-5 py-3 rounded-2xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                  category === cat 
+                    ? 'bg-black text-white shadow-md shadow-black/10' 
+                    : 'bg-white text-slate-500 border border-slate-100 hover:bg-slate-50'
+                }`}
+              >
+                <span>{cat === 'All' ? '🍽️' : getCategoryEmoji(cat)}</span>
+                <span>{cat === 'All' ? 'Todos' : cat}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Toggle to view unavailable items in current schedule */}
+        <div className="flex justify-end mb-4">
+          <button 
+            onClick={() => setShowUnavailableItems(!showUnavailableItems)}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
+              showUnavailableItems 
+                ? 'bg-black text-white border-black shadow-sm' 
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <span>⏰</span>
+            <span>{showUnavailableItems ? 'Ver solo disponibles hoy' : 'Ver menú completo (incluyendo no disponibles hoy)'}</span>
+          </button>
+        </div>
+
+        {/* MENU LISTINGS */}
+        <h3 id="menu-listings" className="font-bold text-lg mb-6 flex items-center gap-2">
+          <span>Menú Disponible</span>
+          <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-normal">
+            {filteredMenu.length} platillos
+          </span>
+        </h3>
+
+        {filteredMenu.length === 0 ? (
+          <div className="bg-white rounded-3xl p-12 text-center border border-slate-100 shadow-sm max-w-md mx-auto">
+            <Search size={40} className="mx-auto text-slate-300 mb-4" />
+            <p className="font-bold">No se encontraron platillos</p>
+            <p className="text-slate-400 text-xs mt-1">Prueba buscando con palabras como 'hamburguesa', 'bebida' o cambia el filtro de categoría.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+            {filteredMenu.map(item => {
+              const countInCart = cart.find(c => c.item.id === item.id)?.qty || 0;
+              const { isAvailable, timingLabel } = getMenuItemAvailability(item);
+              const stockAlert = getMenuItemStockAlert(item, ingredients);
+              const isOutOfStock = stockAlert.status === 'out_of_stock';
+              const canOrder = isAvailable && isRestaurantOpen && !isOutOfStock && (qrTable === null || settings?.qrOrderingEnabled !== false);
+              
+              return (
+                <div 
+                  key={item.id}
+                  onClick={() => { if (!isOutOfStock) { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); } }}
+                  className={`bg-white rounded-[28px] border border-slate-100 overflow-hidden flex flex-col hover:shadow-xl hover:-translate-y-1 transition-all group cursor-pointer ${
+                    (!isAvailable || !isRestaurantOpen || isOutOfStock) ? 'opacity-85' : ''
+                  }`}
+                >
+                  <div className="aspect-[4/3] bg-slate-50 overflow-hidden relative">
+                    <img 
+                      src={item.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500'} 
+                      alt={item.name} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                    />
+                    
+                    {/* Category Label */}
+                    <span className="absolute top-4 left-4 bg-white/95 backdrop-blur-md text-black text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm z-10">
+                      {item.category}
+                    </span>
+
+                    {/* Active tags badges overlay */}
+                    {item.alerts && item.alerts.length > 0 && (
+                      <div className="absolute bottom-4 left-4 right-4 flex flex-wrap gap-1.5 z-10">
+                        {item.alerts.map(tagId => {
+                          const labelMap: { [key: string]: string } = {
+                            'Spicy': '🌶️ Picante',
+                            'Gluten-Free': '🌾 Sin Gluten',
+                            'Lactose-Free': '🥛 S. Lactosa',
+                            'Vegan': '🌱 Vegano',
+                            'Vegetarian': '🥗 Vegetar.',
+                            'Popular': '🔥 Popular',
+                            'New': '✨ Nuevo',
+                            'Slow-Prep': '⏳ Prep. Lenta',
+                            'Chef-Special': '⭐ Especial'
+                          };
+                          return (
+                            <span key={tagId} className="px-2 py-0.5 bg-black/85 backdrop-blur text-white text-[9px] font-extrabold rounded-lg uppercase tracking-wider shadow-sm">
+                              {labelMap[tagId] || tagId}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {!isAvailable && (
+                      <span className="absolute bottom-4 left-4 right-4 bg-rose-600/95 backdrop-blur-md text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl uppercase tracking-wider shadow-sm text-center z-20">
+                        ⏳ {timingLabel || 'No disponible ahora'}
+                      </span>
+                    )}
+
+                    {isOutOfStock && (
+                      <div className="absolute inset-0 bg-rose-950/60 backdrop-blur-[1.5px] flex items-center justify-center z-20">
+                        <span className="bg-white px-3 py-1.5 text-xs font-black text-rose-600 rounded-xl shadow-md tracking-wider uppercase">
+                          Agotado temporalmente 🚫
+                        </span>
+                      </div>
+                    )}
+
+                    {countInCart > 0 && (
+                      <span className="absolute top-4 right-4 bg-black text-white text-xs font-black w-7 h-7 rounded-full flex items-center justify-center shadow-lg animate-bounce z-10">
+                        {countInCart}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="p-5 flex-1 flex flex-col justify-between">
+                    <div>
+                      {/* Inventory status helper badge */}
+                      {stockAlert.status !== 'available' && (
+                        <span className={`text-[10px] font-extrabold uppercase tracking-widest mb-1.5 block ${
+                          isOutOfStock ? 'text-rose-500' : 'text-amber-500'
+                        }`}>
+                          ● {stockAlert.text}
+                        </span>
+                      )}
+
+                      <h4 className="font-bold text-base text-slate-900 group-hover:text-black transition-colors">
+                        {item.name}
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                        Exquisita preparación de la casa con los mejores ingredientes frescos.
+                      </p>
+                    </div>
+
+                    <div className="mt-5 flex items-center justify-between pt-4 border-t border-slate-50">
+                      <div>
+                        <span className="block font-black text-lg text-black leading-tight">
+                          ${item.price.toFixed(2)}
+                        </span>
+                        <span className="block text-[10px] text-slate-400 font-medium">
+                          Bs. {(item.price * exchangeRate).toFixed(2)}
+                        </span>
+                      </div>
+
+                      <button 
+                        disabled={!canOrder}
+                        onClick={(e) => { e.stopPropagation(); if (canOrder) addToCart(item); }}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          !canOrder
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-black hover:bg-slate-800 text-white hover:scale-105 active:scale-95'
+                        }`}
+                      >
+                        <ShoppingBag size={14} />
+                        {!isRestaurantOpen 
+                          ? 'Cerrado' 
+                          : isOutOfStock
+                            ? 'Agotado'
+                            : !isAvailable 
+                              ? 'Inactivo' 
+                              : (qrTable !== null && settings?.qrOrderingEnabled === false) 
+                                ? 'Ver' 
+                                : 'Agregar'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {/* FLOAT BOTTOM BAR CART PREVIEW */}
+      {cart.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30">
+          <button 
+            onClick={() => setIsCartOpen(true)}
+            className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl flex justify-between items-center shadow-xl shadow-black/25 hover:scale-[1.02] transition-all"
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-white/10 px-3 py-1.5 rounded-xl text-xs font-black">
+                {cart.reduce((sum, c) => sum + c.qty, 0)}
+              </div>
+              <span className="text-sm font-bold uppercase tracking-wider">Ver Carrito</span>
+            </div>
+            <div className="text-right">
+              <span className="block font-bold text-sm">${cartTotal.toFixed(2)}</span>
+              <span className="block text-[10px] text-slate-400 font-bold">Bs. {(cartTotal * exchangeRate).toFixed(2)}</span>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* CART SLIDE-OVER MODAL */}
+      <AnimatePresence>
+        {isCartOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+            <motion.div 
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-2xl font-black tracking-tight">Tu Carrito</h3>
+                  <p className="text-xs text-slate-400 mt-1">Revisa tus artículos antes de pagar.</p>
+                </div>
+                <button 
+                  onClick={() => setIsCartOpen(false)}
+                  className="text-xs font-bold text-slate-400 hover:text-black uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              {/* Cart List */}
+              <div className="space-y-4 mb-8 overflow-y-auto flex-1 pr-2 max-h-[350px]">
+                {cart.map((entry, idx) => (
+                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="aspect-square w-12 h-12 rounded-xl overflow-hidden bg-slate-200">
+                        <img src={entry.item.image || 'https://via.placeholder.com/150'} alt={entry.item.name} className="w-full h-full object-cover" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-sm text-slate-950 block">{entry.item.name}</span>
+                        {entry.note && (
+                          <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md font-bold inline-block mt-1 border border-amber-100/50 max-w-[150px] truncate" title={entry.note}>
+                            {entry.note}
+                          </span>
+                        )}
+                        <span className="text-xs text-slate-400 block mt-0.5">${entry.item.price.toFixed(2)} c/u</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      {/* Qty Modifiers */}
+                      <div className="flex items-center bg-white border border-slate-100 rounded-xl px-2.5 py-1 gap-3 shadow-sm">
+                        <button 
+                          onClick={() => updateCartQty(idx, -1)}
+                          className="font-bold text-slate-500 hover:text-black text-sm"
+                        >
+                          -
+                        </button>
+                        <span className="font-mono font-bold text-sm">{entry.qty}</span>
+                        <button 
+                          onClick={() => updateCartQty(idx, 1)}
+                          className="font-bold text-slate-500 hover:text-black text-sm"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      <div className="text-right flex flex-col items-end min-w-[70px]">
+                        <span className="font-bold text-sm text-black">${(entry.item.price * entry.qty).toFixed(2)}</span>
+                        <span className="text-[10px] text-slate-400">Bs. {(entry.item.price * entry.qty * exchangeRate).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-slate-100 pt-6 mb-6">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Total a Pagar</span>
+                  <div className="text-right">
+                    <span className="block text-2xl font-black">${cartTotal.toFixed(2)}</span>
+                    <span className="block text-xs text-slate-500 font-bold">Bs. {(cartTotal * exchangeRate).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Checkout flow activator */}
+              <button 
+                disabled={qrTable !== null && settings?.qrOrderingEnabled === false}
+                onClick={() => {
+                  setIsOrdering(true);
+                }}
+                className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {qrTable 
+                  ? (settings?.qrOrderingEnabled === false ? 'Pedidos QR Desactivados' : `Confirmar Orden en Mesa ${qrTable.number}`) 
+                  : 'Proceder al Pago'} <ArrowRight size={18} />
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CHECKOUT FLOW WIZARD MODAL */}
+      <AnimatePresence>
+        {isOrdering && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+            <motion.div 
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-2xl font-black tracking-tight">
+                    {qrTable ? `Mesa ${qrTable.number} - Enviar a Cocina` : 'Formulario de Pago'}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {qrTable ? 'Ingresa tu nombre para procesar tu orden.' : 'Completa tus datos de envío y pago.'}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setIsOrdering(false)}
+                  className="text-xs font-bold text-slate-400 hover:text-rose-500 uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              {qrTable ? (
+                /* Streamlined Dine-in QR Checkout */
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      Identificación del Comensal
+                    </label>
+                    <div className="relative">
+                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Escribe tu Nombre (Ej. Tomás)" 
+                        value={customerName}
+                        onChange={e => setCustomerName(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      💡 Tu pedido se enviará en tiempo real directo a las pantallas de cocina. Al finalizar tu consumo podrás pagar directamente con el mesero o en caja.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-6">
+                    <div className="flex justify-between items-center mb-6">
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total de la Orden</span>
+                      <div className="text-right">
+                        <span className="block text-2xl font-black">${cartTotal.toFixed(2)}</span>
+                        <span className="block text-xs text-slate-500 font-bold">Bs. {(cartTotal * exchangeRate).toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={submitOrder}
+                      disabled={isSubmitting || !isRestaurantOpen || !customerName.trim()}
+                      className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                    >
+                      {isSubmitting ? (
+                        <>Enviando a Cocina... <span className="animate-pulse">⏳</span></>
+                      ) : !isRestaurantOpen ? (
+                        <>Tienda Cerrada Temporalmente 🕒</>
+                      ) : (
+                        <>Confirmar y Enviar a Cocina 🍳</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Original Delivery / Pickup wizard form */
+                <>
+                  {/* Delivery Type Selector */}
+                  {((settings?.deliveryEnabled !== false) || (settings?.pickupEnabled !== false)) && (
+                    <div className="space-y-3 mb-6">
+                      <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">Método de Entrega</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        {settings?.deliveryEnabled !== false && (
+                          <button 
+                            type="button"
+                            onClick={() => setDeliveryType('delivery')}
+                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${settings?.pickupEnabled === false ? 'col-span-2' : ''} ${
+                              deliveryType === 'delivery' 
+                                ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                                : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-xl">🛵</span>
+                            <span className="font-bold text-xs">Delivery Express</span>
+                          </button>
+                        )}
+
+                        {settings?.pickupEnabled !== false && (
+                          <button 
+                            type="button"
+                            onClick={() => setDeliveryType('pickup')}
+                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${settings?.deliveryEnabled === false ? 'col-span-2' : ''} ${
+                              deliveryType === 'pickup' 
+                                ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                                : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-xl">🛍️</span>
+                            <span className="font-bold text-xs">Retiro en Local (Pick Up)</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 1. Address Section */}
+                  <div className="space-y-4 mb-6">
+                    <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">
+                      {deliveryType === 'delivery' ? 'Datos de Envío' : 'Datos del Cliente'}
+                    </h4>
+                    <div className="relative">
+                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Tu Nombre" 
+                        value={customerName}
+                        onChange={e => setCustomerName(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                      />
+                    </div>
+                    <div className="relative">
+                      <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Tu Teléfono de Contacto" 
+                        value={customerPhone}
+                        onChange={e => setCustomerPhone(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                      />
+                    </div>
+                    
+                    {deliveryType === 'delivery' && (
+                      <>
+                        <div className="relative">
+                          <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                          <input 
+                            type="text" 
+                            placeholder="Dirección Completa de Envío" 
+                            value={customerAddress}
+                            onChange={e => setCustomerAddress(e.target.value)}
+                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                          />
+                        </div>
+                        
+                        <div className="relative">
+                          <Navigation className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 -rotate-45" size={18} />
+                          <input 
+                            type="text" 
+                            placeholder="Enlace de ubicación GPS (Ej. Google Maps, WhatsApp)" 
+                            value={whatsappLocation}
+                            onChange={e => setWhatsappLocation(e.target.value)}
+                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                          />
+                          <span className="text-[10px] text-slate-400 block mt-1 px-1">
+                            💡 Comparte tu ubicación como en WhatsApp para que el repartidor llegue directo.
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* 2. Payment Selector */}
+                  <div className="space-y-4 mb-6">
+                    <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">Método de Pago</h4>
+                    <div className={`grid gap-3 ${
+                      [
+                        settings?.paymentMethods?.pagoMovil !== false,
+                        settings?.paymentMethods?.zelle !== false,
+                        settings?.paymentMethods?.cash !== false
+                      ].filter(Boolean).length === 3 ? 'grid-cols-3' : 
+                      [
+                        settings?.paymentMethods?.pagoMovil !== false,
+                        settings?.paymentMethods?.zelle !== false,
+                        settings?.paymentMethods?.cash !== false
+                      ].filter(Boolean).length === 2 ? 'grid-cols-2' : 'grid-cols-1'
+                    }`}>
+                      {settings?.paymentMethods?.pagoMovil !== false && (
+                        <button 
+                          type="button"
+                          onClick={() => setPaymentMethod('pagomovil')}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                            paymentMethod === 'pagomovil' 
+                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span>📱</span>
+                          <span className="font-bold text-xs">Pago Móvil</span>
+                        </button>
+                      )}
+
+                      {settings?.paymentMethods?.zelle !== false && (
+                        <button 
+                          type="button"
+                          onClick={() => setPaymentMethod('zelle')}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                            paymentMethod === 'zelle' 
+                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span>📧</span>
+                          <span className="font-bold text-xs">Zelle</span>
+                        </button>
+                      )}
+
+                      {settings?.paymentMethods?.cash !== false && (
+                        <button 
+                          type="button"
+                          onClick={() => setPaymentMethod('cash')}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                            paymentMethod === 'cash' 
+                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span>💵</span>
+                          <span className="font-bold text-xs">Efectivo</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Account Details Box */}
+                    <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs text-indigo-950 flex gap-2">
+                      <Info size={16} className="text-indigo-600 shrink-0" />
+                      <div>
+                        {paymentMethod === 'pagomovil' && (
+                          <div className="space-y-1">
+                            <span className="font-bold block">Datos de Pago Móvil:</span>
+                            <span>Banco: <strong className="text-indigo-700">{settings?.pagoMovilBanco || 'Banesco'}</strong></span><br />
+                            <span>Teléfono: <strong className="text-indigo-700">{settings?.pagoMovilPhone || '0412-1234567'}</strong></span><br />
+                            <span>Cédula/RIF: <strong className="text-indigo-700">{settings?.pagoMovilId || 'V-12345678'}</strong></span><br />
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">Bs. {(cartTotal * exchangeRate).toFixed(2)}</strong></span>
+                          </div>
+                        )}
+                        {paymentMethod === 'zelle' && (
+                          <div className="space-y-1">
+                            <span className="font-bold block">Datos de Zelle:</span>
+                            <span>Correo: <strong className="text-indigo-700">{settings?.zelleEmail || 'pagos@bistroflow.com'}</strong></span><br />
+                            <span>Beneficiario: <strong className="text-indigo-700">{settings?.zelleName || 'BistroFlow SL'}</strong></span><br />
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">${cartTotal.toFixed(2)}</strong></span>
+                          </div>
+                        )}
+                        {paymentMethod === 'cash' && (
+                          <div className="space-y-1">
+                            <span className="font-bold block">{deliveryType === 'delivery' ? 'Pago Contra Entrega (Efectivo):' : 'Pago al Retirar (Efectivo):'}</span>
+                            <span>Prepara el monto exacto para dárselo al {deliveryType === 'delivery' ? 'repartidor' : 'cajero'} cuando {deliveryType === 'delivery' ? 'llegue tu pedido' : 'vengas a retirar'}.</span><br />
+                            <span className="font-semibold block mt-1">Total: ${cartTotal.toFixed(2)} (Bs. {(cartTotal * exchangeRate).toFixed(2)})</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Reference Code input */}
+                    {paymentMethod !== 'cash' && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                          Número de Referencia / Comprobante
+                        </label>
+                        <div className="relative">
+                          <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                          <input 
+                            type="text" 
+                            placeholder="Ingresa los últimos 4 o 6 dígitos de la referencia" 
+                            value={paymentReference}
+                            onChange={e => setPaymentReference(e.target.value)}
+                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Submit Order button */}
+                  <button 
+                    onClick={submitOrder}
+                    disabled={
+                      isSubmitting ||
+                      !isRestaurantOpen ||
+                      !customerName.trim() || 
+                      !customerPhone.trim() || 
+                      (deliveryType === 'delivery' && !customerAddress.trim()) || 
+                      (paymentMethod !== 'cash' && !paymentReference.trim())
+                    }
+                    className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <>Enviando Pedido... <span className="animate-pulse">⏳</span></>
+                    ) : !isRestaurantOpen ? (
+                      <>Tienda Cerrada Temporalmente 🕒</>
+                    ) : (
+                      <>Confirmar y Enviar Pedido <Navigation size={18} className="-rotate-45" /></>
+                    )}
+                  </button>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* STAFF PIN PAD LOGIN MODAL */}
+      <AnimatePresence>
+        {isStaffLoginOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl relative border border-slate-100"
+            >
+              <button 
+                onClick={() => setIsStaffLoginOpen(false)}
+                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 bg-black text-white rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-lg shadow-black/10">
+                  <KeyRound size={28} />
+                </div>
+                <h3 className="text-xl font-bold">Ingreso de Personal</h3>
+                <p className="text-xs text-slate-400 mt-1">Ingresa tu PIN de 4 dígitos para acceder.</p>
+              </div>
+
+              {/* Pin Indicator Bullets */}
+              <div className="flex justify-center gap-4 mb-8">
+                {[0, 1, 2, 3].map((i) => (
+                  <div 
+                    key={i}
+                    className={`w-3.5 h-3.5 rounded-full border-2 border-black transition-all ${
+                      pin.length > i ? 'bg-black scale-110' : 'bg-transparent'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              {loginError && (
+                <div className="bg-rose-50 text-rose-500 text-[11px] p-3 rounded-xl text-center mb-6 font-bold border border-rose-100">
+                  {loginError}
+                </div>
+              )}
+
+              {/* Number pad */}
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => handlePinClick(num)}
+                    className="h-12 w-full text-xl font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors"
+                  >
+                    {num}
+                  </button>
+                ))}
+                <button 
+                  onClick={handlePinDelete}
+                  className="h-12 w-full text-[10px] font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors text-slate-400 uppercase tracking-widest"
+                >
+                  Borrar
+                </button>
+                <button
+                  onClick={() => handlePinClick('0')}
+                  className="h-12 w-full text-xl font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors"
+                >
+                  0
+                </button>
+                <button
+                  onClick={handleStaffLogin}
+                  disabled={pin.length < 4}
+                  className={`h-12 w-full text-[11px] uppercase tracking-widest font-black rounded-2xl flex items-center justify-center transition-all ${
+                    pin.length === 4 
+                      ? 'bg-black text-white shadow-lg shadow-black/15' 
+                      : 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                  }`}
+                >
+                  OK
+                </button>
+              </div>
+
+              <div className="text-center text-[10px] text-slate-400 font-mono space-y-1 border-t border-slate-50 pt-4">
+                <span className="block">Admin: 1111 | Mesero: 2222</span>
+                <span className="block">Cocina: 3333 | Caja / Finanzas: 4444</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* PLATILLO DETAIL MODAL */}
+      <AnimatePresence>
+        {selectedItem && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+            {/* Clickable backdrop overlay to close */}
+            <div 
+              className="absolute inset-0 cursor-pointer" 
+              onClick={() => setSelectedItem(null)} 
+            />
+
+            <motion.div 
+              initial={{ scale: 0.95, y: 15, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 15, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-8"
+            >
+              {/* Image & Header Section */}
+              <div className="relative aspect-[16/10] w-full bg-slate-100">
+                <img 
+                  src={selectedItem.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500'} 
+                  alt={selectedItem.name} 
+                  className="w-full h-full object-cover"
+                />
+                
+                {/* Close Button on top of image */}
+                <button 
+                  onClick={() => setSelectedItem(null)}
+                  className="absolute top-4 right-4 p-2 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full text-white transition-all shadow-md hover:scale-105"
+                >
+                  <X size={20} />
+                </button>
+
+                {/* Category tag */}
+                <span className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-md text-black text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm">
+                  {selectedItem.category}
+                </span>
+              </div>
+
+              {/* Content Body */}
+              <div className="p-6 md:p-8">
+                <div className="mb-4">
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">
+                    {selectedItem.name}
+                  </h3>
+                  
+                  {/* Prices */}
+                  <div className="flex items-baseline gap-3 mt-2">
+                    <span className="font-black text-2xl text-black">
+                      ${selectedItem.price.toFixed(2)}
+                    </span>
+                    <span className="text-sm text-slate-400 font-semibold">
+                      Bs. {(selectedItem.price * exchangeRate).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Custom category-based Description */}
+                <p className="text-slate-500 text-sm leading-relaxed mb-6">
+                  {(() => {
+                    const cat = selectedItem.category?.toLowerCase() || '';
+                    if (cat.includes('burg') || cat.includes('hambur')) {
+                      return 'Exquisita hamburguesa gourmet preparada al momento con carne de res premium seleccionada, queso cheddar fundido, lechuga fresca, tomates jugosos y nuestra exclusiva salsa de la casa BistroFlow, todo abrazado por un esponjoso pan brioche tostado con mantequilla.';
+                    }
+                    if (cat.includes('bebi') || cat.includes('soda') || cat.includes('refr')) {
+                      return 'Refrescante bebida servida bien fría con hielo y rodaja de limón. El acompañante idóneo para realzar cada uno de los sabores de tu comida favorita en un día caluroso.';
+                    }
+                    if (cat.includes('postre') || cat.includes('dulce') || cat.includes('helado')) {
+                      return 'Un deleite dulce para cerrar con broche de oro. Preparado de manera totalmente artesanal por nuestros maestros reposteros, combinando texturas suaves y sabores irresistibles.';
+                    }
+                    if (cat.includes('entr') || cat.includes('snack') || cat.includes('papa')) {
+                      return 'El acompañamiento perfecto para picar solo o compartir. Crujiente, dorado a la perfección en aceite limpio y sazonado con nuestra mezcla secreta de opiáceos de la casa.';
+                    }
+                    return 'Una magnífica creación culinaria de nuestra cocina autor, preparada cuidadosamente por el chef del día empleando ingredientes frescos, locales y de la más alta calidad para garantizar un sabor extraordinario e inolvidable.';
+                  })()}
+                </p>
+
+                {/* Availability Warning Notice */}
+                {(() => {
+                  const { isAvailable, timingLabel } = getMenuItemAvailability(selectedItem);
+                  if (!isRestaurantOpen) {
+                    return (
+                      <div className="mb-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 flex items-start gap-3 text-rose-950">
+                        <span className="text-lg">🕒</span>
+                        <p className="text-xs font-semibold leading-relaxed">
+                          La tienda está cerrada en este momento. Los pedidos están inhabilitados.
+                        </p>
+                      </div>
+                    );
+                  }
+                  if (!isAvailable) {
+                    return (
+                      <div className="mb-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 flex items-start gap-3 text-rose-950">
+                        <span className="text-lg">⏳</span>
+                        <p className="text-xs font-semibold leading-relaxed">
+                          Este platillo solo está disponible en horario de: <strong className="font-bold">{timingLabel || 'Especial'}</strong>. No se puede ordenar en este momento.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Personalizar Platillo */}
+                {selectedItem.recipe && selectedItem.recipe.length > 0 && (
+                  <div className="mb-6 p-4 bg-slate-50 border border-slate-100/60 rounded-2xl">
+                    <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <span>🍔</span> Personalizar ingredientes
+                    </h5>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      Quita los ingredientes que no desees en tu preparación:
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {selectedItem.recipe.map((ri) => {
+                        const ing = ingredients.find(i => i.id === ri.ingredientId);
+                        if (!ing) return null;
+                        const isExcluded = excludedIds.includes(ri.ingredientId);
+                        return (
+                          <label 
+                            key={ri.ingredientId} 
+                            className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer select-none transition-all ${
+                              isExcluded 
+                                ? 'bg-rose-50/40 border-rose-100 text-slate-400 line-through' 
+                                : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <input 
+                              type="checkbox"
+                              checked={!isExcluded}
+                              onChange={() => {
+                                if (isExcluded) {
+                                  setExcludedIds(prev => prev.filter(id => id !== ri.ingredientId));
+                                } else {
+                                  setExcludedIds(prev => [...prev, ri.ingredientId]);
+                                }
+                              }}
+                              className="accent-black rounded border-slate-300 w-3.5 h-3.5"
+                            />
+                            <span className="text-xs font-semibold">{ing.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extra note textarea */}
+                <div className="mb-6">
+                  <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+                    ✍️ Nota o Instrucción especial
+                  </label>
+                  <textarea
+                    value={extraNote}
+                    onChange={(e) => setExtraNote(e.target.value)}
+                    placeholder="Ej: Sin cebolla, aderezo aparte, bien tostado..."
+                    className="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-3 text-xs font-medium outline-none focus:border-black resize-none h-16 transition-colors"
+                  />
+                </div>
+
+                {/* Highlights Icons bar */}
+                <div className="grid grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl mb-8 text-center text-slate-500 text-xs font-semibold">
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <Sparkles size={16} className="text-yellow-500 fill-yellow-500/10" />
+                    <span>Premium</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center gap-1 border-x border-slate-200">
+                    <Clock size={16} className="text-sky-500" />
+                    <span>Fresco</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center gap-1">
+                    <Info size={16} className="text-emerald-500" />
+                    <span>Artesanal</span>
+                  </div>
+                </div>
+
+                {/* Quantity selector and checkout action */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 border-t border-slate-100 pt-6">
+                  {/* Quantity controls */}
+                  <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:self-auto">
+                    <button 
+                      disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen}
+                      onClick={() => setModalQty(prev => Math.max(1, prev - 1))}
+                      className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="font-black text-base w-8 text-center select-none">
+                      {modalQty}
+                    </span>
+                    <button 
+                      disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen}
+                      onClick={() => setModalQty(prev => prev + 1)}
+                      className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+
+                  {/* Add with custom Qty button */}
+                  <button 
+                    disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false)}
+                    onClick={() => {
+                      const finalExclusions = excludedIds.map(id => ingredients.find(ing => ing.id === id)?.name).filter(Boolean);
+                      const exclusionsText = finalExclusions.length > 0 ? `SIN: ${finalExclusions.join(', ')}` : '';
+                      const finalNote = [exclusionsText, extraNote.trim()].filter(Boolean).join(' | ');
+
+                      addToCart(selectedItem, modalQty, finalNote, excludedIds);
+                      setSelectedItem(null);
+                    }}
+                    className={`flex-1 rounded-2xl p-4 font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg ${
+                      (!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false))
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                        : 'bg-black hover:bg-slate-800 text-white shadow-black/10'
+                    }`}
+                  >
+                    <ShoppingBag size={18} />
+                    <span>
+                      {!isRestaurantOpen 
+                        ? 'Tienda Cerrada' 
+                        : !getMenuItemAvailability(selectedItem).isAvailable 
+                          ? 'Inactivo por Horario' 
+                          : (qrTable !== null && settings?.qrOrderingEnabled === false)
+                            ? 'Pedidos QR Inhabilitados'
+                            : 'Agregar al Pedido'}
+                    </span>
+                    {getMenuItemAvailability(selectedItem).isAvailable && isRestaurantOpen && (qrTable === null || settings?.qrOrderingEnabled !== false) && (
+                      <>
+                        <span className="opacity-40 font-normal">|</span>
+                        <span>${(selectedItem.price * modalQty).toFixed(2)}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* FLOATING BOTTOM BAR FOR LIVE ORDER TRACKING */}
+      {trackedSession && (
+        <div className={`fixed left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30 transition-all duration-300 ${cart.length > 0 ? 'bottom-24' : 'bottom-6'}`}>
+          <button 
+            onClick={() => setIsTrackerDrawerOpen(true)}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl flex justify-between items-center shadow-xl shadow-indigo-600/20 hover:scale-[1.02] transition-all"
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 p-2 rounded-xl text-xs animate-pulse">
+                🛵
+              </div>
+              <div className="text-left">
+                <span className="block text-xs font-black uppercase tracking-wider text-indigo-200">Seguimiento en Vivo</span>
+                <span className="block text-sm font-bold text-white">Pedido #{trackedSession.id.slice(-6).toUpperCase()}</span>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-white/20 px-2.5 py-1 rounded-full font-bold">
+                {getTrackerStep() === 1 && 'Validando'}
+                {getTrackerStep() === 2 && 'Cocinando'}
+                {getTrackerStep() === 3 && 'Listo/Reparto'}
+                {getTrackerStep() >= 4 && 'Entregado'}
+              </span>
+              <ChevronRight size={16} className="text-white/80" />
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* TRACKING DRAWER BOTTOM SHEET */}
+      <AnimatePresence>
+        {isTrackerDrawerOpen && trackedSession && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+            {/* Backdrop click to close */}
+            <div className="absolute inset-0" onClick={() => {
+              if (trackedSession && (trackedSession.status === 'completed' || trackedSession.status === 'closed')) {
+                localStorage.removeItem('tracked_delivery_session_id');
+                setTrackedSessionId(null);
+                setTrackedSession(null);
+              }
+              setIsTrackerDrawerOpen(false);
+            }} />
+            
+            <motion.div 
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl z-10 relative"
+            >
+              {/* Drag indicator bar */}
+              <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
+
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2.5 py-1 rounded-full">
+                    Sincronizado en Vivo
+                  </span>
+                  <h3 className="font-bold text-xl mt-2">Seguimiento de tu Pedido</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Cliente: <span className="font-semibold text-slate-700">{trackedSession.customerName}</span> | Método: <span className="font-bold uppercase text-slate-700">{trackedSession.deliveryType === 'delivery' ? '🛵 Delivery' : '🛍️ Pick Up'}</span>
+                  </p>
+                </div>
+                
+                <button 
+                  onClick={() => {
+                    if (trackedSession && (trackedSession.status === 'completed' || trackedSession.status === 'closed')) {
+                      localStorage.removeItem('tracked_delivery_session_id');
+                      setTrackedSessionId(null);
+                      setTrackedSession(null);
+                    }
+                    setIsTrackerDrawerOpen(false);
+                  }}
+                  className="text-xs font-bold text-slate-400 hover:text-black uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              {/* Progress Steps */}
+              <div className="space-y-6 relative before:absolute before:left-[17px] before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100 mb-8">
+                {/* Step 1: Verification */}
+                <div className="flex items-start gap-4 relative">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-colors z-10 ${
+                    getTrackerStep() >= 1 ? 'bg-black text-white' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {getTrackerStep() > 1 ? <Check size={16} /> : '1'}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm">Validación del Pago</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {trackedSession.paymentStatus === 'pending_validation' 
+                        ? 'Esperando verificación de la transacción (Finanzas/Caja)...' 
+                        : 'Pago verificado correctamente.'}
+                    </p>
+                    {trackedSession.paymentMethod !== 'cash' && (
+                      <span className="inline-block mt-1 font-mono text-[10px] text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                        Ref: {trackedSession.paymentReference || 'N/A'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Step 2: Preparation */}
+                <div className="flex items-start gap-4 relative">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-colors z-10 ${
+                    getTrackerStep() >= 2 ? 'bg-black text-white' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {getTrackerStep() > 2 ? <Check size={16} /> : '2'}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm">En Preparación</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {getTrackerStep() === 2 
+                        ? 'El chef y equipo de cocina están preparando tus platos favoritos...' 
+                        : getTrackerStep() > 2 
+                          ? 'Platos preparados con éxito.' 
+                          : 'Pendiente de validación de pago.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Step 3: Ready for delivery */}
+                <div className="flex items-start gap-4 relative">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-colors z-10 ${
+                    getTrackerStep() >= 3 ? 'bg-black text-white' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {getTrackerStep() > 3 ? <Check size={16} /> : '3'}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm">
+                      {trackedSession.deliveryType === 'delivery' ? 'Listo para Reparto / Delivery' : 'Listo para Retiro (Pick Up)'}
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {getTrackerStep() === 3 
+                        ? (trackedSession.deliveryType === 'delivery' ? '¡Tu pedido ya está en camino a tu destino!' : '¡Tu pedido ya está empaquetado y listo para que pases a retirar!')
+                        : getTrackerStep() > 3 
+                          ? 'Pedido entregado.' 
+                          : 'Preparando platos...'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Step 4: Completed */}
+                <div className="flex items-start gap-4 relative">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-colors z-10 ${
+                    getTrackerStep() >= 4 ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {getTrackerStep() >= 4 ? <CheckCircle2 size={16} /> : '4'}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm">Entregado / Finalizado</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {getTrackerStep() >= 4 
+                        ? '¡Que disfrutes tu comida! Gracias por preferir BistroFlow.' 
+                        : (trackedSession.deliveryType === 'delivery' ? 'En camino al destino.' : 'Pendiente de entrega/retiro.')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reset tracker if finished, or allow hide */}
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    if (trackedSession && (trackedSession.status === 'completed' || trackedSession.status === 'closed')) {
+                      localStorage.removeItem('tracked_delivery_session_id');
+                      setTrackedSessionId(null);
+                      setTrackedSession(null);
+                    }
+                    setIsTrackerDrawerOpen(false);
+                  }}
+                  className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Seguir Navegando
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    if (confirm('¿Deseas desvincular este tracker de tu pantalla? El pedido continuará su proceso normal.')) {
+                      localStorage.removeItem('tracked_delivery_session_id');
+                      setTrackedSessionId(null);
+                      setIsTrackerDrawerOpen(false);
+                    }
+                  }}
+                  className="px-4 py-3.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Desvincular
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* COMPROBANTE / VOUCHER SUCCESS MODAL */}
+      <AnimatePresence>
+        {submittedVoucher && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[32px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 my-8 flex flex-col relative z-50"
+            >
+              <div className="p-6 md:p-8 flex-1">
+                {/* Header with success badge */}
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100">
+                    <CheckCircle2 size={36} className="text-emerald-500" />
+                  </div>
+                  <h3 className="text-xl font-black text-slate-900">¡Pedido Recibido!</h3>
+                  <p className="text-xs text-slate-400 mt-1">Guarda tu comprobante de pago.</p>
+                </div>
+
+                {/* Voucher Ticket Paper Design */}
+                <div id="voucher-ticket" className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-5 font-mono text-xs text-slate-700 space-y-4 relative overflow-hidden">
+                  {/* Top round notch decorations */}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1">
+                    <span className="w-2 h-2 rounded-full bg-white block" />
+                    <span className="w-2 h-2 rounded-full bg-white block" />
+                  </div>
+
+                  <div className="text-center border-b border-slate-200 pb-3">
+                    <h4 className="font-bold text-sm uppercase text-slate-900">BISTROFLOW</h4>
+                    <span className="text-[10px] text-slate-400">Comprobante de Pedido</span>
+                  </div>
+
+                  <div className="space-y-1.5 border-b border-slate-200 pb-3">
+                    <div><span className="text-slate-400">Nro Pedido:</span> <strong className="text-slate-900 float-right">#{submittedVoucher.id.slice(-6).toUpperCase()}</strong></div>
+                    <div><span className="text-slate-400">Fecha:</span> <span className="text-slate-900 float-right">{submittedVoucher.timestamp}</span></div>
+                    <div><span className="text-slate-400">Cliente:</span> <span className="text-slate-900 float-right truncate max-w-[180px]">{submittedVoucher.customerName}</span></div>
+                    <div><span className="text-slate-400">Teléfono:</span> <span className="text-slate-900 float-right">{submittedVoucher.customerPhone}</span></div>
+                    <div><span className="text-slate-400">Tipo:</span> <span className="text-slate-900 float-right uppercase font-bold">{submittedVoucher.deliveryType === 'delivery' ? '🛵 Delivery' : '🛍️ Pick Up'}</span></div>
+                    
+                    {submittedVoucher.deliveryType === 'delivery' && (
+                      <div className="pt-1 border-t border-slate-100 mt-1">
+                        <span className="text-slate-400 block mb-0.5">Dirección:</span>
+                        <span className="text-slate-800 block text-[11px] leading-tight font-sans font-medium">{submittedVoucher.customerAddress}</span>
+                      </div>
+                    )}
+                    {submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation && (
+                      <div className="pt-1 border-t border-slate-100 mt-1">
+                        <span className="text-slate-400 block mb-0.5">Ubicación GPS:</span>
+                        <a href={submittedVoucher.whatsappLocation} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline block text-[11px] leading-tight font-sans font-medium break-all flex items-center gap-1">
+                          <span>{submittedVoucher.whatsappLocation}</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Items list */}
+                  <div className="border-b border-slate-200 pb-3 space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Detalle:</span>
+                    {submittedVoucher.items.map((it, i) => (
+                      <div key={i} className="flex justify-between">
+                        <span className="truncate max-w-[200px]">{it.qty}x {it.name}</span>
+                        <span>${(it.price * it.qty).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Totals */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-slate-900 font-bold text-sm">
+                      <span>TOTAL USD:</span>
+                      <span>${submittedVoucher.totalAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-500 font-bold">
+                      <span>TOTAL BS:</span>
+                      <span>Bs. {(submittedVoucher.totalAmount * exchangeRate).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-400 text-[10px] mt-1 border-t border-slate-100 pt-2">
+                      <span>Pago: {submittedVoucher.paymentMethod.toUpperCase()}</span>
+                      {submittedVoucher.paymentMethod !== 'cash' && (
+                        <span>Ref: {submittedVoucher.paymentReference}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Instruction for user */}
+                <p className="text-[11px] text-indigo-600 font-medium text-center mt-4 bg-indigo-50 py-2 px-3 rounded-xl border border-indigo-100">
+                  ⚠️ Envía tu comprobante por WhatsApp al restaurante para validar el pedido y agilizar la cocina.
+                </p>
+              </div>
+
+              {/* Action Buttons footer */}
+              <div className="bg-slate-50 p-6 border-t border-slate-100 flex flex-col gap-2">
+                {/* 1. Enviar por WhatsApp directly */}
+                <button 
+                  onClick={() => {
+                    const phone = settings?.whatsappPhone || '+584121234567';
+                    const cleanPhone = phone.replace(/[^0-9]/g, '');
+                    
+                    // Format message
+                    const itemsText = submittedVoucher.items
+                      .map(it => `• *${it.qty}x* ${it.name} (_$${(it.price * it.qty).toFixed(2)}_)`)
+                      .join('\n');
+                    
+                    const message = `🍔 *NUEVO PEDIDO EN BISTROFLOW* 🍟\n` +
+                      `------------------------------------\n` +
+                      `*Nro Pedido:* #${submittedVoucher.id.slice(-6).toUpperCase()}\n` +
+                      `*Cliente:* ${submittedVoucher.customerName}\n` +
+                      `*Teléfono:* ${submittedVoucher.customerPhone}\n` +
+                      `*Método:* ${submittedVoucher.deliveryType === 'delivery' ? 'Delivery Express 🛵' : 'Retiro en Local (Pick Up) 🛍️'}\n` +
+                      (submittedVoucher.deliveryType === 'delivery' ? `*Dirección:* ${submittedVoucher.customerAddress}\n` : '') +
+                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation ? `*Ubicación GPS:* ${submittedVoucher.whatsappLocation}\n` : '') +
+                      `\n*Artículos:* \n${itemsText}\n\n` +
+                      `------------------------------------\n` +
+                      `*TOTAL:* $${submittedVoucher.totalAmount.toFixed(2)} USD\n` +
+                      `*TOTAL BS:* Bs. ${(submittedVoucher.totalAmount * exchangeRate).toFixed(2)} _(Tasa: ${exchangeRate})_\n` +
+                      `*Método de Pago:* _${submittedVoucher.paymentMethod === 'pagomovil' ? 'Pago Móvil 📱' : submittedVoucher.paymentMethod === 'zelle' ? 'Zelle 📧' : 'Efectivo 💵'}_\n` +
+                      (submittedVoucher.paymentMethod !== 'cash' ? `*Referencia/Pago:* _${submittedVoucher.paymentReference}_\n` : '') +
+                      `------------------------------------\n` +
+                      `_¡Hola! Acabo de enviar mi pedido a través de la aplicación. Quedo atento a la confirmación de la preparación._ 🙏`;
+
+                    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+                    window.open(waUrl, '_blank');
+                  }}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl py-3.5 px-4 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/15 hover:scale-[1.01] transition-transform"
+                >
+                  <MessageCircle size={18} />
+                  <span>Enviar por WhatsApp</span>
+                </button>
+
+                {/* 2. Download Comprobante as TXT file */}
+                <button 
+                  onClick={() => {
+                    const cleanID = submittedVoucher.id.slice(-6).toUpperCase();
+                    const itemsText = submittedVoucher.items
+                      .map(it => ` - ${it.qty}x ${it.name} : $${(it.price * it.qty).toFixed(2)}`)
+                      .join('\r\n');
+                    
+                    const receiptContent = 
+                      `========================================\r\n` +
+                      `             BISTROFLOW SL              \r\n` +
+                      `         COMPROBANTE DE PEDIDO          \r\n` +
+                      `========================================\r\n` +
+                      `ID Pedido : #${cleanID}\r\n` +
+                      `Fecha     : ${submittedVoucher.timestamp}\r\n` +
+                      `Cliente   : ${submittedVoucher.customerName}\r\n` +
+                      `Telefono  : ${submittedVoucher.customerPhone}\r\n` +
+                      `Tipo      : ${submittedVoucher.deliveryType === 'delivery' ? 'Delivery Express' : 'Retiro en Local'}\r\n` +
+                      (submittedVoucher.deliveryType === 'delivery' ? `Direccion : ${submittedVoucher.customerAddress}\r\n` : '') +
+                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation ? `GPS       : ${submittedVoucher.whatsappLocation}\r\n` : '') +
+                      `----------------------------------------\r\n` +
+                      `DETALLE DEL PEDIDO:\r\n` +
+                      `${itemsText}\r\n` +
+                      `----------------------------------------\r\n` +
+                      `TOTAL USD : $${submittedVoucher.totalAmount.toFixed(2)}\r\n` +
+                      `TOTAL BS  : Bs. ${(submittedVoucher.totalAmount * exchangeRate).toFixed(2)}\r\n` +
+                      `----------------------------------------\r\n` +
+                      `Metodo    : ${submittedVoucher.paymentMethod.toUpperCase()}\r\n` +
+                      (submittedVoucher.paymentMethod !== 'cash' ? `Referencia: ${submittedVoucher.paymentReference}\r\n` : '') +
+                      `========================================\r\n` +
+                      `       ¡Gracias por tu preferencia!      \r\n` +
+                      `========================================\r\n`;
+
+                    const blob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `bistroflow-pedido-${cleanID}.txt`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-2xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform"
+                >
+                  <Download size={14} />
+                  <span>Descargar Comprobante (.TXT)</span>
+                </button>
+
+                {/* 3. Ir a Inicio / Cerrar */}
+                <button 
+                  onClick={() => setSubmittedVoucher(null)}
+                  className="w-full bg-black text-white rounded-2xl py-3 px-4 font-black text-xs hover:scale-[1.01] transition-transform"
+                >
+                  Ir al Inicio (Seguimiento en Vivo)
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
