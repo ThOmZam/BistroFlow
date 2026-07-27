@@ -13,7 +13,7 @@ import { useBookmarks } from '../lib/bookmarks';
 export default function MenuSettingsView({ currentUser }: { currentUser?: any }) {
   const { menu, tables, exchangeRate, settings, promotions, ingredients } = useRestaurantData();
   const { isBookmarked, toggleBookmark } = useBookmarks();
-  const [activeTab, setActiveTab] = useState<'menu' | 'tables' | 'general' | 'promotions' | 'payments' | 'notifications'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'tables' | 'general' | 'toast_pos' | 'promotions' | 'payments' | 'notifications'>('menu');
   
   // Menu State
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
@@ -101,6 +101,18 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     sunday: { open: '09:00', close: '21:00', closed: false }
   });
 
+  // Operaciones & KDS Configurables State
+  const [suggestedTipsEnabledInput, setSuggestedTipsEnabledInput] = useState(true);
+  const [defaultTipPercentInput, setDefaultTipPercentInput] = useState(10);
+  const [kdsWarningMinutesInput, setKdsWarningMinutesInput] = useState(8);
+  const [kdsCriticalMinutesInput, setKdsCriticalMinutesInput] = useState(15);
+  const [kdsWarningColorInput, setKdsWarningColorInput] = useState<'amber' | 'yellow' | 'orange'>('amber');
+  const [kdsCriticalColorInput, setKdsCriticalColorInput] = useState<'rose' | 'red' | 'purple'>('rose');
+  const [auto86EnabledInput, setAuto86EnabledInput] = useState(true);
+  const [coursePacingEnabledInput, setCoursePacingEnabledInput] = useState(true);
+  const [seatOrderingEnabledInput, setSeatOrderingEnabledInput] = useState(true);
+  const [feedbackEnabledInput, setFeedbackEnabledInput] = useState(true);
+
   useEffect(() => {
     setRateInput(exchangeRate.toString());
     setPagoMovilBancoInput(settings?.pagoMovilBanco || 'Banesco');
@@ -135,7 +147,41 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       saturday: { open: '08:00', close: '23:00', closed: false },
       sunday: { open: '09:00', close: '21:00', closed: false }
     });
+    setSuggestedTipsEnabledInput(settings?.suggestedTipsEnabled !== undefined ? settings?.suggestedTipsEnabled : true);
+    setDefaultTipPercentInput(settings?.defaultTipPercent !== undefined ? settings?.defaultTipPercent : 10);
+    setKdsWarningMinutesInput(settings?.kdsWarningMinutes !== undefined ? settings?.kdsWarningMinutes : 8);
+    setKdsCriticalMinutesInput(settings?.kdsCriticalMinutes !== undefined ? settings?.kdsCriticalMinutes : 15);
+    setKdsWarningColorInput((settings?.kdsWarningColor as any) || 'amber');
+    setKdsCriticalColorInput((settings?.kdsCriticalColor as any) || 'rose');
+    setAuto86EnabledInput(settings?.auto86Enabled !== undefined ? settings?.auto86Enabled : true);
+    setCoursePacingEnabledInput(settings?.coursePacingEnabled !== undefined ? settings?.coursePacingEnabled : true);
+    setSeatOrderingEnabledInput(settings?.seatOrderingEnabled !== undefined ? settings?.seatOrderingEnabled : true);
+    setFeedbackEnabledInput(settings?.feedbackEnabled !== undefined ? settings?.feedbackEnabled : true);
   }, [exchangeRate, settings]);
+
+  const handleSaveOperationsSettings = async () => {
+    try {
+      await setDoc(doc(db, 'settings', 'general'), {
+        suggestedTipsEnabled: suggestedTipsEnabledInput,
+        defaultTipPercent: Number(defaultTipPercentInput),
+        kdsWarningMinutes: Number(kdsWarningMinutesInput),
+        kdsCriticalMinutes: Number(kdsCriticalMinutesInput),
+        kdsWarningColor: kdsWarningColorInput,
+        kdsCriticalColor: kdsCriticalColorInput,
+        auto86Enabled: auto86EnabledInput,
+        coursePacingEnabled: coursePacingEnabledInput,
+        seatOrderingEnabled: seatOrderingEnabledInput,
+        feedbackEnabled: feedbackEnabledInput
+      }, { merge: true });
+
+      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración de Operaciones & KDS', `Propinas: ${suggestedTipsEnabledInput ? 'SÍ' : 'NO'} | KDS Alerta: ${kdsWarningMinutesInput}m / ${kdsCriticalMinutesInput}m`);
+      playSuccessSound();
+      alert('⚡ Configuración de Operaciones & KDS guardada correctamente');
+    } catch (err) {
+      playErrorSound();
+      alert('Error guardando configuración de Operaciones & KDS');
+    }
+  };
 
   // MENU LOGIC
   const handleEditMenu = (item: MenuItem) => {
@@ -342,6 +388,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         <button onClick={() => setActiveTab('tables')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'tables' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Mesas</button>
         <button onClick={() => setActiveTab('promotions')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'promotions' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Promociones y Banners</button>
         <button onClick={() => setActiveTab('general')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'general' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Configuración General</button>
+        <button onClick={() => setActiveTab('toast_pos')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'toast_pos' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>⚡ Operaciones & KDS</button>
         <button onClick={() => setActiveTab('payments')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'payments' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Métodos de Pago</button>
         <button onClick={() => setActiveTab('notifications')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'notifications' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>🔔 Alertas y Notificaciones</button>
       </div>
@@ -908,6 +955,289 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           <div className="mt-8 pt-6 border-t border-slate-100">
             <button onClick={handleSaveGeneralSettings} className="w-full bg-black text-white p-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform">
               <Save size={18} /> Guardar Configuración General
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'toast_pos' && (
+        <div className="bg-white rounded-[32px] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-8 max-w-4xl">
+          <div className="border-b border-slate-100 pb-5">
+            <span className="text-[10px] uppercase font-black tracking-widest text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
+              Ajustes de Operaciones y Cocina
+            </span>
+            <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-2">
+              <span>⚡ Módulo de Operaciones Avanzadas & KDS</span>
+            </h3>
+            <p className="text-slate-500 text-xs sm:text-sm mt-1">
+              Personaliza los umbrales de alerta de cocina, colores de tarjetas, propinas sugeridas, auto 86-ing y encuestas de satisfacción.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* CARD 1: KDS UMBRALES Y COLORES */}
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-200 flex items-center justify-center text-amber-700 font-extrabold text-lg">
+                  🔥
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Alertas y Colores KDS (Cocina)</h4>
+                  <p className="text-[11px] text-slate-500">Tiempos máximos antes de marcar comanda como atrasada.</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-2">
+                {/* Warning Minutes & Color */}
+                <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800">🟡 Alerta de Advertencia (Warning)</label>
+                    <span className="text-xs font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-100">
+                      {kdsWarningMinutesInput} min
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block mb-1">Minutos:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={kdsWarningMinutesInput}
+                        onChange={(e) => setKdsWarningMinutesInput(Math.max(1, Number(e.target.value)))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-extrabold outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block mb-1">Color Borde:</span>
+                      <select
+                        value={kdsWarningColorInput}
+                        onChange={(e: any) => setKdsWarningColorInput(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-bold outline-none focus:border-amber-500"
+                      >
+                        <option value="amber">🟡 Ámbar</option>
+                        <option value="yellow">🟨 Amarillo</option>
+                        <option value="orange">🟧 Naranja</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Critical Minutes & Color */}
+                <div className="bg-white p-3.5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800">🔴 Alerta Crítica (Urgente)</label>
+                    <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-100">
+                      {kdsCriticalMinutesInput} min
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block mb-1">Minutos:</span>
+                      <input
+                        type="number"
+                        min="2"
+                        max="120"
+                        value={kdsCriticalMinutesInput}
+                        onChange={(e) => setKdsCriticalMinutesInput(Math.max(2, Number(e.target.value)))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-extrabold outline-none focus:border-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block mb-1">Color Borde:</span>
+                      <select
+                        value={kdsCriticalColorInput}
+                        onChange={(e: any) => setKdsCriticalColorInput(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-bold outline-none focus:border-rose-500"
+                      >
+                        <option value="rose">🔴 Rosa / Carmesí</option>
+                        <option value="red">🩸 Rojo Oscuro</option>
+                        <option value="purple">🟣 Púrpura</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* CARD 2: PROPINAS SUGERIDAS */}
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-200 flex items-center justify-center text-emerald-700 font-extrabold text-lg">
+                  💡
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Propinas Sugeridas</h4>
+                  <p className="text-[11px] text-slate-500">Módulos de propina automática en cobros de caja e hilos de cliente.</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-2">
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between gap-4">
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">Habilitar Propina Sugerida</span>
+                    <span className="text-[10px] text-slate-400">Muestra selector de 10%, 15%, 20% al procesar pagos.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSuggestedTipsEnabledInput(!suggestedTipsEnabledInput)}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      suggestedTipsEnabledInput ? 'bg-black' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
+                      suggestedTipsEnabledInput ? 'left-6' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+
+                {suggestedTipsEnabledInput && (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-2">
+                    <label className="text-xs font-bold text-slate-800 block">Porcentaje Predeterminado (%)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[10, 15, 20].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => setDefaultTipPercentInput(pct)}
+                          className={`py-2 rounded-xl text-xs font-extrabold border transition-all cursor-pointer ${
+                            defaultTipPercentInput === pct
+                              ? 'bg-black text-white border-black'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* CARD 3: AUTO-86ING & INVENTARIO */}
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-200 flex items-center justify-center text-indigo-700 font-extrabold text-lg">
+                  🚫
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Agotado Automático (Auto-86)</h4>
+                  <p className="text-[11px] text-slate-500">Bloqueo inmediato de platos al agotarse stock en inventario.</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between gap-4">
+                <div>
+                  <span className="font-bold text-xs text-slate-900 block">Auto-86 al Agotar Insumo</span>
+                  <span className="text-[10px] text-slate-400">Inhabilita automáticamente la adición de items sin existencias.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAuto86EnabledInput(!auto86EnabledInput)}
+                  className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                    auto86EnabledInput ? 'bg-black' : 'bg-slate-300'
+                  }`}
+                >
+                  <span className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
+                    auto86EnabledInput ? 'left-6' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+            </div>
+
+            {/* CARD 4: PASES POR TIEMPOS Y ASENTAMIENTOS */}
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-purple-500/10 border border-purple-200 flex items-center justify-center text-purple-700 font-extrabold text-lg">
+                  🍽️
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Pase por Tiempos & Asientos</h4>
+                  <p className="text-[11px] text-slate-500">Organización fina por tiempos y comensales en comandas de mesonero.</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between gap-4">
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">Marcha por Tiempos (Courses)</span>
+                    <span className="text-[10px] text-slate-400">Permite pausar/marchar Entradas, Fuertes y Postres.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCoursePacingEnabledInput(!coursePacingEnabledInput)}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      coursePacingEnabledInput ? 'bg-black' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
+                      coursePacingEnabledInput ? 'left-6' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between gap-4">
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">Registro por Asiento (Seats)</span>
+                    <span className="text-[10px] text-slate-400">Asigna comensal (Asiento 1, 2...) y habilita división en 1-click.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSeatOrderingEnabledInput(!seatOrderingEnabledInput)}
+                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                      seatOrderingEnabledInput ? 'bg-black' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
+                      seatOrderingEnabledInput ? 'left-6' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* CARD 5: ENCUESTAS DE SATISFACCIÓN */}
+            <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5 md:col-span-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-200 flex items-center justify-center text-amber-700 font-extrabold text-lg">
+                  ⭐
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Encuestas de Satisfacción Express (Feedback)</h4>
+                  <p className="text-[11px] text-slate-500">Muestra modal de calificación en estrellas y comentarios al procesar cobro.</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between gap-4">
+                <div>
+                  <span className="font-bold text-xs text-slate-900 block">Habilitar Encuesta al Cliente en Cierre</span>
+                  <span className="text-[10px] text-slate-400">Guarda feedback de comensal en tiempo real y alimenta el panel de reputación Admin.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackEnabledInput(!feedbackEnabledInput)}
+                  className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                    feedbackEnabledInput ? 'bg-black' : 'bg-slate-300'
+                  }`}
+                >
+                  <span className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform ${
+                    feedbackEnabledInput ? 'left-6' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={handleSaveOperationsSettings}
+              className="w-full bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-black text-sm shadow-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform cursor-pointer"
+            >
+              <Save size={18} /> Guardar Configuración de Operaciones & KDS
             </button>
           </div>
         </div>

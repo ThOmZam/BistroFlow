@@ -22,19 +22,27 @@ import {
   Check,
   Star
 } from 'lucide-react';
-import { collection, addDoc, serverTimestamp, doc, updateDoc, onSnapshot, getDocs, collectionGroup, query, where, getDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, onSnapshot, getDocs, collectionGroup, query, where, getDoc, deleteDoc } from 'firebase/firestore';
 import { logAction } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { playClickSound, playSuccessSound, playErrorSound } from '../lib/audio';
-import { Table, MenuItem, Session } from '../types';
+import { Table, MenuItem, Session, CourseType, CourseStatus } from '../types';
 import { useBookmarks } from '../lib/bookmarks';
-import { getMenuItemStockAlert } from '../lib/stockUtils';
+import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
 
 export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const { tables, menu, ingredients, activeSessions, exchangeRate, settings } = useRestaurantData();
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
-  const [cart, setCart] = useState<{ item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[] }[]>([]);
+  const [cart, setCart] = useState<{ 
+    item: MenuItem; 
+    qty: number; 
+    note?: string; 
+    excludedIngredientIds?: string[];
+    course?: CourseType;
+    courseStatus?: CourseStatus;
+    seatNumber?: number;
+  }[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [modalQty, setModalQty] = useState(1);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
@@ -193,24 +201,43 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     }
   };
 
-  const addToCart = (item: MenuItem, qty: number = 1, note: string = '', excludedIngredientIds: string[] = []) => {
+  // Advanced POS state extensions: Course, Seat, Auto-86
+  const [selectedCourse, setSelectedCourse] = useState<CourseType>('main');
+  const [selectedCourseStatus, setSelectedCourseStatus] = useState<CourseStatus>('fired');
+  const [selectedSeatNumber, setSelectedSeatNumber] = useState<number>(1);
+
+  const addToCart = (
+    item: MenuItem, 
+    qty: number = 1, 
+    note: string = '', 
+    excludedIngredientIds: string[] = [],
+    course: CourseType = 'main',
+    courseStatus: CourseStatus = 'fired',
+    seatNumber: number = 1
+  ) => {
     playClickSound();
     setCart(prev => {
       const existing = prev.find(i => 
         i.item.id === item.id && 
         (i.note || '') === note && 
+        i.course === course &&
+        i.courseStatus === courseStatus &&
+        i.seatNumber === seatNumber &&
         JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds)
       );
       if (existing) {
         return prev.map(i => 
           (i.item.id === item.id && 
            (i.note || '') === note && 
+           i.course === course &&
+           i.courseStatus === courseStatus &&
+           i.seatNumber === seatNumber &&
            JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds))
             ? { ...i, qty: i.qty + qty }
             : i
         );
       }
-      return [...prev, { item, qty, note, excludedIngredientIds }];
+      return [...prev, { item, qty, note, excludedIngredientIds, course, courseStatus, seatNumber }];
     });
   };
 
@@ -220,16 +247,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     if (!session) return;
 
     try {
-      // Create sub-account if not exists (demo logic: default 'Main Account')
-      // For simplicity, we create orders directly in a sub-collection of session here
-      // But blueprint said sessions/{sessionId}/accounts/{accountId}/orders
-      // I'll create a default account first if needed, or just flatten for the demo UI if too complex.
-      // Let's stick to the blueprint: sessions/{sessionId}/accounts/default/orders
-      
       const accountId = activeAccountId;
       const ordersRef = collection(db, 'sessions', session.id, 'accounts', accountId, 'orders');
       const batchId = Date.now().toString();
-      // Add log
       const itemNames = cart.map(c => c.qty + 'x ' + c.item.name).join(', ');
       const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
       await logAction('order', waiterName, 'Envió un pedido a cocina', `Mesa ${selectedTable.number}: ${itemNames}`);
@@ -243,6 +263,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           status: 'pending',
           timestamp: new Date().toISOString(),
           note: entry.note || '',
+          course: entry.course || entry.item.course || 'main',
+          courseStatus: entry.courseStatus || 'fired',
+          seatNumber: entry.seatNumber || 1,
           excludedIngredientIds: entry.excludedIngredientIds || [],
           batchId,
           tableName: 'MESA ' + selectedTable.number,
@@ -818,7 +841,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     return acc + (itemPrice * (o.quantity || 1));
   }, 0);
   
-  const showServiceCharge = settings?.serviceChargeEnabled !== false;
+  const showServiceCharge = settings?.serviceChargeEnabled !== false && settings?.suggestedTipsEnabled !== false;
   const servicePercent = showServiceCharge ? (settings?.serviceChargePercent !== undefined ? settings.serviceChargePercent : 10) : 0;
   const tipAmount = includeTip && showServiceCharge ? activeOrdersTotal * (servicePercent / 100) : 0;
   const finalTotal = activeOrdersTotal + tipAmount;
@@ -1312,6 +1335,54 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       >
                         <Plus size={14} /> + Persona
                       </button>
+
+                      {/* Feature: 1-Click Bill Split by Seat */}
+                      <button
+                        onClick={async () => {
+                          if (!selectedTable) return;
+                          const session = getSessionForTable(selectedTable.id);
+                          if (!session) return;
+
+                          try {
+                            const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
+                            const snap = await getDocs(ordersRef);
+                            const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                            const seats = [...new Set(orders.map((o: any) => o.seatNumber || 1))].sort((a, b) => a - b);
+                            if (seats.length <= 1) {
+                              alert('Se requiere registrar items con al menos 2 asientos distintos para dividir automáticamente.');
+                              return;
+                            }
+
+                            const newAccounts = seats.map(s => ({
+                              id: `seat_${s}`,
+                              name: `Asiento ${s}`,
+                              status: 'active'
+                            }));
+
+                            await updateDoc(doc(db, 'sessions', session.id), { accounts: newAccounts });
+
+                            for (const orderDoc of snap.docs) {
+                              const o = orderDoc.data();
+                              const seat = o.seatNumber || 1;
+                              const targetAccId = `seat_${seat}`;
+
+                              await addDoc(collection(db, 'sessions', session.id, 'accounts', targetAccId, 'orders'), o);
+                              await deleteDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id));
+                            }
+
+                            playSuccessSound();
+                            alert(`✅ Cuenta dividida en ${seats.length} asientos automáticamente.`);
+                          } catch (err) {
+                            console.error('Error splitting by seat:', err);
+                            playErrorSound();
+                          }
+                        }}
+                        className="text-xs bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/80 px-3 py-1.5 rounded-xl font-extrabold flex items-center gap-1 transition-all shadow-sm"
+                        title="Dividir la cuenta por número de asiento registrado"
+                      >
+                        ⚡ Dividir por Asiento
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1529,6 +1600,58 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 ) : (
                   <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden">
                     <div className="flex-1 overflow-auto p-3.5 sm:p-4">
+                      {/* TOAST FEATURE: Course Firing Bar */}
+                      <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3 mb-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-amber-900 uppercase tracking-wider flex items-center gap-1">
+                            <span>🔥 Pase por Tiempos (Pase de Cocina)</span>
+                          </span>
+                          {activeOrders.some(o => o.courseStatus === 'hold') && (
+                            <span className="text-[9px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded-full animate-pulse">
+                              Platos en Espera ⏳
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={async () => {
+                              if (!selectedTable) return;
+                              const session = getSessionForTable(selectedTable.id);
+                              if (!session) return;
+                              const ordersRef = collection(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders');
+                              const snap = await getDocs(ordersRef);
+                              const holds = snap.docs.filter(d => d.data().courseStatus === 'hold' && d.data().course === 'main');
+                              for (const d of holds) {
+                                await updateDoc(doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', d.id), { courseStatus: 'fired' });
+                              }
+                              playSuccessSound();
+                              alert('🔥 Platos Fuertes marchados a cocina.');
+                            }}
+                            className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1"
+                          >
+                            🔥 Marchar Fuertes
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!selectedTable) return;
+                              const session = getSessionForTable(selectedTable.id);
+                              if (!session) return;
+                              const ordersRef = collection(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders');
+                              const snap = await getDocs(ordersRef);
+                              const holds = snap.docs.filter(d => d.data().courseStatus === 'hold' && d.data().course === 'dessert');
+                              for (const d of holds) {
+                                await updateDoc(doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', d.id), { courseStatus: 'fired' });
+                              }
+                              playSuccessSound();
+                              alert('🍰 Postres marchados a cocina.');
+                            }}
+                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-3 py-1.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1"
+                          >
+                            🍰 Marchar Postres
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
                         <h4 className="font-bold text-xs sm:text-sm mb-3 flex justify-between uppercase tracking-wider text-slate-800">
                           <span>Items Registrados</span>
@@ -1556,6 +1679,25 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                     })}
                                   </div>
                                 )}
+
+                                {/* Seat & Course Badges */}
+                                <div className="flex flex-wrap items-center gap-1 mt-1">
+                                  {order.seatNumber && (
+                                    <span className="text-[8px] bg-slate-900 text-white font-black px-1.5 py-0.5 rounded">
+                                      💺 Asiento {order.seatNumber}
+                                    </span>
+                                  )}
+                                  {order.course && (
+                                    <span className="text-[8px] bg-indigo-100 text-indigo-900 font-bold px-1.5 py-0.5 rounded capitalize">
+                                      {order.course === 'starter' ? '🥗 Entrada' : order.course === 'dessert' ? '🍰 Postre' : order.course === 'beverage' ? '🍹 Bebida' : '🥩 Fuerte'}
+                                    </span>
+                                  )}
+                                  {order.courseStatus === 'hold' && (
+                                    <span className="text-[8px] bg-amber-100 text-amber-900 font-black px-1.5 py-0.5 rounded border border-amber-300">
+                                      ⏳ En Espera
+                                    </span>
+                                  )}
+                                </div>
 
                                 {/* Special Instructions / Note */}
                                 {order.note && (
@@ -2755,6 +2897,87 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </div>
                 </div>
 
+                {/* TOAST FEATURE: Course Firing & Seat Selection */}
+                <div className="mb-6 p-4 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-indigo-900 uppercase tracking-wider mb-2 flex items-center justify-between">
+                      <span>🍽️ Tiempo de Entrega (Pase por Tiempos)</span>
+                      <span className="text-[9px] text-indigo-600 bg-white px-2 py-0.5 rounded-full font-bold">KDS Avanzado</span>
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { id: 'starter', label: '🥗 Entrada' },
+                        { id: 'main', label: '🥩 Fuerte' },
+                        { id: 'dessert', label: '🍰 Postre' },
+                        { id: 'beverage', label: '🍹 Bebida' }
+                      ].map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setSelectedCourse(c.id as CourseType)}
+                          className={`py-2 rounded-xl text-xs font-black transition-all border ${
+                            selectedCourse === c.id
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
+                              : 'bg-white text-indigo-950 border-indigo-200/80 hover:bg-indigo-100/50'
+                          }`}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-indigo-100/80">
+                    <span className="text-xs font-bold text-indigo-900">Estado de Envío:</span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCourseStatus('fired')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                          selectedCourseStatus === 'fired'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-white text-slate-600 border border-indigo-200'
+                        }`}
+                      >
+                        🔥 Marchar Ya
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCourseStatus('hold')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                          selectedCourseStatus === 'hold'
+                            ? 'bg-amber-500 text-slate-950 shadow-sm'
+                            : 'bg-white text-slate-600 border border-indigo-200'
+                        }`}
+                      >
+                        ⏳ En Espera
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-indigo-100/80">
+                    <label className="block text-[10px] font-black text-indigo-900 uppercase tracking-wider mb-2">
+                      💺 Asiento / Comensal
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setSelectedSeatNumber(s)}
+                          className={`w-8 h-8 rounded-xl text-xs font-black transition-all border ${
+                            selectedSeatNumber === s
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                              : 'bg-white text-slate-700 border-indigo-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Extra note text area */}
                 <div className="mb-6">
                   <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
@@ -2795,7 +3018,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     const exclusionsText = finalExclusions.length > 0 ? `SIN: ${finalExclusions.join(', ')}` : '';
                     const finalNote = [exclusionsText, extraNote.trim()].filter(Boolean).join(' | ');
 
-                    addToCart(selectedItem, modalQty, finalNote, excludedIds);
+                    addToCart(
+                      selectedItem, 
+                      modalQty, 
+                      finalNote, 
+                      excludedIds, 
+                      selectedCourse, 
+                      selectedCourseStatus, 
+                      selectedSeatNumber
+                    );
                     setSelectedItem(null);
                   }}
                   className="flex-1 bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg"

@@ -273,8 +273,33 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         }
       }
 
-      if (isDelivery || allPaid) {
-        // Complete the entire session
+      if (isDelivery) {
+        // For delivery/pickup orders, validating payment leaves session active so it enters Kitchen KDS & Delivery/Pickup tab in Caja
+        await updateDoc(doc(db, 'sessions', session.id), {
+          status: 'active',
+          paymentStatus: 'validated',
+          accounts: updatedAccounts,
+          customerPhone: session.pendingPayment?.creditClient?.tlf || session.pendingPayment?.client?.tlf || session.customerPhone || '',
+          customerName: session.pendingPayment?.creditClient?.nombre || session.pendingPayment?.client?.nombre || session.customerName || 'Cliente',
+          totalAmount: totalAmount,
+          payment: {
+            method: paymentMethod,
+            reference: paymentRef,
+            currency: session.pendingPayment?.currency || 'USD',
+            totalUSD: session.totalAmount || totalAmount,
+            totalBs: (session.totalAmount || totalAmount) * exchangeRate,
+            timestamp: new Date().toISOString(),
+            receiptImage: receiptImage,
+            mixedPayments: mixedPayments || null,
+            creditClient: session.pendingPayment?.creditClient ? {
+              ...session.pendingPayment.creditClient,
+              clientId: resolvedClientId
+            } : null
+          },
+          pendingPayment: null
+        });
+      } else if (allPaid) {
+        // Complete the entire session for dine-in tables
         await updateDoc(doc(db, 'sessions', session.id), {
           status: 'completed',
           paymentStatus: 'validated',
@@ -300,7 +325,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         });
 
         // Free table if dine-in
-        if (!isDelivery && session.tableId && session.tableId !== 'delivery') {
+        if (session.tableId && session.tableId !== 'delivery' && !session.tableId?.startsWith('delivery')) {
           await updateDoc(doc(db, 'tables', session.tableId), { status: 'free' });
         }
       } else {
@@ -311,7 +336,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
           pendingPayment: null
         });
 
-        if (session.tableId && session.tableId !== 'delivery') {
+        if (session.tableId && session.tableId !== 'delivery' && !session.tableId?.startsWith('delivery')) {
           await updateDoc(doc(db, 'tables', session.tableId), { status: 'occupied' });
         }
       }
@@ -1160,6 +1185,16 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
 
 function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery }: { key?: any; session: any; tables: any[]; exchangeRate: number; onViewDelivery?: (session: any) => void }) {
   const isDelivery = session.type === 'delivery' || session.tableId?.startsWith('delivery');
+  const [orders, setOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!isDelivery || !session.id) return;
+    const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
+    const unsub = onSnapshot(ordersRef, (snap) => {
+      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error('Error fetching delivery card orders:', err));
+    return () => unsub();
+  }, [isDelivery, session.id]);
   
   if (isDelivery) {
     const isPickup = session.deliveryType === 'pickup';
@@ -1167,14 +1202,32 @@ function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery }:
     const totalBs = totalUSD * exchangeRate;
     const orderNum = session.orderNumber || session.id.substring(0, 4).toUpperCase();
 
+    const allReady = orders.length > 0 && orders.every(o => o.status === 'ready' || o.status === 'delivered');
+    const isPreparing = orders.some(o => o.status === 'pending' || o.status === 'preparing');
+
     return (
       <div className="bg-gradient-to-br from-amber-50/50 to-white rounded-[32px] border border-amber-100 p-6 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full translate-x-12 -translate-y-12" />
         <div className="flex justify-between items-start mb-4 pb-4 border-b border-amber-100/60 relative z-10">
           <div>
-            <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 block mb-0.5">
-              {isPickup ? 'Retiro en Local (Pickup)' : 'Envío a Domicilio (Delivery)'}
-            </span>
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 block">
+                {isPickup ? 'Retiro en Local (Pickup)' : 'Envío a Domicilio (Delivery)'}
+              </span>
+              {allReady ? (
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 animate-pulse">
+                  🔔 ¡Listo para Despachar!
+                </span>
+              ) : isPreparing ? (
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+                  🍳 En Cocina
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-slate-100 text-slate-600 border border-slate-200">
+                  Pendiente
+                </span>
+              )}
+            </div>
             <h4 className="font-black text-slate-900 text-base">
               Pedido #{orderNum} <span className="text-xs font-medium text-slate-500">({session.customerName})</span>
             </h4>

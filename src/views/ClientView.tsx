@@ -110,6 +110,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     localStorage.getItem('tracked_delivery_session_id')
   );
   const [trackedSession, setTrackedSession] = useState<any | null>(null);
+  const [trackedOrders, setTrackedOrders] = useState<any[]>([]);
 
   // Staff Login Modal State
   const [isStaffLoginOpen, setIsStaffLoginOpen] = useState(false);
@@ -127,6 +128,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     if (!trackedSessionId) {
       setTrackedSession(null);
+      setTrackedOrders([]);
       return;
     }
 
@@ -136,6 +138,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       } else {
         // Session was deleted or finished
         setTrackedSession(null);
+        setTrackedOrders([]);
         localStorage.removeItem('tracked_delivery_session_id');
         setTrackedSessionId(null);
       }
@@ -143,7 +146,19 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       console.error('Error tracking session:', err);
     });
 
-    return () => unsub();
+    // Subcollection listener for session order items
+    const ordersRef = collection(db, 'sessions', trackedSessionId, 'accounts', 'default', 'orders');
+    const unsubOrders = onSnapshot(ordersRef, (snap) => {
+      const ordersList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTrackedOrders(ordersList);
+    }, (err) => {
+      console.error('Error tracking session orders:', err);
+    });
+
+    return () => {
+      unsub();
+      unsubOrders();
+    };
   }, [trackedSessionId]);
 
   // Auto-clear tracker after it's been completed or closed for a while (e.g. 20 seconds)
@@ -658,17 +673,22 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     }
 
     // Payment validation pending
-    if (trackedSession.paymentStatus === 'pending_validation') {
+    if (trackedSession.paymentStatus === 'pending_validation' || trackedSession.paymentStatus === 'pending_credit_approval') {
       return 1; // Payment verification
     }
 
-    // Payment validated, checking if all items are prepared
+    // Payment validated: evaluate order items from kitchen
     if (trackedSession.paymentStatus === 'validated') {
-      // In this demo, we can consider it ready if preparation status is updated, or transition to prep
+      if (trackedOrders.length > 0) {
+        const allReadyOrDelivered = trackedOrders.every(o => o.status === 'ready' || o.status === 'delivered');
+        if (allReadyOrDelivered) {
+          return 3; // Ready for pickup / delivery
+        }
+      }
       return 2; // In preparation
     }
 
-    return 3; // Ready for delivery
+    return 1; // Default
   };
 
   return (
@@ -1959,6 +1979,35 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </div>
               </div>
+
+              {/* Order Items Summary in Tracker */}
+              {trackedOrders.length > 0 && (
+                <div className="mb-6 bg-slate-50 border border-slate-100 rounded-2xl p-4">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                    Detalle del Pedido ({trackedOrders.length} {trackedOrders.length === 1 ? 'platillo' : 'platillos'})
+                  </span>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                    {trackedOrders.map((order, idx) => {
+                      let itemBadge = { text: 'En Espera', color: 'bg-slate-100 text-slate-600 border-slate-200' };
+                      if (order.status === 'pending' || order.status === 'preparing') {
+                        itemBadge = { text: '🍳 En Cocina', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+                      } else if (order.status === 'ready') {
+                        itemBadge = { text: '🔔 ¡Listo!', color: 'bg-emerald-100 text-emerald-800 border-emerald-200 animate-pulse' };
+                      } else if (order.status === 'delivered') {
+                        itemBadge = { text: '✅ Entregado', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
+                      }
+                      return (
+                        <div key={order.id || idx} className="flex justify-between items-center text-xs bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs">
+                          <span className="font-semibold text-slate-800">{order.quantity}x {order.itemName}</span>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${itemBadge.color}`}>
+                            {itemBadge.text}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Reset tracker if finished, or allow hide */}
               <div className="flex gap-3">

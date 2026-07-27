@@ -671,20 +671,11 @@ export default function AdminView({ currentUser }: { currentUser?: any }) {
               </div>
             </div>
           </div>
+
+          {/* TOAST FEATURE 5: Customer Satisfaction & Feedback Board */}
+          <FeedbackAdminSection />
         </div>
       </div>
-
-
-
-
-
-
-
-
-
-
-
-
     </div>
   );
 }
@@ -702,6 +693,96 @@ function KPICard({ title, value, sub, icon: Icon }: any) {
       <div className="text-[9px] font-bold text-emerald-500 mt-2 flex items-center bg-emerald-50/50 w-fit px-2 py-0.5 rounded-md">
         <TrendingUp size={10} className="mr-0.5" /> {sub}
       </div>
+    </div>
+  );
+}
+
+function FeedbackAdminSection() {
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'feedback'), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setFeedbacks(data.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
+    });
+    return () => unsub();
+  }, []);
+
+  const totalReviews = feedbacks.length;
+  const avgRating = totalReviews > 0 
+    ? (feedbacks.reduce((acc, f) => acc + (f.rating || 5), 0) / totalReviews).toFixed(1)
+    : '5.0';
+
+  return (
+    <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-5">
+        <div>
+          <span className="text-[10px] uppercase font-black tracking-widest text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
+            Encuestas Express (Calificaciones)
+          </span>
+          <h3 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+            <span>⭐ Satisfacción y Calificaciones</span>
+          </h3>
+          <p className="text-slate-500 text-xs mt-0.5">Respuestas en tiempo real recopiladas al cerrar comanda o pago.</p>
+        </div>
+
+        <div className="flex items-center gap-4 bg-slate-50 px-5 py-3 rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-1">
+            <Star className="text-amber-400 fill-amber-400" size={24} />
+            <span className="text-2xl font-black text-slate-900">{avgRating}</span>
+            <span className="text-xs text-slate-400 font-bold">/ 5.0</span>
+          </div>
+          <div className="h-8 w-px bg-slate-200" />
+          <div>
+            <span className="text-xs font-black text-slate-800 block">{totalReviews}</span>
+            <span className="text-[10px] font-bold text-slate-400">Encuestas Totales</span>
+          </div>
+        </div>
+      </div>
+
+      {feedbacks.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 text-xs italic">
+          Aún no hay calificaciones o encuestas registradas.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {feedbacks.map(f => (
+            <div key={f.id} className="bg-slate-50/70 border border-slate-100 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex gap-0.5">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <Star 
+                      key={star} 
+                      size={14} 
+                      className={star <= (f.rating || 5) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'} 
+                    />
+                  ))}
+                </div>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {f.createdAt ? new Date(f.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                </span>
+              </div>
+
+              {f.sentimentTag && (
+                <span className="inline-block text-[9px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md border border-indigo-100">
+                  {f.sentimentTag}
+                </span>
+              )}
+
+              {f.comment && (
+                <p className="text-xs text-slate-700 italic bg-white p-2.5 rounded-xl border border-slate-100">
+                  "{f.comment}"
+                </p>
+              )}
+
+              <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
+                <span>{f.customerName ? `Cliente: ${f.customerName}` : 'Anónimo'}</span>
+                {f.tableName && <span className="font-bold text-slate-600">{f.tableName}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

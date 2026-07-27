@@ -43,7 +43,17 @@ export function useRestaurantData() {
       friday: { open: '08:00', close: '23:00', closed: false },
       saturday: { open: '08:00', close: '23:00', closed: false },
       sunday: { open: '09:00', close: '21:00', closed: false }
-    } as any
+    } as any,
+    suggestedTipsEnabled: true,
+    defaultTipPercent: 10,
+    kdsWarningMinutes: 8,
+    kdsCriticalMinutes: 15,
+    kdsWarningColor: 'amber', // 'amber' | 'yellow' | 'orange' | 'purple'
+    kdsCriticalColor: 'rose', // 'rose' | 'red' | 'crimson'
+    auto86Enabled: true,
+    coursePacingEnabled: true,
+    seatOrderingEnabled: true,
+    feedbackEnabled: true
   });
 
   useEffect(() => {
@@ -108,7 +118,17 @@ export function useRestaurantData() {
             friday: { open: '08:00', close: '23:00', closed: false },
             saturday: { open: '08:00', close: '23:00', closed: false },
             sunday: { open: '09:00', close: '21:00', closed: false }
-          }
+          },
+          suggestedTipsEnabled: data.suggestedTipsEnabled !== undefined ? data.suggestedTipsEnabled : true,
+          defaultTipPercent: data.defaultTipPercent !== undefined ? data.defaultTipPercent : 10,
+          kdsWarningMinutes: data.kdsWarningMinutes !== undefined ? data.kdsWarningMinutes : 8,
+          kdsCriticalMinutes: data.kdsCriticalMinutes !== undefined ? data.kdsCriticalMinutes : 15,
+          kdsWarningColor: data.kdsWarningColor || 'amber',
+          kdsCriticalColor: data.kdsCriticalColor || 'rose',
+          auto86Enabled: data.auto86Enabled !== undefined ? data.auto86Enabled : true,
+          coursePacingEnabled: data.coursePacingEnabled !== undefined ? data.coursePacingEnabled : true,
+          seatOrderingEnabled: data.seatOrderingEnabled !== undefined ? data.seatOrderingEnabled : true,
+          feedbackEnabled: data.feedbackEnabled !== undefined ? data.feedbackEnabled : true
         });
       }
     });

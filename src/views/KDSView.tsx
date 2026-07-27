@@ -10,7 +10,7 @@ import { playNotificationSound } from '../lib/audio';
 
 export default function KDSView({ currentUser }: { currentUser?: any }) {
   const { orders } = useOrders();
-  const { ingredients } = useRestaurantData();
+  const { ingredients, settings } = useRestaurantData();
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [checkedItemIds, setCheckedItemIds] = useState<Record<string, boolean>>({});
 
@@ -58,6 +58,15 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
     return localStorage.getItem('kds_auto_print_enabled') === 'true';
   });
   const [prevOrdersLength, setPrevOrdersLength] = useState<number>(orders.length);
+  const [, setTicker] = useState(0);
+
+  // Live timer interval to update elapsed minutes dynamically every 10s
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTicker(t => t + 1);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Group pending orders by batchId or fallback to timestamp
   const groupedTickets = useMemo(() => {
@@ -276,8 +285,22 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {groupedTickets.map((ticket: any) => {
                 const elapsedMins = getElapsedMinutes(ticket.timestamp);
-                const isUrgent = elapsedMins >= 20;
-                const isWarning = elapsedMins >= 10 && elapsedMins < 20;
+                const warningMins = settings?.kdsWarningMinutes ?? 8;
+                const criticalMins = settings?.kdsCriticalMinutes ?? 15;
+                const isCritical = elapsedMins >= criticalMins;
+                const isWarning = elapsedMins >= warningMins && elapsedMins < criticalMins;
+
+                const criticalClass = settings?.kdsCriticalColor === 'red' 
+                  ? 'border-red-600 ring-2 ring-red-600/40 shadow-red-500/20' 
+                  : settings?.kdsCriticalColor === 'purple'
+                  ? 'border-purple-600 ring-2 ring-purple-600/40 shadow-purple-500/20'
+                  : 'border-rose-500 ring-2 ring-rose-500/30 shadow-rose-500/20';
+
+                const warningClass = settings?.kdsWarningColor === 'yellow'
+                  ? 'border-yellow-400 ring-2 ring-yellow-400/30'
+                  : settings?.kdsWarningColor === 'orange'
+                  ? 'border-orange-500 ring-2 ring-orange-500/30'
+                  : 'border-amber-400 ring-1 ring-amber-400/20';
 
                 return (
                   <motion.div
@@ -286,26 +309,34 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     className={`bg-white rounded-[24px] border shadow-sm overflow-hidden flex flex-col transition-all ${
-                      isUrgent 
-                        ? 'border-rose-500 ring-2 ring-rose-500/20 shadow-rose-500/10' 
+                      isCritical 
+                        ? criticalClass
                         : isWarning 
-                          ? 'border-amber-400' 
-                          : 'border-slate-200'
+                          ? warningClass 
+                          : 'border-emerald-300'
                     }`}
                   >
                     {/* Ticket Header */}
                     <div className={`p-4 text-white flex justify-between items-start ${
-                      isUrgent ? 'bg-rose-950' : 'bg-slate-900'
+                      isCritical ? 'bg-rose-950' : isWarning ? 'bg-amber-950' : 'bg-slate-900'
                     }`}>
                       <div>
-                        <div className="flex items-center gap-2 mb-0.5">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <span className="text-[10px] uppercase font-black tracking-wider text-amber-400 block">
                             {ticket.isDelivery ? '📦 Delivery' : '🍽️ Comanda Mesa'}
                           </span>
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 ${
-                            isUrgent ? 'bg-rose-500 text-white animate-pulse' : isWarning ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-300'
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1.5 ${
+                            isCritical 
+                              ? 'bg-rose-600 text-white animate-pulse' 
+                              : isWarning 
+                                ? 'bg-amber-500 text-slate-950 font-extrabold' 
+                                : 'bg-emerald-500 text-white'
                           }`}>
-                            <Clock size={10} /> {elapsedMins} min
+                            <Clock size={11} /> 
+                            <span>{elapsedMins} min</span>
+                            <span className="text-[9px] opacity-90 border-l border-white/20 pl-1">
+                              {isCritical ? '🚨 CRÍTICO (>15m)' : isWarning ? '🟡 ALERTA (8-15m)' : '🟢 OK (<8m)'}
+                            </span>
                           </span>
                         </div>
                         <h3 className="font-black text-xl text-white leading-tight">
@@ -345,7 +376,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                       </div>
                     )}
 
-                    {/* Interactive Items List (Tap to Checkoff) */}
+                    {/* Interactive Items List (Tap to Checkoff & Course Firing) */}
                     <div className="p-4 flex-1 space-y-2.5">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                         Toca un plato para tacharlo al prepararlo:
@@ -353,40 +384,93 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                       {ticket.items.map((item: any) => {
                         const isChecked = checkedItemIds[item.id];
                         const notesAndExclusions = getItemNotesAndExclusions(item, ingredients);
+                        const isHold = item.courseStatus === 'hold';
+
+                        const courseLabel = item.course === 'starter' ? '🥗 Entrada' :
+                                           item.course === 'main' ? '🥩 Plato Fuerte' :
+                                           item.course === 'dessert' ? '🍰 Postre' :
+                                           item.course === 'beverage' ? '🍹 Bebida' : null;
 
                         return (
                           <div 
                             key={item.id} 
-                            onClick={() => toggleCheckItem(item.id)}
-                            className={`flex justify-between items-start text-sm border p-2.5 rounded-xl cursor-pointer transition-all select-none ${
+                            className={`flex flex-col text-sm border p-2.5 rounded-xl transition-all select-none ${
                               isChecked 
                                 ? 'bg-slate-100 border-slate-200 opacity-50 line-through' 
-                                : 'bg-slate-50/50 border-slate-100 hover:border-slate-300'
+                                : isHold
+                                  ? 'bg-amber-50/60 border-amber-200'
+                                  : 'bg-slate-50/50 border-slate-100 hover:border-slate-300'
                             }`}
                           >
-                            <div className="font-medium flex-1 mr-2">
-                              <span className={`font-extrabold mr-2 px-2 py-0.5 rounded-md border ${
-                                isChecked ? 'bg-slate-200 text-slate-500 border-slate-300' : 'bg-slate-200 text-slate-900 border-slate-300'
-                              }`}>{item.quantity}x</span>
-                              <span className={isChecked ? 'text-slate-500' : 'text-slate-900 font-bold'}>{item.itemName}</span>
-                              
-                              {/* Notes & Excluded Ingredients */}
-                              {notesAndExclusions.length > 0 && (
-                                <div className="text-xs text-amber-900 font-bold bg-amber-50/90 border border-amber-200/80 rounded-lg p-1.5 mt-1.5 no-underline space-y-0.5">
-                                  {notesAndExclusions.map((detail, dIdx) => (
-                                    <div key={dIdx} className="flex items-start gap-1">
-                                      <span className="shrink-0 text-amber-600">⚠️</span>
-                                      <span>{detail}</span>
-                                    </div>
-                                  ))}
+                            <div className="flex justify-between items-start cursor-pointer" onClick={() => toggleCheckItem(item.id)}>
+                              <div className="font-medium flex-1 mr-2">
+                                <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                  <span className={`font-extrabold px-2 py-0.5 rounded-md border text-xs ${
+                                    isChecked ? 'bg-slate-200 text-slate-500 border-slate-300' : 'bg-slate-200 text-slate-900 border-slate-300'
+                                  }`}>{item.quantity}x</span>
+
+                                  {/* Course Tag */}
+                                  {courseLabel && (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-200">
+                                      {courseLabel}
+                                    </span>
+                                  )}
+
+                                  {/* Seat Tag */}
+                                  {item.seatNumber && (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200">
+                                      💺 Asiento {item.seatNumber}
+                                    </span>
+                                  )}
+
+                                  {/* Hold Tag */}
+                                  {isHold && (
+                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 uppercase animate-pulse">
+                                      ⏸️ EN ESPERA
+                                    </span>
+                                  )}
                                 </div>
-                              )}
+
+                                <span className={isChecked ? 'text-slate-500' : 'text-slate-900 font-bold'}>{item.itemName}</span>
+                                
+                                {/* Notes & Excluded Ingredients */}
+                                {notesAndExclusions.length > 0 && (
+                                  <div className="text-xs text-amber-900 font-bold bg-amber-50/90 border border-amber-200/80 rounded-lg p-1.5 mt-1.5 no-underline space-y-0.5">
+                                    {notesAndExclusions.map((detail, dIdx) => (
+                                      <div key={dIdx} className="flex items-start gap-1">
+                                        <span className="shrink-0 text-amber-600">⚠️</span>
+                                        <span>{detail}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 border ${
+                                isChecked ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 bg-white'
+                              }`}>
+                                {isChecked && <Check size={12} />}
+                              </div>
                             </div>
-                            <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 border ${
-                              isChecked ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 bg-white'
-                            }`}>
-                              {isChecked && <Check size={12} />}
-                            </div>
+
+                            {/* Fire Course Button if in Hold */}
+                            {isHold && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    if (item.path) {
+                                      await updateDoc(doc(db, item.path), { courseStatus: 'fired' });
+                                    }
+                                  } catch (err) {
+                                    console.error('Error firing course:', err);
+                                  }
+                                }}
+                                className="mt-2 text-xs font-black bg-amber-500 hover:bg-amber-600 text-slate-950 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 border border-amber-600 transition-all cursor-pointer shadow-sm"
+                              >
+                                <span>🔥 MARCHAR ESTE PLATO AHORA</span>
+                              </button>
+                            )}
                           </div>
                         );
                       })}

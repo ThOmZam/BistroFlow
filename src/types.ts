@@ -29,6 +29,8 @@ export interface Session {
   customerName?: string;
   customerAddress?: string;
   accounts?: { id: string; name: string; status?: 'active' | 'paid' }[];
+  tipAmount?: number;
+  tipPercent?: number;
 }
 
 export interface Account {
@@ -36,6 +38,9 @@ export interface Account {
   sessionId: string;
   label: string;
 }
+
+export type CourseType = 'starter' | 'main' | 'dessert' | 'beverage';
+export type CourseStatus = 'hold' | 'fired';
 
 export interface OrderItem {
   id: string;
@@ -45,6 +50,9 @@ export interface OrderItem {
   status: OrderStatus;
   timestamp: string;
   note?: string;
+  course?: CourseType;
+  courseStatus?: CourseStatus;
+  seatNumber?: number;
   // Extended info for UI
   menuItem?: MenuItem;
 }
@@ -60,6 +68,8 @@ export interface MenuItem {
   availableFrom?: string;
   availableTo?: string;
   alerts?: string[];
+  course?: CourseType;
+  is86ed?: boolean;
 }
 
 export interface Ingredient {
@@ -76,6 +86,9 @@ export interface Transaction {
   amount: number;
   method: 'cash' | 'digital';
   timestamp: string;
+  tipAmount?: number;
+  rating?: number;
+  feedbackComment?: string;
 }
 
 export interface Promotion {
@@ -91,5 +104,17 @@ export interface Promotion {
   accentColor?: string;
   badgeBg?: string;
   badgeText?: string;
+}
+
+export interface CustomerFeedback {
+  id?: string;
+  orderId?: string;
+  sessionId?: string;
+  tableName?: string;
+  customerName?: string;
+  rating: number; // 1 to 5 stars
+  tags: string[];
+  comment?: string;
+  timestamp: string;
 }
 
