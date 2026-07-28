@@ -37,6 +37,7 @@ export default function InventoryView() {
   // Modal states for stock
   const [editingIng, setEditingIng] = useState<IngredientWithCost | null>(null);
   const [isCreatingIng, setIsCreatingIng] = useState(false);
+  const [isSavingIng, setIsSavingIng] = useState(false);
   const [ingForm, setIngForm] = useState({
     name: '',
     unit: 'und',
@@ -50,6 +51,7 @@ export default function InventoryView() {
   const [recipeIngredients, setRecipeIngredients] = useState<{ ingredientId: string; quantity: number }[]>([]);
   const [newRecipeIngId, setNewRecipeIngId] = useState('');
   const [newRecipeQty, setNewRecipeQty] = useState('');
+  const [isSavingRecipe, setIsSavingRecipe] = useState(false);
 
   // Purchase Form State
   const [purchaseIngId, setPurchaseIngId] = useState('');
@@ -151,7 +153,9 @@ export default function InventoryView() {
   };
 
   const handleSaveIng = async () => {
+    if (isSavingIng) return;
     if (!ingForm.name.trim()) return;
+    setIsSavingIng(true);
     try {
       const dataToSave = {
         name: ingForm.name.trim(),
@@ -170,6 +174,8 @@ export default function InventoryView() {
       setEditingIng(null);
     } catch (err) {
       alert('Error guardando insumo');
+    } finally {
+      setIsSavingIng(false);
     }
   };
 
@@ -213,7 +219,8 @@ export default function InventoryView() {
   };
 
   const handleSaveRecipe = async () => {
-    if (!selectedRecipeItem) return;
+    if (isSavingRecipe || !selectedRecipeItem) return;
+    setIsSavingRecipe(true);
     try {
       await updateDoc(doc(db, 'menu', selectedRecipeItem.id), {
         recipe: recipeIngredients
@@ -221,12 +228,15 @@ export default function InventoryView() {
       setSelectedRecipeItem(null);
     } catch (err) {
       alert('Error guardando la receta del plato');
+    } finally {
+      setIsSavingRecipe(false);
     }
   };
 
   // PURCHASE ACTION
   const handleRegisterPurchase = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingPurchase) return;
     if (!purchaseIngId || !purchaseQty || !purchasePrice) return;
     
     setIsSubmittingPurchase(true);
@@ -1053,10 +1063,10 @@ export default function InventoryView() {
                   </button>
                   <button 
                     onClick={handleSaveIng}
-                    disabled={!ingForm.name.trim()}
-                    className="flex-1 py-4 bg-black text-white rounded-xl font-bold text-xs uppercase tracking-wider hover:scale-[1.02] transition-all flex justify-center items-center gap-2 disabled:opacity-50"
+                    disabled={!ingForm.name.trim() || isSavingIng}
+                    className="flex-1 py-4 bg-black text-white rounded-xl font-bold text-xs uppercase tracking-wider hover:scale-[1.02] transition-all flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer"
                   >
-                    <Save size={14} /> Guardar
+                    <Save size={14} /> {isSavingIng ? 'Guardando...' : 'Guardar Insumo'}
                   </button>
                 </div>
               </div>

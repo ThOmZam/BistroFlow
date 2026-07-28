@@ -19,6 +19,14 @@ export interface Table {
   capacity?: number;
 }
 
+export interface DeliveryZone {
+  id: string;
+  name: string;
+  priceUSD: number;
+  estimatedTime?: string;
+  coveredAreas?: string;
+}
+
 export interface Session {
   id: string;
   tableId: string;
@@ -26,8 +34,15 @@ export interface Session {
   status: SessionStatus;
   totalAmount: number;
   type?: 'dine-in' | 'delivery';
+  deliveryType?: 'delivery' | 'pickup';
   customerName?: string;
+  customerPhone?: string;
   customerAddress?: string;
+  deliveryZoneId?: string;
+  deliveryZoneName?: string;
+  deliveryFee?: number;
+  deliveryReference?: string;
+  whatsappLocation?: string;
   accounts?: { id: string; name: string; status?: 'active' | 'paid' }[];
   tipAmount?: number;
   tipPercent?: number;
@@ -42,6 +57,11 @@ export interface Account {
 export type CourseType = 'starter' | 'main' | 'dessert' | 'beverage';
 export type CourseStatus = 'hold' | 'fired';
 
+export interface ExtraOption {
+  name: string;
+  price: number;
+}
+
 export interface OrderItem {
   id: string;
   accountId: string;
@@ -53,6 +73,7 @@ export interface OrderItem {
   course?: CourseType;
   courseStatus?: CourseStatus;
   seatNumber?: number;
+  extras?: ExtraOption[];
   // Extended info for UI
   menuItem?: MenuItem;
 }
@@ -70,6 +91,8 @@ export interface MenuItem {
   alerts?: string[];
   course?: CourseType;
   is86ed?: boolean;
+  extras?: ExtraOption[];
+  preparationTime?: number;
 }
 
 export interface Ingredient {

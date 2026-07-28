@@ -10,7 +10,7 @@ import { playNotificationSound } from '../lib/audio';
 
 export default function KDSView({ currentUser }: { currentUser?: any }) {
   const { orders } = useOrders();
-  const { ingredients, settings } = useRestaurantData();
+  const { ingredients, settings, menu } = useRestaurantData();
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [checkedItemIds, setCheckedItemIds] = useState<Record<string, boolean>>({});
 
@@ -386,6 +386,11 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                         const notesAndExclusions = getItemNotesAndExclusions(item, ingredients);
                         const isHold = item.courseStatus === 'hold';
 
+                        const menuItem = menu?.find((m: any) => m.id === item.menuItemId || m.name === item.itemName);
+                        const prepTime = menuItem?.preparationTime;
+                        const itemElapsed = getElapsedMinutes(item.timestamp || ticket.timestamp);
+                        const isDelayed = prepTime && itemElapsed > prepTime;
+
                         const courseLabel = item.course === 'starter' ? '🥗 Entrada' :
                                            item.course === 'main' ? '🥩 Plato Fuerte' :
                                            item.course === 'dessert' ? '🍰 Postre' :
@@ -399,7 +404,9 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                                 ? 'bg-slate-100 border-slate-200 opacity-50 line-through' 
                                 : isHold
                                   ? 'bg-amber-50/60 border-amber-200'
-                                  : 'bg-slate-50/50 border-slate-100 hover:border-slate-300'
+                                  : isDelayed
+                                    ? 'bg-rose-50 border-rose-300 ring-1 ring-rose-300/40'
+                                    : 'bg-slate-50/50 border-slate-100 hover:border-slate-300'
                             }`}
                           >
                             <div className="flex justify-between items-start cursor-pointer" onClick={() => toggleCheckItem(item.id)}>
@@ -427,6 +434,26 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                                   {isHold && (
                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 uppercase animate-pulse">
                                       ⏸️ EN ESPERA
+                                    </span>
+                                  )}
+
+                                  {/* Prep Time Tag */}
+                                  {prepTime ? (
+                                    <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border flex items-center gap-0.5 ${
+                                      isChecked 
+                                        ? 'bg-slate-100 text-slate-400 border-slate-200' 
+                                        : isDelayed
+                                          ? 'bg-rose-100 text-rose-700 border-rose-300'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    }`}>
+                                      ⏱️ {prepTime}m
+                                    </span>
+                                  ) : null}
+
+                                  {/* Overdue/Delay Warning */}
+                                  {!isChecked && isDelayed && (
+                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-600 text-white uppercase animate-pulse flex items-center gap-1">
+                                      ⚠️ Retrasado (+{itemElapsed - prepTime}m)
                                     </span>
                                   )}
                                 </div>

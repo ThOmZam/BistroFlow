@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { useRestaurantData } from '../hooks/useRestaurantData';
-import { MenuItem, Table, Promotion } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star } from 'lucide-react';
+import { useRestaurantData, DEFAULT_DELIVERY_ZONES } from '../hooks/useRestaurantData';
+import { MenuItem, Table, Promotion, ExtraOption, DeliveryZone } from '../types';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
@@ -18,6 +18,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   // Menu State
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [isCreatingMenu, setIsCreatingMenu] = useState(false);
+  const [isSavingMenu, setIsSavingMenu] = useState(false);
   const [menuData, setMenuData] = useState({ 
     name: '', 
     price: 0, 
@@ -26,12 +27,15 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     scheduleType: 'always' as 'always' | 'breakfast' | 'lunch' | 'dinner' | 'custom',
     availableFrom: '',
     availableTo: '',
-    alerts: [] as string[]
+    alerts: [] as string[],
+    extras: [] as ExtraOption[],
+    preparationTime: '' as number | ''
   });
 
   // Promotions State
   const [editingPromo, setEditingPromo] = useState<Promotion | null>(null);
   const [isCreatingPromo, setIsCreatingPromo] = useState(false);
+  const [isSavingPromo, setIsSavingPromo] = useState(false);
   const [promoData, setPromoData] = useState({
     title: '',
     subtitle: '',
@@ -48,6 +52,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   // Table State
   const [editingTable, setEditingTable] = useState<Table | null>(null);
   const [isCreatingTable, setIsCreatingTable] = useState(false);
+  const [isSavingTable, setIsSavingTable] = useState(false);
   const [tableData, setTableData] = useState({ number: '', capacity: 4, status: 'free' });
   const [selectedQRTable, setSelectedQRTable] = useState<Table | null>(null);
   const [copiedTableId, setCopiedTableId] = useState<string | null>(null);
@@ -75,6 +80,17 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   const [restaurantAddressInput, setRestaurantAddressInput] = useState(settings?.restaurantAddress || 'Caracas, Venezuela');
   const [deliveryEnabledInput, setDeliveryEnabledInput] = useState(true);
   const [pickupEnabledInput, setPickupEnabledInput] = useState(true);
+  const [deliveryZonesInput, setDeliveryZonesInput] = useState<DeliveryZone[]>(
+    settings?.deliveryZones || DEFAULT_DELIVERY_ZONES
+  );
+  const [editingZone, setEditingZone] = useState<DeliveryZone | null>(null);
+  const [isCreatingZone, setIsCreatingZone] = useState(false);
+  const [zoneForm, setZoneForm] = useState({
+    name: '',
+    priceUSD: '2.50',
+    estimatedTime: '20-35 min',
+    coveredAreas: ''
+  });
   const [qrOrderingEnabledInput, setQrOrderingEnabledInput] = useState(true);
   const [serviceChargeEnabledInput, setServiceChargeEnabledInput] = useState(true);
   const [serviceChargePercentInput, setServiceChargePercentInput] = useState(10);
@@ -126,6 +142,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setRestaurantAddressInput(settings?.restaurantAddress || 'Caracas, Venezuela');
     setDeliveryEnabledInput(settings?.deliveryEnabled !== undefined ? settings?.deliveryEnabled : true);
     setPickupEnabledInput(settings?.pickupEnabled !== undefined ? settings?.pickupEnabled : true);
+    setDeliveryZonesInput(settings?.deliveryZones && settings.deliveryZones.length > 0 ? settings.deliveryZones : DEFAULT_DELIVERY_ZONES);
     setQrOrderingEnabledInput(settings?.qrOrderingEnabled !== undefined ? settings?.qrOrderingEnabled : true);
     setServiceChargeEnabledInput(settings?.serviceChargeEnabled !== undefined ? settings?.serviceChargeEnabled : true);
     setServiceChargePercentInput(settings?.serviceChargePercent !== undefined ? settings?.serviceChargePercent : 10);
@@ -194,10 +211,14 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       scheduleType: item.scheduleType || 'always',
       availableFrom: item.availableFrom || '',
       availableTo: item.availableTo || '',
-      alerts: item.alerts || []
+      alerts: item.alerts || [],
+      extras: item.extras || [],
+      preparationTime: item.preparationTime || ''
     });
   };
   const handleSaveMenu = async () => {
+    if (isSavingMenu) return;
+    setIsSavingMenu(true);
     try {
       const payload = {
         name: menuData.name,
@@ -207,7 +228,9 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         scheduleType: menuData.scheduleType || 'always',
         availableFrom: menuData.availableFrom || '',
         availableTo: menuData.availableTo || '',
-        alerts: menuData.alerts || []
+        alerts: menuData.alerts || [],
+        extras: menuData.extras || [],
+        preparationTime: menuData.preparationTime !== '' ? Number(menuData.preparationTime) : null
       };
       if (isCreatingMenu) {
         await addDoc(collection(db, 'menu'), payload);
@@ -217,7 +240,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         await logAction('system', currentUser?.name || 'Administrador', 'Editó plato del menú', `Plato: ${payload.name} - Precio anterior: $${editingItem.price.toFixed(2)} -> Nuevo: $${payload.price.toFixed(2)}`);
       }
       setEditingItem(null); setIsCreatingMenu(false);
-    } catch (err) { alert('Error guardando los cambios'); }
+    } catch (err) { alert('Error guardando los cambios'); } finally { setIsSavingMenu(false); }
   };
   const handleDeleteMenu = async (id: string) => {
     const item = menu.find(m => m.id === id);
@@ -234,6 +257,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setTableData({ number: t.number, capacity: t.capacity, status: t.status });
   };
   const handleSaveTable = async () => {
+    if (isSavingTable) return;
+    setIsSavingTable(true);
     try {
       if (isCreatingTable) {
         await addDoc(collection(db, 'tables'), { ...tableData, capacity: Number(tableData.capacity) });
@@ -243,7 +268,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         await logAction('system', currentUser?.name || 'Administrador', 'Editó mesa', `Mesa anterior: ${editingTable.number} -> Nueva: ${tableData.number} (Capacidad: ${tableData.capacity})`);
       }
       setEditingTable(null); setIsCreatingTable(false);
-    } catch (err) { alert('Error guardando mesa'); }
+    } catch (err) { alert('Error guardando mesa'); } finally { setIsSavingTable(false); }
   };
   const handleDeleteTable = async (id: string) => {
     const table = tables.find(t => t.id === id);
@@ -271,6 +296,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     });
   };
   const handleSavePromo = async () => {
+    if (isSavingPromo) return;
+    setIsSavingPromo(true);
     try {
       if (isCreatingPromo) {
         await addDoc(collection(db, 'promotions'), promoData);
@@ -280,7 +307,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         await logAction('system', currentUser?.name || 'Administrador', 'Editó promoción', `Título: ${promoData.title}`);
       }
       setEditingPromo(null); setIsCreatingPromo(false);
-    } catch (err) { alert('Error guardando la promoción'); }
+    } catch (err) { alert('Error guardando la promoción'); } finally { setIsSavingPromo(false); }
   };
   const handleDeletePromo = async (id: string) => {
     const promo = promotions.find(p => p.id === id);
@@ -288,6 +315,55 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     if(confirm('¿Eliminar esta promoción?')) {
       await deleteDoc(doc(db, 'promotions', id));
       await logAction('system', currentUser?.name || 'Administrador', 'Eliminó promoción', `Título: ${promoTitle}`);
+    }
+  };
+
+  // Delivery Zone logic handlers
+  const handleOpenCreateZone = () => {
+    setZoneForm({ name: '', priceUSD: '2.50', estimatedTime: '20-35 min', coveredAreas: '' });
+    setEditingZone(null);
+    setIsCreatingZone(true);
+  };
+
+  const handleOpenEditZone = (z: DeliveryZone) => {
+    setEditingZone(z);
+    setZoneForm({
+      name: z.name,
+      priceUSD: String(z.priceUSD),
+      estimatedTime: z.estimatedTime || '20-35 min',
+      coveredAreas: z.coveredAreas || ''
+    });
+    setIsCreatingZone(true);
+  };
+
+  const handleSaveZoneModal = () => {
+    if (!zoneForm.name.trim()) return;
+    const priceNum = parseFloat(zoneForm.priceUSD) || 0;
+    if (editingZone) {
+      setDeliveryZonesInput(prev => prev.map(z => z.id === editingZone.id ? {
+        ...z,
+        name: zoneForm.name.trim(),
+        priceUSD: priceNum,
+        estimatedTime: zoneForm.estimatedTime.trim(),
+        coveredAreas: zoneForm.coveredAreas.trim()
+      } : z));
+    } else {
+      const newZone: DeliveryZone = {
+        id: 'zone-' + Date.now(),
+        name: zoneForm.name.trim(),
+        priceUSD: priceNum,
+        estimatedTime: zoneForm.estimatedTime.trim(),
+        coveredAreas: zoneForm.coveredAreas.trim()
+      };
+      setDeliveryZonesInput(prev => [...prev, newZone]);
+    }
+    setEditingZone(null);
+    setIsCreatingZone(false);
+  };
+
+  const handleDeleteZone = (id: string) => {
+    if (confirm('¿Eliminar esta zona de delivery?')) {
+      setDeliveryZonesInput(prev => prev.filter(z => z.id !== id));
     }
   };
 
@@ -300,6 +376,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         restaurantAddress: restaurantAddressInput,
         deliveryEnabled: deliveryEnabledInput,
         pickupEnabled: pickupEnabledInput,
+        deliveryZones: deliveryZonesInput,
         qrOrderingEnabled: qrOrderingEnabledInput,
         serviceChargeEnabled: serviceChargeEnabledInput,
         serviceChargePercent: Number(serviceChargePercentInput),
@@ -373,7 +450,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         {activeTab === 'menu' && (
           <div className="flex items-center gap-2.5 shrink-0">
             <button 
-              onClick={() => { setIsCreatingMenu(true); setMenuData({ name: '', price: 0, category: 'Hamburguesas', image: '', scheduleType: 'always', availableFrom: '', availableTo: '', alerts: [] }); }} 
+              onClick={() => { setIsCreatingMenu(true); setMenuData({ name: '', price: 0, category: 'Hamburguesas', image: '', scheduleType: 'always', availableFrom: '', availableTo: '', alerts: [], extras: [], preparationTime: '' }); }} 
               className="flex items-center gap-2 px-5 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
             >
               <Plus size={16} />
@@ -734,18 +811,86 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   </div>
                 </div>
 
-                {/* Delivery Toggle */}
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/80">
-                  <div>
-                    <span className="font-bold text-sm text-slate-950 block">Habilitar Pedidos Delivery</span>
-                    <span className="text-xs text-slate-400 block">Permitir a los clientes pedir con entrega a domicilio.</span>
+                {/* Delivery Toggle & Zones Management */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100/80">
+                    <div>
+                      <span className="font-bold text-sm text-slate-950 block">Habilitar Pedidos Delivery</span>
+                      <span className="text-xs text-slate-400 block">Permitir a los clientes pedir con entrega a domicilio.</span>
+                    </div>
+                    <button 
+                      onClick={() => setDeliveryEnabledInput(!deliveryEnabledInput)}
+                      className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none ${deliveryEnabledInput ? 'bg-black' : 'bg-slate-200'}`}
+                    >
+                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${deliveryEnabledInput ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => setDeliveryEnabledInput(!deliveryEnabledInput)}
-                    className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none ${deliveryEnabledInput ? 'bg-black' : 'bg-slate-200'}`}
-                  >
-                    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${deliveryEnabledInput ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </button>
+
+                  {deliveryEnabledInput && (
+                    <div className="p-5 bg-amber-50/40 rounded-2xl border border-amber-200/80 space-y-4">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                          <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                            <MapPin size={16} className="text-amber-600" /> Zonas de Delivery y Tarifas de Envío
+                          </h4>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Establece el costo del despacho según la zona o distancia del cliente.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleOpenCreateZone}
+                          className="px-3.5 py-2 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 cursor-pointer"
+                        >
+                          <Plus size={14} /> Agregar Zona
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {deliveryZonesInput.map(zone => (
+                          <div key={zone.id} className="p-3.5 bg-white rounded-xl border border-amber-200/60 flex justify-between items-start gap-3 shadow-xs">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-xs text-slate-900">{zone.name}</span>
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-950 font-black text-[11px] rounded-md">
+                                  ${zone.priceUSD.toFixed(2)} USD
+                                </span>
+                              </div>
+                              {zone.estimatedTime && (
+                                <div className="text-[11px] text-slate-600 font-medium">
+                                  ⏱️ Tiempo estimado: <span className="font-bold text-slate-800">{zone.estimatedTime}</span>
+                                </div>
+                              )}
+                              {zone.coveredAreas && (
+                                <div className="text-[11px] text-slate-500 leading-snug">
+                                  📍 <span className="italic">{zone.coveredAreas}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditZone(zone)}
+                                className="p-1.5 text-slate-500 hover:text-black hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                title="Editar zona"
+                              >
+                                <Edit size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteZone(zone.id)}
+                                className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Eliminar zona"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Pickup Toggle */}
@@ -1448,7 +1593,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative">
               <button onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }} className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400"><X size={20} /></button>
               <h3 className="text-xl font-bold mb-6">{isCreatingMenu ? 'Nuevo Platillo' : 'Editar Platillo'}</h3>
-              <div className="space-y-4 mb-8">
+              <div className="space-y-4 mb-8 max-h-[55vh] overflow-y-auto pr-2 scrollbar-thin">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre</label>
                   <input type="text" value={menuData.name} onChange={e => setMenuData({...menuData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium" />
@@ -1462,6 +1607,16 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                     <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Categoría</label>
                     <input type="text" value={menuData.category} onChange={e => setMenuData({...menuData, category: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium" />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tiempo de Cocción Promedio (minutos)</label>
+                  <input 
+                    type="number" 
+                    placeholder="Ej: 15 (Opcional)" 
+                    value={menuData.preparationTime} 
+                    onChange={e => setMenuData({...menuData, preparationTime: e.target.value !== '' ? Number(e.target.value) : ''})} 
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium" 
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Imagen del Platillo</label>
@@ -1598,8 +1753,77 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                     })}
                   </div>
                 </div>
+
+                <div className="pt-4 border-t border-slate-100">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Ingredientes Extras / Adicionales</label>
+                  <p className="text-[10px] text-slate-400 mb-3">Define los ingredientes adicionales que los clientes pueden agregar a este platillo:</p>
+                  
+                  {/* List of current extras */}
+                  <div className="space-y-2 mb-3">
+                    {(menuData.extras || []).map((extra, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-700">{extra.name}</span>
+                          <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg">+${extra.price.toFixed(2)}</span>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            const updated = (menuData.extras || []).filter((_, i) => i !== idx);
+                            setMenuData({ ...menuData, extras: updated });
+                          }}
+                          className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    {(menuData.extras || []).length === 0 && (
+                      <p className="text-[10px] italic text-slate-400">No hay adicionales configurados para este plato.</p>
+                    )}
+                  </div>
+
+                  {/* Add extra form */}
+                  <div className="flex gap-2 items-center bg-slate-50/50 border border-slate-100 rounded-2xl p-3">
+                    <div className="flex-1">
+                      <input 
+                        type="text" 
+                        placeholder="Nombre (ej: Queso Cheddar)" 
+                        id="new-extra-name"
+                        className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none focus:border-black text-xs font-medium"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <input 
+                        type="number" 
+                        placeholder="Precio $" 
+                        id="new-extra-price"
+                        step="0.1"
+                        className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none focus:border-black text-xs font-bold text-indigo-600"
+                      />
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        const nameEl = document.getElementById('new-extra-name') as HTMLInputElement;
+                        const priceEl = document.getElementById('new-extra-price') as HTMLInputElement;
+                        const name = nameEl?.value?.trim();
+                        const price = Number(priceEl?.value || '0');
+                        if (name) {
+                          const updated = [...(menuData.extras || []), { name, price }];
+                          setMenuData({ ...menuData, extras: updated });
+                          if (nameEl) nameEl.value = '';
+                          if (priceEl) priceEl.value = '';
+                        }
+                      }}
+                      className="px-3 py-2 bg-black hover:bg-slate-800 text-white rounded-lg font-black text-xs cursor-pointer flex items-center justify-center h-[34px]"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <button onClick={handleSaveMenu} className="w-full bg-black text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2"><Save size={18}/> Guardar Cambios</button>
+              <button onClick={handleSaveMenu} className="w-full bg-black text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0"><Save size={18}/> Guardar Cambios</button>
             </motion.div>
           </div>
         )}
@@ -2226,6 +2450,101 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 >
                   <ExternalLink size={16} /> Abrir Portal de Clientes
                 </a>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* CREATE / EDIT DELIVERY ZONE MODAL */}
+        {isCreatingZone && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 border border-slate-100"
+            >
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <MapPin size={18} className="text-amber-600" />
+                  {editingZone ? 'Editar Zona de Delivery' : 'Nueva Zona de Delivery'}
+                </h3>
+                <button 
+                  onClick={() => setIsCreatingZone(false)}
+                  className="p-1 text-slate-400 hover:text-black rounded-lg transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Nombre de la Zona / Sector</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Zona Altamira - Chacao"
+                    value={zoneForm.name}
+                    onChange={e => setZoneForm({ ...zoneForm, name: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:border-black transition-colors"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Costo Envío ($ USD)</label>
+                    <input 
+                      type="number" 
+                      step="0.25"
+                      placeholder="2.50"
+                      value={zoneForm.priceUSD}
+                      onChange={e => setZoneForm({ ...zoneForm, priceUSD: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:border-black transition-colors"
+                    />
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      Equivalente: ~{( (parseFloat(zoneForm.priceUSD) || 0) * exchangeRate ).toFixed(0)} Bs.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Tiempo Estimado</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ej. 20-35 min"
+                      value={zoneForm.estimatedTime}
+                      onChange={e => setZoneForm({ ...zoneForm, estimatedTime: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:border-black transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Sectores / Referencias Incluidas</label>
+                  <textarea 
+                    rows={2}
+                    placeholder="Ej. Plaza Altamira, Los Palos Grandes, La Castellana, Av. Francisco de Miranda"
+                    value={zoneForm.coveredAreas}
+                    onChange={e => setZoneForm({ ...zoneForm, coveredAreas: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 outline-none focus:border-black transition-colors resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingZone(false)}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveZoneModal}
+                  disabled={!zoneForm.name.trim()}
+                  className="flex-1 py-3 bg-black hover:bg-slate-900 text-white rounded-xl font-bold text-xs transition-colors disabled:opacity-40 cursor-pointer"
+                >
+                  Guardar Zona
+                </button>
               </div>
             </motion.div>
           </div>

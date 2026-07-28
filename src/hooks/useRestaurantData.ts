@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, where, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Table, MenuItem, Session, OrderItem, Promotion, Ingredient } from '../types';
+import { Table, MenuItem, Session, OrderItem, Promotion, Ingredient, DeliveryZone } from '../types';
+
+export const DEFAULT_DELIVERY_ZONES: DeliveryZone[] = [
+  { id: 'zone-1', name: 'Zona Central / Cercana', priceUSD: 2.00, estimatedTime: '20-30 min', coveredAreas: 'Casco Central, avenidas principales y sectores adyacentes' },
+  { id: 'zone-2', name: 'Zona Media / Residencial', priceUSD: 3.50, estimatedTime: '30-45 min', coveredAreas: 'Urbanizaciones intermedias y sectores residenciales' },
+  { id: 'zone-3', name: 'Zona Lejana / Periferia', priceUSD: 5.00, estimatedTime: '45-60 min', coveredAreas: 'Zonas retiradas, colinas y afueras' }
+];
 
 export function useRestaurantData() {
   const [tables, setTables] = useState<Table[]>([]);
@@ -23,6 +29,7 @@ export function useRestaurantData() {
     restaurantAddress: 'Caracas, Venezuela',
     deliveryEnabled: true,
     pickupEnabled: true,
+    deliveryZones: DEFAULT_DELIVERY_ZONES,
     serviceChargeEnabled: true,
     serviceChargePercent: 10,
     closeDineInOnPaymentReport: false,
@@ -98,6 +105,7 @@ export function useRestaurantData() {
           restaurantAddress: data.restaurantAddress || 'Caracas, Venezuela',
           deliveryEnabled: data.deliveryEnabled !== undefined ? data.deliveryEnabled : true,
           pickupEnabled: data.pickupEnabled !== undefined ? data.pickupEnabled : true,
+          deliveryZones: data.deliveryZones && data.deliveryZones.length > 0 ? data.deliveryZones : DEFAULT_DELIVERY_ZONES,
           serviceChargeEnabled: data.serviceChargeEnabled !== undefined ? data.serviceChargeEnabled : true,
           serviceChargePercent: data.serviceChargePercent !== undefined ? data.serviceChargePercent : 10,
           closeDineInOnPaymentReport: data.closeDineInOnPaymentReport !== undefined ? data.closeDineInOnPaymentReport : false,

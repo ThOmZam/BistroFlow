@@ -23,14 +23,15 @@ import {
   X,
   Download,
   MessageCircle,
-  ExternalLink
+  ExternalLink,
+  Upload
 } from 'lucide-react';
 import { collection, addDoc, doc, updateDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { logAction } from '../lib/logger';
-import { MenuItem } from '../types';
+import { MenuItem, ExtraOption } from '../types';
 import PromotionsBanner from '../components/PromotionsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 
@@ -69,7 +70,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   }, [currentTableSession?.id]);
 
   // Shopping Cart State
-  const [cart, setCart] = useState<{ item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[] }[]>([]);
+  const [cart, setCart] = useState<{ item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[]; selectedExtras?: ExtraOption[] }[]>([]);
+  const [selectedExtras, setSelectedExtras] = useState<ExtraOption[]>([]);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
   const [extraNote, setExtraNote] = useState<string>('');
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -80,12 +82,54 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   // Checkout Wizard State
   const [isOrdering, setIsOrdering] = useState(false);
   const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('');
+  const [deliveryReference, setDeliveryReference] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [whatsappLocation, setWhatsappLocation] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'pagomovil' | 'zelle' | 'cash'>('pagomovil');
   const [paymentReference, setPaymentReference] = useState('');
+  const [paymentReceiptImage, setPaymentReceiptImage] = useState<string | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+
+  const handleClientReceiptImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingReceipt(true);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDim = 800;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          setPaymentReceiptImage(canvas.toDataURL('image/jpeg', 0.7));
+        } else {
+          setPaymentReceiptImage(reader.result as string);
+        }
+        setIsUploadingReceipt(false);
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Voucher / Receipt Success State
   const [submittedVoucher, setSubmittedVoucher] = useState<{
@@ -95,10 +139,15 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     deliveryType: 'delivery' | 'pickup';
     customerAddress: string;
     whatsappLocation: string;
+    deliveryZoneName?: string;
+    deliveryFee?: number;
+    deliveryReference?: string;
     paymentMethod: 'pagomovil' | 'zelle' | 'cash';
     paymentReference: string;
+    paymentReceiptImage?: string | null;
     items: { name: string; qty: number; price: number }[];
     totalAmount: number;
+    subtotalAmount: number;
     timestamp: string;
   } | null>(null);
 
@@ -286,24 +335,37 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     return { isAvailable, timingLabel: label };
   };
 
+  const getCartEntryPrice = (entry: { item: MenuItem; selectedExtras?: ExtraOption[] }) => {
+    const extrasTotal = (entry.selectedExtras || []).reduce((sum, ext) => sum + ext.price, 0);
+    return entry.item.price + extrasTotal;
+  };
+
   // Handle addition to cart
-  const addToCart = (item: MenuItem, qty: number = 1, note: string = '', excludedIngredientIds: string[] = []) => {
+  const addToCart = (
+    item: MenuItem, 
+    qty: number = 1, 
+    note: string = '', 
+    excludedIngredientIds: string[] = [],
+    selectedExtras: ExtraOption[] = []
+  ) => {
     setCart(prev => {
       const existing = prev.find(i => 
         i.item.id === item.id && 
         (i.note || '') === note && 
-        JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds)
+        JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
+        JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras)
       );
       if (existing) {
         return prev.map(i => 
           (i.item.id === item.id && 
            (i.note || '') === note && 
-           JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds))
+           JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
+           JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras))
             ? { ...i, qty: i.qty + qty }
             : i
         );
       }
-      return [...prev, { item, qty, note, excludedIngredientIds }];
+      return [...prev, { item, qty, note, excludedIngredientIds, selectedExtras }];
     });
   };
 
@@ -315,7 +377,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
           return newQty > 0 ? { ...item, qty: newQty } : null;
         }
         return item;
-      }).filter(Boolean) as { item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[] }[];
+      }).filter(Boolean) as { item: MenuItem; qty: number; note?: string; excludedIngredientIds?: string[]; selectedExtras?: ExtraOption[] }[];
     });
   };
 
@@ -371,7 +433,21 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     return matchesCategory && matchesSearch && matchesSchedule;
   });
 
-  const cartTotal = cart.reduce((acc, entry) => acc + (entry.item.price * entry.qty), 0);
+  const cartTotal = cart.reduce((acc, entry) => acc + (getCartEntryPrice(entry) * entry.qty), 0);
+
+  const deliveryZones = useMemo(() => {
+    if (settings?.deliveryZones && settings.deliveryZones.length > 0) {
+      return settings.deliveryZones;
+    }
+    return DEFAULT_DELIVERY_ZONES;
+  }, [settings?.deliveryZones]);
+
+  const activeDeliveryZone = useMemo(() => {
+    return deliveryZones.find(z => z.id === selectedZoneId) || deliveryZones[0];
+  }, [deliveryZones, selectedZoneId]);
+
+  const deliveryFeeUSD = (deliveryType === 'delivery' && activeDeliveryZone) ? activeDeliveryZone.priceUSD : 0;
+  const grandTotalUSD = cartTotal + deliveryFeeUSD;
 
   // Submit delivery or QR self-service order
   const submitOrder = async () => {
@@ -390,7 +466,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         const orderItemsForVoucher = cart.map(c => ({
           name: c.item.name,
           qty: c.qty,
-          price: c.item.price
+          price: getCartEntryPrice(c),
+          extras: c.selectedExtras || []
         }));
 
         let sessionToUseId = '';
@@ -419,15 +496,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         const batchId = Date.now().toString();
 
         for (const entry of cart) {
+          const itemPrice = getCartEntryPrice(entry);
           await addDoc(ordersRef, {
             menuItemId: entry.item.id,
             itemName: entry.item.name,
-            price: entry.item.price,
+            price: itemPrice,
             quantity: entry.qty,
             status: 'pending', // Dine-in table orders go directly to 'pending' to be cooked
             timestamp: new Date().toISOString(),
             note: entry.note || '',
             excludedIngredientIds: entry.excludedIngredientIds || [],
+            extras: entry.selectedExtras || [],
             batchId,
             tableName: 'MESA ' + qrTable.number,
             customerName: customerName.trim()
@@ -472,12 +551,24 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     const isDelivery = deliveryType === 'delivery';
     if (!customerName.trim() || !customerPhone.trim() || (isDelivery && !customerAddress.trim()) || cart.length === 0) return;
 
+    if (paymentMethod !== 'cash') {
+      if (!paymentReference.trim()) {
+        alert('Por favor, ingresa el número de referencia del pago.');
+        return;
+      }
+      if (!paymentReceiptImage) {
+        alert('Es obligatorio adjuntar la foto/captura del comprobante de pago.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const orderItemsForVoucher = cart.map(c => ({
         name: c.item.name,
         qty: c.qty,
-        price: c.item.price
+        price: getCartEntryPrice(c),
+        extras: c.selectedExtras || []
       }));
 
       // 1. Create delivery session with paymentStatus = 'pending_validation'
@@ -487,6 +578,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         status: 'active',
         type: 'delivery',
         deliveryType,
+        deliveryZoneId: isDelivery ? (activeDeliveryZone?.id || '') : '',
+        deliveryZoneName: isDelivery ? (activeDeliveryZone?.name || '') : '',
+        deliveryFee: deliveryFeeUSD,
+        deliveryReference: isDelivery ? deliveryReference.trim() : '',
         orderNumber: Math.floor(1000 + Math.random() * 9000),
         whatsappLocation: isDelivery ? whatsappLocation : '',
         customerName,
@@ -494,8 +589,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         customerAddress: isDelivery ? customerAddress : 'Retiro en Local (Pick Up)',
         paymentStatus: 'pending_validation',
         paymentMethod,
-        paymentReference: paymentMethod === 'cash' ? '' : paymentReference,
-        totalAmount: cartTotal
+        paymentReference: paymentMethod === 'cash' ? '' : paymentReference.trim(),
+        paymentReceiptImage: paymentMethod === 'cash' ? null : paymentReceiptImage,
+        pendingPayment: paymentMethod === 'cash' ? null : {
+          method: paymentMethod,
+          reference: paymentReference.trim(),
+          receiptImage: paymentReceiptImage,
+          totalUSD: grandTotalUSD,
+          currency: 'USD'
+        },
+        totalAmount: grandTotalUSD
       });
 
       // 2. Create order items with status = 'pending_payment_validation'
@@ -504,15 +607,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       const batchId = Date.now().toString();
 
       for (const entry of cart) {
+        const itemPrice = getCartEntryPrice(entry);
         await addDoc(ordersRef, {
           menuItemId: entry.item.id,
           itemName: entry.item.name,
-          price: entry.item.price,
+          price: itemPrice,
           quantity: entry.qty,
           status: 'pending_payment_validation', // Does not show up on KDS until Cashier validates
           timestamp: new Date().toISOString(),
           note: entry.note || '',
           excludedIngredientIds: entry.excludedIngredientIds || [],
+          extras: entry.selectedExtras || [],
           batchId,
           tableName: 'Delivery',
           customerName: customerName
@@ -521,7 +626,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
       // Log delivery/pickup order creation
       const deliveryItemNames = cart.map(c => `${c.qty}x ${c.item.name}`).join(', ');
-      await logAction('order', customerName, `Pidió ${deliveryType === 'delivery' ? 'Delivery' : 'Pick Up'}`, `${deliveryItemNames} | Total: $${cartTotal.toFixed(2)}`);
+      await logAction('order', customerName, `Pidió ${deliveryType === 'delivery' ? 'Delivery' : 'Pick Up'}`, `${deliveryItemNames} | Total: $${grandTotalUSD.toFixed(2)}`);
 
       // Save the voucher data for the success receipt screen
       setSubmittedVoucher({
@@ -531,15 +636,21 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         deliveryType,
         customerAddress: isDelivery ? customerAddress : 'Retiro en Local (Pick Up)',
         whatsappLocation: isDelivery ? whatsappLocation : '',
+        deliveryZoneName: isDelivery ? (activeDeliveryZone?.name || '') : '',
+        deliveryFee: deliveryFeeUSD,
+        deliveryReference: isDelivery ? deliveryReference.trim() : '',
         paymentMethod,
-        paymentReference: paymentMethod === 'cash' ? '' : paymentReference,
+        paymentReference: paymentMethod === 'cash' ? '' : paymentReference.trim(),
+        paymentReceiptImage: paymentMethod === 'cash' ? null : paymentReceiptImage,
         items: orderItemsForVoucher,
-        totalAmount: cartTotal,
+        subtotalAmount: cartTotal,
+        totalAmount: grandTotalUSD,
         timestamp: new Date().toLocaleString()
       });
 
       // Clear cart & checkout flow inputs
       setCart([]);
+      setPaymentReceiptImage(null);
       setIsOrdering(false);
       setIsCartOpen(false);
 
@@ -1076,11 +1187,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               <div className="bg-white/10 px-3 py-1.5 rounded-xl text-xs font-black">
                 {cart.reduce((sum, c) => sum + c.qty, 0)}
               </div>
-              <span className="text-sm font-bold uppercase tracking-wider">Ver Carrito</span>
+              <div>
+                <span className="text-sm font-bold uppercase tracking-wider block leading-none">Ver Carrito</span>
+                {!qrTable && deliveryType === 'delivery' && (
+                  <span className="text-[10px] text-amber-300 font-medium block mt-0.5">🛵 Incluye envío (${deliveryFeeUSD.toFixed(2)})</span>
+                )}
+              </div>
             </div>
             <div className="text-right">
-              <span className="block font-bold text-sm">${cartTotal.toFixed(2)}</span>
-              <span className="block text-[10px] text-slate-400 font-bold">Bs. {(cartTotal * exchangeRate).toFixed(2)}</span>
+              <span className="block font-bold text-sm">${(!qrTable ? grandTotalUSD : cartTotal).toFixed(2)}</span>
+              <span className="block text-[10px] text-slate-400 font-bold">Bs. {((!qrTable ? grandTotalUSD : cartTotal) * exchangeRate).toFixed(2)}</span>
             </div>
           </button>
         </div>
@@ -1099,7 +1215,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h3 className="text-2xl font-black tracking-tight">Tu Carrito</h3>
-                  <p className="text-xs text-slate-400 mt-1">Revisa tus artículos antes de pagar.</p>
+                  <p className="text-xs text-slate-400 mt-1">Revisa tus artículos y opciones de entrega.</p>
                 </div>
                 <button 
                   onClick={() => setIsCartOpen(false)}
@@ -1109,8 +1225,88 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 </button>
               </div>
 
+              {/* Delivery / Pick Up selector inside Cart Drawer (for non-QR orders) */}
+              {!qrTable && ((settings?.deliveryEnabled !== false) || (settings?.pickupEnabled !== false)) && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 mb-6 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Truck size={14} className="text-black" /> Método de Entrega
+                    </span>
+                    <span className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
+                      {deliveryType === 'delivery' ? `Delivery (+${activeDeliveryZone?.priceUSD.toFixed(2) || '0.00'})` : 'Retiro en Local ($0)'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {settings?.deliveryEnabled !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryType('delivery')}
+                        className={`py-2.5 px-3 rounded-xl border text-center transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          deliveryType === 'delivery'
+                            ? 'bg-black text-white border-black font-extrabold shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100/70 font-semibold text-xs'
+                        }`}
+                      >
+                        <span className="text-sm">🛵</span>
+                        <span className="text-xs">Delivery Express</span>
+                      </button>
+                    )}
+
+                    {settings?.pickupEnabled !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryType('pickup')}
+                        className={`py-2.5 px-3 rounded-xl border text-center transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                          deliveryType === 'pickup'
+                            ? 'bg-black text-white border-black font-extrabold shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100/70 font-semibold text-xs'
+                        }`}
+                      >
+                        <span className="text-sm">🛍️</span>
+                        <span className="text-xs">Retiro en Local</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Delivery Zone Selector inside Cart Drawer */}
+                  {deliveryType === 'delivery' && (
+                    <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                      <label className="block text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                        Selecciona la Zona de Envío:
+                      </label>
+                      <div className="space-y-1.5">
+                        {deliveryZones.map(zone => {
+                          const isSelected = activeDeliveryZone?.id === zone.id;
+                          return (
+                            <button
+                              key={zone.id}
+                              type="button"
+                              onClick={() => setSelectedZoneId(zone.id)}
+                              className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-500/10 border-amber-500 text-amber-950 font-bold'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100/60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? 'border-amber-600 bg-amber-600' : 'border-slate-300'}`}>
+                                  {isSelected && <span className="w-1 h-1 rounded-full bg-white" />}
+                                </span>
+                                <span className="text-xs font-bold truncate">{zone.name}</span>
+                              </div>
+                              <span className="text-xs font-black shrink-0">+${zone.priceUSD.toFixed(2)} USD</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Cart List */}
-              <div className="space-y-4 mb-8 overflow-y-auto flex-1 pr-2 max-h-[350px]">
+              <div className="space-y-4 mb-6 overflow-y-auto flex-1 pr-2 max-h-[280px]">
                 {cart.map((entry, idx) => (
                   <div key={idx} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
                     <div className="flex items-center gap-3">
@@ -1119,12 +1315,24 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       </div>
                       <div>
                         <span className="font-bold text-sm text-slate-950 block">{entry.item.name}</span>
+                        
+                        {/* Selected Extras list */}
+                        {entry.selectedExtras && entry.selectedExtras.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {entry.selectedExtras.map((extra, eIdx) => (
+                              <span key={eIdx} className="text-[9px] bg-indigo-50 border border-indigo-100/30 text-indigo-700 px-1.5 py-0.5 rounded font-black">
+                                + {extra.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
                         {entry.note && (
                           <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md font-bold inline-block mt-1 border border-amber-100/50 max-w-[150px] truncate" title={entry.note}>
                             {entry.note}
                           </span>
                         )}
-                        <span className="text-xs text-slate-400 block mt-0.5">${entry.item.price.toFixed(2)} c/u</span>
+                        <span className="text-xs text-slate-400 block mt-0.5">${getCartEntryPrice(entry).toFixed(2)} c/u</span>
                       </div>
                     </div>
 
@@ -1147,20 +1355,33 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       </div>
 
                       <div className="text-right flex flex-col items-end min-w-[70px]">
-                        <span className="font-bold text-sm text-black">${(entry.item.price * entry.qty).toFixed(2)}</span>
-                        <span className="text-[10px] text-slate-400">Bs. {(entry.item.price * entry.qty * exchangeRate).toFixed(2)}</span>
+                        <span className="font-bold text-sm text-black">${(getCartEntryPrice(entry) * entry.qty).toFixed(2)}</span>
+                        <span className="text-[10px] text-slate-400">Bs. {(getCartEntryPrice(entry) * entry.qty * exchangeRate).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="border-t border-slate-100 pt-6 mb-6">
-                <div className="flex justify-between items-center mb-4">
-                  <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Total a Pagar</span>
+              {/* Totals Breakdown inside Cart Drawer */}
+              <div className="border-t border-slate-200/80 pt-4 mb-6 space-y-2 bg-slate-50 p-4 rounded-2xl">
+                <div className="flex justify-between items-center text-xs text-slate-500 font-medium">
+                  <span>Subtotal Productos:</span>
+                  <span className="font-bold text-slate-800">${cartTotal.toFixed(2)} USD</span>
+                </div>
+
+                {!qrTable && deliveryType === 'delivery' && (
+                  <div className="flex justify-between items-center text-xs text-amber-900 font-semibold">
+                    <span>Costo Envío ({activeDeliveryZone?.name}):</span>
+                    <span className="font-extrabold text-amber-900">+${deliveryFeeUSD.toFixed(2)} USD</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-baseline border-t border-slate-200/80 pt-2">
+                  <span className="text-sm font-black text-slate-900 uppercase tracking-wider">Total a Pagar:</span>
                   <div className="text-right">
-                    <span className="block text-2xl font-black">${cartTotal.toFixed(2)}</span>
-                    <span className="block text-xs text-slate-500 font-bold">Bs. {(cartTotal * exchangeRate).toFixed(2)}</span>
+                    <span className="block text-2xl font-black text-slate-950">${(!qrTable ? grandTotalUSD : cartTotal).toFixed(2)}</span>
+                    <span className="block text-xs text-slate-500 font-bold">Bs. {((!qrTable ? grandTotalUSD : cartTotal) * exchangeRate).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -1261,20 +1482,28 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   {/* Delivery Type Selector */}
                   {((settings?.deliveryEnabled !== false) || (settings?.pickupEnabled !== false)) && (
                     <div className="space-y-3 mb-6">
-                      <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">Método de Entrega</h4>
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">Método de Entrega</h4>
+                        <span className="text-[11px] font-extrabold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/80">
+                          {deliveryType === 'delivery' ? `🛵 Envío: +$${deliveryFeeUSD.toFixed(2)} USD` : '🛍️ Retiro: $0.00 USD'}
+                        </span>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         {settings?.deliveryEnabled !== false && (
                           <button 
                             type="button"
                             onClick={() => setDeliveryType('delivery')}
-                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${settings?.pickupEnabled === false ? 'col-span-2' : ''} ${
+                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${settings?.pickupEnabled === false ? 'col-span-2' : ''} ${
                               deliveryType === 'delivery' 
                                 ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
-                                : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
                             <span className="text-xl">🛵</span>
                             <span className="font-bold text-xs">Delivery Express</span>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md mt-0.5 ${deliveryType === 'delivery' ? 'bg-amber-400/30 text-amber-300' : 'bg-amber-100 text-amber-900'}`}>
+                              +${deliveryFeeUSD.toFixed(2)} USD
+                            </span>
                           </button>
                         )}
 
@@ -1282,30 +1511,94 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                           <button 
                             type="button"
                             onClick={() => setDeliveryType('pickup')}
-                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1.5 ${settings?.deliveryEnabled === false ? 'col-span-2' : ''} ${
+                            className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${settings?.deliveryEnabled === false ? 'col-span-2' : ''} ${
                               deliveryType === 'pickup' 
                                 ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
-                                : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
                             <span className="text-xl">🛍️</span>
-                            <span className="font-bold text-xs">Retiro en Local (Pick Up)</span>
+                            <span className="font-bold text-xs">Retiro en Local</span>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md mt-0.5 ${deliveryType === 'pickup' ? 'bg-emerald-400/30 text-emerald-300' : 'bg-emerald-100 text-emerald-900'}`}>
+                              Sin Costo ($0.00)
+                            </span>
                           </button>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* 1. Address Section */}
+                  {/* Immediate Zone Selector or Pickup Info Notice */}
+                  {deliveryType === 'delivery' ? (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl mb-6 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-black text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                          <MapPin size={15} className="text-amber-600 shrink-0" /> Selecciona tu Zona de Delivery:
+                        </label>
+                        <span className="text-[10px] font-bold text-amber-900 bg-amber-200/60 px-2 py-0.5 rounded-md">
+                          {activeDeliveryZone?.name}
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        {deliveryZones.map(zone => {
+                          const isSelected = (activeDeliveryZone?.id === zone.id);
+                          return (
+                            <button
+                              key={zone.id}
+                              type="button"
+                              onClick={() => setSelectedZoneId(zone.id)}
+                              className={`w-full p-3 rounded-xl border text-left transition-all flex items-start justify-between gap-3 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-50 border-amber-500 shadow-sm ring-2 ring-amber-500/20'
+                                  : 'bg-white border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? 'border-amber-600 bg-amber-600' : 'border-slate-300'}`}>
+                                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                  </span>
+                                  <span className="font-extrabold text-xs text-slate-900">{zone.name}</span>
+                                </div>
+                                {zone.coveredAreas && (
+                                  <p className="text-[11px] text-slate-500 pl-5 leading-tight">{zone.coveredAreas}</p>
+                                )}
+                                {zone.estimatedTime && (
+                                  <p className="text-[10px] text-amber-900 font-semibold pl-5 mt-0.5">⏱️ Tiempo est: {zone.estimatedTime}</p>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="block font-black text-xs text-slate-900">+${zone.priceUSD.toFixed(2)} USD</span>
+                                <span className="block text-[10px] text-slate-400 font-bold">~{(zone.priceUSD * exchangeRate).toFixed(0)} Bs.</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-950 font-bold mb-6">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🛍️</span>
+                        <span>Retiro en Local (Pick Up) sin recargo de envío</span>
+                      </div>
+                      <span className="text-[10px] bg-emerald-600 text-white font-black px-2.5 py-1 rounded-lg uppercase">
+                        $0.00 USD
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 1. Address / Customer Info Section */}
                   <div className="space-y-4 mb-6">
                     <h4 className="font-bold text-xs uppercase tracking-widest text-slate-400">
-                      {deliveryType === 'delivery' ? 'Datos de Envío' : 'Datos del Cliente'}
+                      {deliveryType === 'delivery' ? 'Datos de Dirección de Envío' : 'Datos de Contacto para Retirar'}
                     </h4>
                     <div className="relative">
                       <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         type="text" 
-                        placeholder="Tu Nombre" 
+                        placeholder="Tu Nombre Completo" 
                         value={customerName}
                         onChange={e => setCustomerName(e.target.value)}
                         className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
@@ -1328,10 +1621,20 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                           <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                           <input 
                             type="text" 
-                            placeholder="Dirección Completa de Envío" 
+                            placeholder="Dirección Completa de Envío (Calle, Res., Apto)" 
                             value={customerAddress}
                             onChange={e => setCustomerAddress(e.target.value)}
                             className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
+                          />
+                        </div>
+
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            placeholder="Punto de Referencia / Edificio / Color de Fachada (Opcional)" 
+                            value={deliveryReference}
+                            onChange={e => setDeliveryReference(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-xs font-medium"
                           />
                         </div>
                         
@@ -1345,7 +1648,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                             className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
                           />
                           <span className="text-[10px] text-slate-400 block mt-1 px-1">
-                            💡 Comparte tu ubicación como en WhatsApp para que el repartidor llegue directo.
+                            💡 Comparte el enlace de tu ubicación GPS para que el repartidor llegue con precisión.
                           </span>
                         </div>
                       </>
@@ -1423,7 +1726,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                             <span>Banco: <strong className="text-indigo-700">{settings?.pagoMovilBanco || 'Banesco'}</strong></span><br />
                             <span>Teléfono: <strong className="text-indigo-700">{settings?.pagoMovilPhone || '0412-1234567'}</strong></span><br />
                             <span>Cédula/RIF: <strong className="text-indigo-700">{settings?.pagoMovilId || 'V-12345678'}</strong></span><br />
-                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">Bs. {(cartTotal * exchangeRate).toFixed(2)}</strong></span>
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</strong></span>
                           </div>
                         )}
                         {paymentMethod === 'zelle' && (
@@ -1431,37 +1734,105 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                             <span className="font-bold block">Datos de Zelle:</span>
                             <span>Correo: <strong className="text-indigo-700">{settings?.zelleEmail || 'pagos@bistroflow.com'}</strong></span><br />
                             <span>Beneficiario: <strong className="text-indigo-700">{settings?.zelleName || 'BistroFlow SL'}</strong></span><br />
-                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">${cartTotal.toFixed(2)}</strong></span>
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">${grandTotalUSD.toFixed(2)}</strong></span>
                           </div>
                         )}
                         {paymentMethod === 'cash' && (
                           <div className="space-y-1">
                             <span className="font-bold block">{deliveryType === 'delivery' ? 'Pago Contra Entrega (Efectivo):' : 'Pago al Retirar (Efectivo):'}</span>
                             <span>Prepara el monto exacto para dárselo al {deliveryType === 'delivery' ? 'repartidor' : 'cajero'} cuando {deliveryType === 'delivery' ? 'llegue tu pedido' : 'vengas a retirar'}.</span><br />
-                            <span className="font-semibold block mt-1">Total: ${cartTotal.toFixed(2)} (Bs. {(cartTotal * exchangeRate).toFixed(2)})</span>
+                            <span className="font-semibold block mt-1">Total: ${grandTotalUSD.toFixed(2)} (Bs. {(grandTotalUSD * exchangeRate).toFixed(2)})</span>
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Reference Code input */}
+                    {/* Reference Code & Receipt Upload for Digital Payments */}
                     {paymentMethod !== 'cash' && (
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                          Número de Referencia / Comprobante
-                        </label>
-                        <div className="relative">
-                          <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                          <input 
-                            type="text" 
-                            placeholder="Ingresa los últimos 4 o 6 dígitos de la referencia" 
-                            value={paymentReference}
-                            onChange={e => setPaymentReference(e.target.value)}
-                            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium"
-                          />
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                            Número de Referencia <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
+                          </label>
+                          <div className="relative">
+                            <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <input 
+                              type="text" 
+                              placeholder="Ingresa los dígitos de la referencia de pago" 
+                              value={paymentReference}
+                              onChange={e => setPaymentReference(e.target.value)}
+                              className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-black transition-colors text-sm font-medium font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Foto / Captura del Comprobante <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
+                            </label>
+                            {paymentReceiptImage && (
+                              <button 
+                                type="button" 
+                                onClick={() => setPaymentReceiptImage(null)} 
+                                className="text-[10px] font-bold text-rose-500 hover:underline"
+                              >
+                                Eliminar foto
+                              </button>
+                            )}
+                          </div>
+
+                          <label className={`w-full flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-4 cursor-pointer transition-all ${paymentReceiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={handleClientReceiptImageChange} 
+                              className="hidden" 
+                            />
+                            {isUploadingReceipt ? (
+                              <span className="text-xs text-slate-400 animate-pulse font-medium">Procesando imagen...</span>
+                            ) : paymentReceiptImage ? (
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 border border-emerald-200 flex-shrink-0">
+                                  <img src={paymentReceiptImage} alt="Comprobante" className="w-full h-full object-cover" />
+                                </div>
+                                <div className="text-left">
+                                  <span className="text-xs font-bold text-emerald-800 block">Comprobante Cargado ✓</span>
+                                  <span className="text-[10px] text-emerald-600 block">Captura adjunta</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-center py-1">
+                                <Upload className="mx-auto text-slate-400 mb-1" size={20} />
+                                <span className="text-xs font-bold text-slate-700 block">Subir captura o foto del comprobante</span>
+                                <span className="text-[10px] text-slate-400 block">PNG, JPG o captura de pantalla</span>
+                              </div>
+                            )}
+                          </label>
                         </div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Total & Delivery Fee Breakdown */}
+                  <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2 mb-6">
+                    <div className="flex justify-between items-center text-xs text-slate-500 font-medium">
+                      <span>Subtotal de productos:</span>
+                      <span className="font-bold text-slate-800">${cartTotal.toFixed(2)}</span>
+                    </div>
+                    {deliveryType === 'delivery' && (
+                      <div className="flex justify-between items-center text-xs text-amber-900 font-medium">
+                        <span>Envío ({activeDeliveryZone?.name || 'Delivery'}):</span>
+                        <span className="font-extrabold text-amber-900">+${deliveryFeeUSD.toFixed(2)} USD</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-baseline border-t border-slate-200/80 pt-2 text-slate-900">
+                      <span className="font-black text-sm">TOTAL A PAGAR:</span>
+                      <div className="text-right">
+                        <span className="block font-black text-lg text-slate-950">${grandTotalUSD.toFixed(2)} USD</span>
+                        <span className="block text-xs font-bold text-slate-500">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Submit Order button */}
@@ -1473,16 +1844,23 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       !customerName.trim() || 
                       !customerPhone.trim() || 
                       (deliveryType === 'delivery' && !customerAddress.trim()) || 
-                      (paymentMethod !== 'cash' && !paymentReference.trim())
+                      (paymentMethod !== 'cash' && (!paymentReference.trim() || !paymentReceiptImage))
                     }
-                    className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                    className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex flex-col items-center justify-center gap-0.5 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-xl shadow-black/10 cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <>Enviando Pedido... <span className="animate-pulse">⏳</span></>
+                      <span className="flex items-center gap-2">Enviando Pedido... <span className="animate-pulse">⏳</span></span>
                     ) : !isRestaurantOpen ? (
-                      <>Tienda Cerrada Temporalmente 🕒</>
+                      <span>Tienda Cerrada Temporalmente 🕒</span>
                     ) : (
-                      <>Confirmar y Enviar Pedido <Navigation size={18} className="-rotate-45" /></>
+                      <>
+                        <span className="flex items-center gap-2 text-base">
+                          Confirmar Pedido (${grandTotalUSD.toFixed(2)}) <Navigation size={18} className="-rotate-45" />
+                        </span>
+                        <span className="text-[10px] text-amber-300 font-normal">
+                          {deliveryType === 'delivery' ? `Incluye $${deliveryFeeUSD.toFixed(2)} USD de envío (${activeDeliveryZone?.name})` : 'Retiro en Local ($0.00 de envío)'}
+                        </span>
+                      </>
                     )}
                   </button>
                 </>
@@ -1595,10 +1973,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               animate={{ scale: 1, y: 0, opacity: 1 }}
               exit={{ scale: 0.95, y: 15, opacity: 0 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-8"
+              className="bg-white rounded-[24px] sm:rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-4 flex flex-col max-h-[92vh] sm:max-h-[90vh]"
             >
               {/* Image & Header Section */}
-              <div className="relative aspect-[16/10] w-full bg-slate-100">
+              <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
                 <img 
                   src={selectedItem.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500'} 
                   alt={selectedItem.name} 
@@ -1620,7 +1998,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </div>
 
               {/* Content Body */}
-              <div className="p-6 md:p-8">
+              <div className="p-5 sm:p-6 md:p-8 overflow-y-auto flex-1">
                 <div className="mb-4">
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">
                     {selectedItem.name}
@@ -1726,6 +2104,52 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   </div>
                 )}
 
+                {/* Ingredientes Extras */}
+                {selectedItem.extras && selectedItem.extras.length > 0 && (
+                  <div className="mb-6 p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl">
+                    <h5 className="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <span>🧀</span> Agregar Adicionales / Extras
+                    </h5>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      Añade extras deliciosos a tu plato (el costo se sumará al total):
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {selectedItem.extras.map((extra, idx) => {
+                        const isSelected = selectedExtras.some(e => e.name === extra.name);
+                        return (
+                          <label 
+                            key={idx} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none transition-all ${
+                              isSelected 
+                                ? 'bg-indigo-50 border-indigo-200 text-indigo-950 shadow-sm font-bold' 
+                                : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  if (isSelected) {
+                                    setSelectedExtras(prev => prev.filter(e => e.name !== extra.name));
+                                  } else {
+                                    setSelectedExtras(prev => [...prev, extra]);
+                                  }
+                                }}
+                                className="accent-indigo-600 rounded border-indigo-300 w-3.5 h-3.5"
+                              />
+                              <span className="text-xs">{extra.name}</span>
+                            </div>
+                            <span className="text-xs font-black text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-lg border border-indigo-100/40">
+                              +${extra.price.toFixed(2)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Extra note textarea */}
                 <div className="mb-6">
                   <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
@@ -1755,8 +2179,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </div>
 
-                {/* Quantity selector and checkout action */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 border-t border-slate-100 pt-6">
+              </div>
+
+              {/* Quantity selector and checkout action (Sticky Footer) */}
+              <div className="p-5 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 flex-shrink-0">
                   {/* Quantity controls */}
                   <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:self-auto">
                     <button 
@@ -1786,7 +2212,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       const exclusionsText = finalExclusions.length > 0 ? `SIN: ${finalExclusions.join(', ')}` : '';
                       const finalNote = [exclusionsText, extraNote.trim()].filter(Boolean).join(' | ');
 
-                      addToCart(selectedItem, modalQty, finalNote, excludedIds);
+                      addToCart(selectedItem, modalQty, finalNote, excludedIds, selectedExtras);
                       setSelectedItem(null);
                     }}
                     className={`flex-1 rounded-2xl p-4 font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg ${
@@ -1808,12 +2234,11 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     {getMenuItemAvailability(selectedItem).isAvailable && isRestaurantOpen && (qrTable === null || settings?.qrOrderingEnabled !== false) && (
                       <>
                         <span className="opacity-40 font-normal">|</span>
-                        <span>${(selectedItem.price * modalQty).toFixed(2)}</span>
+                        <span>${(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty).toFixed(2)}</span>
                       </>
                     )}
                   </button>
                 </div>
-              </div>
             </motion.div>
           </div>
         )}
@@ -2084,9 +2509,23 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     <div><span className="text-slate-400">Tipo:</span> <span className="text-slate-900 float-right uppercase font-bold">{submittedVoucher.deliveryType === 'delivery' ? '🛵 Delivery' : '🛍️ Pick Up'}</span></div>
                     
                     {submittedVoucher.deliveryType === 'delivery' && (
-                      <div className="pt-1 border-t border-slate-100 mt-1">
-                        <span className="text-slate-400 block mb-0.5">Dirección:</span>
-                        <span className="text-slate-800 block text-[11px] leading-tight font-sans font-medium">{submittedVoucher.customerAddress}</span>
+                      <div className="pt-1 border-t border-slate-100 mt-1 space-y-1">
+                        {submittedVoucher.deliveryZoneName && (
+                          <div>
+                            <span className="text-slate-400">Zona:</span>
+                            <span className="text-slate-900 float-right font-bold">{submittedVoucher.deliveryZoneName}</span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-slate-400 block mb-0.5">Dirección:</span>
+                          <span className="text-slate-800 block text-[11px] leading-tight font-sans font-medium">{submittedVoucher.customerAddress}</span>
+                        </div>
+                        {submittedVoucher.deliveryReference && (
+                          <div>
+                            <span className="text-slate-400 block mb-0.5">Referencia:</span>
+                            <span className="text-slate-700 block text-[11px] leading-tight font-sans italic">{submittedVoucher.deliveryReference}</span>
+                          </div>
+                        )}
                       </div>
                     )}
                     {submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation && (
@@ -2113,7 +2552,19 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
                   {/* Totals */}
                   <div className="space-y-1">
-                    <div className="flex justify-between text-slate-900 font-bold text-sm">
+                    {submittedVoucher.deliveryType === 'delivery' && (
+                      <>
+                        <div className="flex justify-between text-slate-500 text-[11px]">
+                          <span>Subtotal Productos:</span>
+                          <span>${submittedVoucher.subtotalAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-amber-900 font-medium text-[11px]">
+                          <span>Envío ({submittedVoucher.deliveryZoneName || 'Delivery'}):</span>
+                          <span>+${(submittedVoucher.deliveryFee || 0).toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex justify-between text-slate-900 font-black text-sm pt-1 border-t border-slate-200/80">
                       <span>TOTAL USD:</span>
                       <span>${submittedVoucher.totalAmount.toFixed(2)}</span>
                     </div>
@@ -2155,11 +2606,15 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       `*Cliente:* ${submittedVoucher.customerName}\n` +
                       `*Teléfono:* ${submittedVoucher.customerPhone}\n` +
                       `*Método:* ${submittedVoucher.deliveryType === 'delivery' ? 'Delivery Express 🛵' : 'Retiro en Local (Pick Up) 🛍️'}\n` +
+                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.deliveryZoneName ? `*Zona de Envío:* ${submittedVoucher.deliveryZoneName}\n` : '') +
                       (submittedVoucher.deliveryType === 'delivery' ? `*Dirección:* ${submittedVoucher.customerAddress}\n` : '') +
+                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.deliveryReference ? `*Referencia:* ${submittedVoucher.deliveryReference}\n` : '') +
                       (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation ? `*Ubicación GPS:* ${submittedVoucher.whatsappLocation}\n` : '') +
                       `\n*Artículos:* \n${itemsText}\n\n` +
                       `------------------------------------\n` +
-                      `*TOTAL:* $${submittedVoucher.totalAmount.toFixed(2)} USD\n` +
+                      (submittedVoucher.deliveryType === 'delivery' ? `*Subtotal:* $${submittedVoucher.subtotalAmount.toFixed(2)} USD\n` : '') +
+                      (submittedVoucher.deliveryType === 'delivery' ? `*Costo Envío:* $${(submittedVoucher.deliveryFee || 0).toFixed(2)} USD\n` : '') +
+                      `*TOTAL A PAGAR:* $${submittedVoucher.totalAmount.toFixed(2)} USD\n` +
                       `*TOTAL BS:* Bs. ${(submittedVoucher.totalAmount * exchangeRate).toFixed(2)} _(Tasa: ${exchangeRate})_\n` +
                       `*Método de Pago:* _${submittedVoucher.paymentMethod === 'pagomovil' ? 'Pago Móvil 📱' : submittedVoucher.paymentMethod === 'zelle' ? 'Zelle 📧' : 'Efectivo 💵'}_\n` +
                       (submittedVoucher.paymentMethod !== 'cash' ? `*Referencia/Pago:* _${submittedVoucher.paymentReference}_\n` : '') +

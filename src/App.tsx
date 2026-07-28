@@ -27,6 +27,7 @@ import MyShiftView from './views/MyShiftView';
 import { useRestaurantData } from './hooks/useRestaurantData';
 import { logAction } from './lib/logger';
 import NotificationManager from './components/NotificationManager';
+import { Lock, Clock } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -57,6 +58,31 @@ export default function App() {
 
   // Dynamic active orders in kitchen queue
   const [kitchenOrdersCount, setKitchenOrdersCount] = useState(0);
+  const [hasActiveClockIn, setHasActiveClockIn] = useState<boolean>(true);
+
+  // Listen to employee active clock-in status
+  useEffect(() => {
+    if (!currentUser?.employeeId || currentUser.role === 'admin' || currentUser.role === 'client') {
+      setHasActiveClockIn(true);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'attendance'),
+      where('employeeId', '==', currentUser.employeeId),
+      where('status', '==', 'checked_in')
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const isCheckedIn = !snap.empty;
+      setHasActiveClockIn(isCheckedIn);
+      if (!isCheckedIn && activeView !== 'my_shift') {
+        setActiveView('my_shift');
+      }
+    });
+
+    return () => unsub();
+  }, [currentUser?.employeeId, currentUser?.role]);
   useEffect(() => {
     // We can count pending orders dynamically
     const q = query(collection(db, 'sessions'), where('status', '==', 'active'));
@@ -142,6 +168,9 @@ export default function App() {
     return <ClientView onLogout={handleLogout} />;
   }
 
+  const isOperationalView = ['waiter', 'kitchen', 'caja', 'dashboard', 'chat'].includes(activeView);
+  const isBlockedByClockIn = currentUser.role !== 'admin' && !hasActiveClockIn && isOperationalView;
+
   return (
     <div className="flex flex-col md:flex-row h-screen bg-[#F8F9FA] overflow-hidden text-[#000000] font-sans pb-20 md:pb-0">
       <Sidebar 
@@ -150,27 +179,78 @@ export default function App() {
         activeView={activeView}
         onViewChange={setActiveView}
         restaurantName={settings?.restaurantName || 'BistroFlow'}
+        hasActiveClockIn={hasActiveClockIn}
       />
       
       <NotificationManager currentUser={currentUser} onViewChange={setActiveView} />
       
       <main className="flex-1 overflow-auto p-4 md:p-8 flex flex-col min-w-0 w-full">
-        {activeView === 'dashboard' && (
-          <DashboardView currentUser={currentUser} onViewChange={setActiveView} />
+        {isBlockedByClockIn ? (
+          <div className="flex-1 flex items-center justify-center p-4 md:p-8">
+            <div className="bg-white rounded-[32px] p-8 max-w-md w-full border border-slate-200 shadow-xl text-center space-y-6">
+              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                <Lock size={32} />
+              </div>
+              
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-rose-700 bg-rose-50 px-3 py-1 rounded-full border border-rose-200">
+                  Acceso Restringido • Asistencia
+                </span>
+                <h2 className="text-xl font-black text-slate-900 pt-1">
+                  Entrada Requerida (Clock In)
+                </h2>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Hola <strong className="text-slate-800">{currentUser.name}</strong>. Para acceder a tus funciones de trabajo (<strong>{activeView.toUpperCase()}</strong>), primero debes registrar tu <strong>Fichaje de Entrada</strong> en el módulo de Asistencia.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-2xl text-left border border-slate-100 space-y-2 text-xs font-medium">
+                <div className="flex justify-between text-slate-600">
+                  <span>Empleado:</span>
+                  <strong className="text-slate-900">{currentUser.name}</strong>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Rol de Trabajo:</span>
+                  <strong className="text-slate-900 capitalize">{currentUser.role === 'waiter' ? 'Mesero' : currentUser.role === 'cook' ? 'Cocina / KDS' : currentUser.role === 'finance' ? 'Cajero / Finanzas' : currentUser.role}</strong>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Estado de Turno:</span>
+                  <span className="font-extrabold text-rose-600 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                    Sin Fichar Entrada
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setActiveView('my_shift')}
+                className="w-full py-4 bg-slate-900 hover:bg-black text-white font-black rounded-2xl text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01]"
+              >
+                <Clock size={16} className="text-amber-400" />
+                <span>Ir a Mi Turno y Fichar Entrada</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {activeView === 'dashboard' && (
+              <DashboardView currentUser={currentUser} onViewChange={setActiveView} />
+            )}
+            {activeView === 'chat' && <ChatView currentUser={currentUser} />}
+            {activeView === 'my_shift' && <MyShiftView currentUser={currentUser as any} />}
+            
+            {activeView === 'waiter' && <WaiterView currentUser={currentUser} />}
+            {activeView === 'kitchen' && <KDSView currentUser={currentUser} />}
+            {activeView === 'caja' && <CajaView currentUser={currentUser} />}
+            {activeView === 'finance' && currentUser.role === 'admin' && <FinanceView />}
+            {activeView === 'inventory' && currentUser.role === 'admin' && <InventoryView />}
+            {activeView === 'analytics' && currentUser.role === 'admin' && <AdminView currentUser={currentUser} />}
+            {activeView === 'crm' && currentUser.role === 'admin' && <CRMView />}
+            {activeView === 'personal' && currentUser.role === 'admin' && <PersonalView />}
+            {activeView === 'kernel' && currentUser.role === 'admin' && <KernelView />}
+            {activeView === 'menu_settings' && currentUser.role === 'admin' && <MenuSettingsView currentUser={currentUser} />}
+          </>
         )}
-        {activeView === 'chat' && <ChatView currentUser={currentUser} />}
-        {activeView === 'my_shift' && <MyShiftView currentUser={currentUser as any} />}
-        
-        {activeView === 'waiter' && <WaiterView currentUser={currentUser} />}
-        {activeView === 'kitchen' && <KDSView currentUser={currentUser} />}
-        {activeView === 'caja' && <CajaView currentUser={currentUser} />}
-        {activeView === 'finance' && currentUser.role === 'admin' && <FinanceView />}
-        {activeView === 'inventory' && currentUser.role === 'admin' && <InventoryView />}
-        {activeView === 'analytics' && currentUser.role === 'admin' && <AdminView currentUser={currentUser} />}
-        {activeView === 'crm' && currentUser.role === 'admin' && <CRMView />}
-        {activeView === 'personal' && currentUser.role === 'admin' && <PersonalView />}
-        {activeView === 'kernel' && currentUser.role === 'admin' && <KernelView />}
-        {activeView === 'menu_settings' && currentUser.role === 'admin' && <MenuSettingsView currentUser={currentUser} />}
       </main>
     </div>
   );

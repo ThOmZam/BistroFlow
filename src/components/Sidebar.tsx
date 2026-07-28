@@ -31,9 +31,10 @@ interface SidebarProps {
   activeView: string;
   onViewChange: (view: string) => void;
   restaurantName?: string;
+  hasActiveClockIn?: boolean;
 }
 
-export default function Sidebar({ role, onLogout, activeView, onViewChange, restaurantName }: SidebarProps) {
+export default function Sidebar({ role, onLogout, activeView, onViewChange, restaurantName, hasActiveClockIn }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem('sidebar_collapsed') === 'true';
   });
@@ -225,20 +226,24 @@ export default function Sidebar({ role, onLogout, activeView, onViewChange, rest
           <div className="px-4">
             <button
               onClick={() => onViewChange('my_shift')}
-              className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all relative ${
+              className={`w-full flex items-center justify-between p-3 rounded-2xl transition-all relative ${
                 activeView === 'my_shift'
                   ? 'bg-slate-100 text-black font-extrabold shadow-sm' 
                   : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'
               }`}
             >
-              <div className="relative">
-                <Clock size={24} className={activeView === 'my_shift' ? 'text-black' : 'text-slate-400'} />
+              <div className="flex items-center gap-3 min-w-0">
+                <Clock size={22} className={activeView === 'my_shift' ? 'text-black' : 'text-slate-400'} />
+                {!isCollapsed && (
+                  <span className="font-semibold text-xs text-left truncate">Mi Turno (Asistencia)</span>
+                )}
               </div>
-              {!isCollapsed && (
-                <span className="font-semibold text-xs text-left truncate">Mi Turno (Asistencia)</span>
-              )}
-              {activeView === 'my_shift' && !isCollapsed && (
-                <div className="w-1.5 h-1.5 rounded-full bg-black ml-auto" />
+              {!isCollapsed && role !== 'admin' && (
+                <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full shrink-0 ${
+                  hasActiveClockIn ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800 animate-pulse'
+                }`}>
+                  {hasActiveClockIn ? '🟢 En Turno' : '🔴 Sin Fichar'}
+                </span>
               )}
             </button>
           </div>

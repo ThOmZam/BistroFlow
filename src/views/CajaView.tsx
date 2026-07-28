@@ -31,7 +31,18 @@ import {
   Inbox,
   AlertTriangle,
   ExternalLink,
-  ShoppingBag
+  ShoppingBag,
+  Key,
+  Lock,
+  Unlock,
+  Receipt,
+  PlusCircle,
+  MinusCircle,
+  Printer,
+  Archive,
+  RotateCcw,
+  Calculator,
+  ShieldCheck
 } from 'lucide-react';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { playClickSound, playCashSound, playSuccessSound, playErrorSound } from '../lib/audio';
@@ -43,10 +54,291 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [validatedSessions, setValidatedSessions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'validation' | 'tables' | 'delivery_pickup' | 'credits'>('validation');
+  const [activeTab, setActiveTab] = useState<'validation' | 'tables' | 'delivery_pickup' | 'credits' | 'shifts'>('validation');
+
+  // CASH SHIFT STATES
+  const [shiftsList, setShiftsList] = useState<any[]>([]);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+
+  // Open Shift Modal State
+  const [isOpeningShiftModalOpen, setIsOpeningShiftModalOpen] = useState(false);
+  const [isSubmittingShift, setIsSubmittingShift] = useState(false);
+  const [openingShiftName, setOpeningShiftName] = useState('Turno Mañana');
+  const [openingCashierName, setOpeningCashierName] = useState('');
+  const [openingInitialCashUSD, setOpeningInitialCashUSD] = useState('50.00');
+  const [openingInitialCashBs, setOpeningInitialCashBs] = useState('0.00');
+  const [openingNotes, setOpeningNotes] = useState('');
+
+  // Cash Movement Modal State (Entradas / Salidas de caja)
+  const [isCashMovementModalOpen, setIsCashMovementModalOpen] = useState(false);
+  const [isSubmittingMovement, setIsSubmittingMovement] = useState(false);
+  const [movementType, setMovementType] = useState<'in' | 'out'>('out');
+  const [movementAmountUSD, setMovementAmountUSD] = useState('');
+  const [movementAmountBs, setMovementAmountBs] = useState('');
+  const [movementReason, setMovementReason] = useState('');
+
+  // Close Shift & Arqueo Modal State
+  const [isClosingShiftModalOpen, setIsClosingShiftModalOpen] = useState(false);
+  const [closingCountedCashUSD, setClosingCountedCashUSD] = useState('');
+  const [closingCountedCashBs, setClosingCountedCashBs] = useState('');
+  const [closingCountedTarjetaBs, setClosingCountedTarjetaBs] = useState('');
+  const [closingNotes, setClosingNotes] = useState('');
+  const [viewingShiftDetails, setViewingShiftDetails] = useState<any | null>(null);
+
+  // Real-time listener for cashShifts & transactions
+  useEffect(() => {
+    const unsubShifts = onSnapshot(collection(db, 'cashShifts'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a: any, b: any) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+      setShiftsList(list);
+    });
+
+    const unsubTx = onSnapshot(collection(db, 'transactions'), (snap) => {
+      setAllTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => {
+      unsubShifts();
+      unsubTx();
+    };
+  }, []);
+
+  const activeShift = shiftsList.find(s => s.status === 'open');
+
+  // Calculate active shift metrics
+  const activeShiftStartTime = activeShift ? new Date(activeShift.openedAt).getTime() : 0;
+  
+  const shiftTransactions = activeShift ? allTransactions.filter(tx => {
+    const txTime = new Date(tx.timestamp || 0).getTime();
+    return txTime >= activeShiftStartTime;
+  }) : [];
+
+  const shiftCompletedSessions = activeShift ? validatedSessions.filter(s => {
+    const ts = s.payment?.timestamp || s.startTime;
+    return ts && new Date(ts).getTime() >= activeShiftStartTime;
+  }) : [];
+
+  // Breakdowns by payment method during active shift
+  const shiftCashUSD = shiftTransactions
+    .filter(tx => tx.method === 'efectivo' || tx.method === 'cash' || tx.method === 'efectivo_usd')
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
+    shiftCompletedSessions
+      .filter(s => (s.payment?.method === 'efectivo' || s.paymentMethod === 'efectivo'))
+      .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+
+  const shiftCashBs = shiftTransactions
+    .filter(tx => tx.method === 'efectivo_bs')
+    .reduce((sum, tx) => sum + (tx.amountBs || 0), 0);
+
+  const shiftPagoMovilUSD = shiftTransactions
+    .filter(tx => tx.method === 'pago_movil')
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
+    shiftCompletedSessions
+      .filter(s => (s.payment?.method === 'pago_movil' || s.paymentMethod === 'pago_movil'))
+      .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+
+  const shiftZelleUSD = shiftTransactions
+    .filter(tx => tx.method === 'zelle')
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
+    shiftCompletedSessions
+      .filter(s => (s.payment?.method === 'zelle' || s.paymentMethod === 'zelle'))
+      .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+
+  const shiftTarjetaUSD = shiftTransactions
+    .filter(tx => tx.method === 'punto_de_venta' || tx.method === 'tarjeta')
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
+    shiftCompletedSessions
+      .filter(s => (s.payment?.method === 'punto_de_venta' || s.paymentMethod === 'punto_de_venta' || s.paymentMethod === 'tarjeta'))
+      .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+
+  const shiftCreditoUSD = shiftCompletedSessions
+    .filter(s => (s.payment?.method === 'credito' || s.paymentMethod === 'credito'))
+    .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+
+  // Cash In / Cash Out movements during active shift
+  const shiftCashMovements = activeShift?.cashMovements || [];
+  const shiftCashInUSD = shiftCashMovements.filter((m: any) => m.type === 'in').reduce((sum: number, m: any) => sum + (Number(m.amountUSD) || 0), 0);
+  const shiftCashInBs = shiftCashMovements.filter((m: any) => m.type === 'in').reduce((sum: number, m: any) => sum + (Number(m.amountBs) || 0), 0);
+  const shiftCashOutUSD = shiftCashMovements.filter((m: any) => m.type === 'out').reduce((sum: number, m: any) => sum + (Number(m.amountUSD) || 0), 0);
+  const shiftCashOutBs = shiftCashMovements.filter((m: any) => m.type === 'out').reduce((sum: number, m: any) => sum + (Number(m.amountBs) || 0), 0);
+
+  // Expected totals in register
+  const expectedShiftCashUSD = (Number(activeShift?.initialCashUSD) || 0) + shiftCashUSD + shiftCashInUSD - shiftCashOutUSD;
+  const expectedShiftCashBs = (Number(activeShift?.initialCashBs) || 0) + shiftCashBs + shiftCashInBs - shiftCashOutBs;
+
+  const handleOpenShift = async () => {
+    if (isSubmittingShift) return;
+    setIsSubmittingShift(true);
+    try {
+      const cashier = openingCashierName.trim() || currentUser?.name || localStorage.getItem('demo_user_name') || 'Cajero';
+      await addDoc(collection(db, 'cashShifts'), {
+        shiftName: openingShiftName,
+        openedBy: cashier,
+        openedAt: new Date().toISOString(),
+        status: 'open',
+        initialCashUSD: Number(openingInitialCashUSD) || 0,
+        initialCashBs: Number(openingInitialCashBs) || 0,
+        openingNotes: openingNotes.trim(),
+        cashMovements: []
+      });
+
+      await logAction('finance', cashier, 'Apertura de Turno de Caja', `Turno: ${openingShiftName} - Fondo: $${openingInitialCashUSD}`);
+      playSuccessSound();
+      showToast('🟢 Turno de Caja abierto exitosamente.');
+      setIsOpeningShiftModalOpen(false);
+      setOpeningNotes('');
+    } catch (err) {
+      console.error('Error opening cash shift:', err);
+      playErrorSound();
+      showToast('❌ Error al abrir el turno de caja.');
+    } finally {
+      setIsSubmittingShift(false);
+    }
+  };
+
+  const handleSaveCashMovement = async () => {
+    if (isSubmittingMovement || !activeShift) return;
+    const usd = Number(movementAmountUSD) || 0;
+    const bs = Number(movementAmountBs) || 0;
+    if (usd <= 0 && bs <= 0) {
+      alert('Ingresa un monto válido en USD o Bs');
+      return;
+    }
+    if (!movementReason.trim()) {
+      alert('Por favor indica el motivo o concepto del movimiento.');
+      return;
+    }
+
+    setIsSubmittingMovement(true);
+    try {
+      const cashier = currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja';
+      const newMovement = {
+        id: `mov_${Date.now()}`,
+        type: movementType,
+        amountUSD: usd,
+        amountBs: bs,
+        reason: movementReason.trim(),
+        timestamp: new Date().toISOString(),
+        registeredBy: cashier
+      };
+
+      const updatedMovements = [...(activeShift.cashMovements || []), newMovement];
+      await updateDoc(doc(db, 'cashShifts', activeShift.id), {
+        cashMovements: updatedMovements
+      });
+
+      await logAction('finance', cashier, `Movimiento de Caja (${movementType === 'in' ? 'Ingreso' : 'Egreso'})`, `USD: $${usd} - Bs: ${bs} - Motivo: ${movementReason}`);
+      playCashSound();
+      showToast(`✅ ${movementType === 'in' ? 'Ingreso' : 'Egreso'} de caja registrado.`);
+      setIsCashMovementModalOpen(false);
+      setMovementAmountUSD('');
+      setMovementAmountBs('');
+      setMovementReason('');
+    } catch (err) {
+      console.error('Error saving cash movement:', err);
+      playErrorSound();
+      showToast('❌ Error al registrar movimiento.');
+    } finally {
+      setIsSubmittingMovement(false);
+    }
+  };
+
+  const handleCloseShift = async () => {
+    if (isSubmittingShift || !activeShift) return;
+    setIsSubmittingShift(true);
+    try {
+      const cashier = currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja';
+      const actualUSD = Number(closingCountedCashUSD) || 0;
+      const actualBs = Number(closingCountedCashBs) || 0;
+      const actualTarjetaBs = Number(closingCountedTarjetaBs) || 0;
+
+      const diffUSD = actualUSD - expectedShiftCashUSD;
+      const diffBs = actualBs - expectedShiftCashBs;
+
+      const salesSummary = {
+        totalCollectedUSD: shiftCashUSD + shiftPagoMovilUSD + shiftZelleUSD + shiftTarjetaUSD + shiftCreditoUSD,
+        cashUSD: shiftCashUSD,
+        cashBs: shiftCashBs,
+        pagoMovilUSD: shiftPagoMovilUSD,
+        zelleUSD: shiftZelleUSD,
+        tarjetaUSD: shiftTarjetaUSD,
+        creditoUSD: shiftCreditoUSD,
+        totalOrdersCount: shiftCompletedSessions.length
+      };
+
+      const closedData = {
+        status: 'closed',
+        closedBy: cashier,
+        closedAt: new Date().toISOString(),
+        closingNotes: closingNotes.trim(),
+        expectedCashUSD: expectedShiftCashUSD,
+        expectedCashBs: expectedShiftCashBs,
+        actualCashUSD: actualUSD,
+        actualCashBs: actualBs,
+        actualTarjetaBs: actualTarjetaBs,
+        differenceUSD: diffUSD,
+        differenceBs: diffBs,
+        salesSummary
+      };
+
+      await updateDoc(doc(db, 'cashShifts', activeShift.id), closedData);
+
+      await logAction('finance', cashier, 'Cierre y Arqueo de Turno de Caja', `Turno: ${activeShift.shiftName} - Dif USD: $${diffUSD.toFixed(2)}`);
+      playCashSound();
+      showToast('🔒 Turno de Caja cerrado y arqueado correctamente.');
+      setIsClosingShiftModalOpen(false);
+      setViewingShiftDetails({ id: activeShift.id, ...activeShift, ...closedData });
+    } catch (err) {
+      console.error('Error closing shift:', err);
+      playErrorSound();
+      showToast('❌ Error al cerrar el turno.');
+    } finally {
+      setIsSubmittingShift(false);
+    }
+  };
 
   const [viewingDeliveryOrder, setViewingDeliveryOrder] = useState<any | null>(null);
   const [deliveryOrders, setDeliveryOrders] = useState<any[]>([]);
+
+  const [viewingCompletedSession, setViewingCompletedSession] = useState<any | null>(null);
+  const [completedSessionOrders, setCompletedSessionOrders] = useState<any[]>([]);
+  const [isLoadingCompletedOrders, setIsLoadingCompletedOrders] = useState(false);
+
+  useEffect(() => {
+    if (!viewingCompletedSession) {
+      setCompletedSessionOrders([]);
+      return;
+    }
+
+    const fetchCompletedOrders = async () => {
+      setIsLoadingCompletedOrders(true);
+      try {
+        const accountsList = viewingCompletedSession.accounts || [{ id: 'default', name: 'Única' }];
+        const allOrders: any[] = [];
+        
+        for (const acc of accountsList) {
+          const ordersRef = collection(db, 'sessions', viewingCompletedSession.id, 'accounts', acc.id, 'orders');
+          const snap = await getDocs(ordersRef);
+          snap.forEach(docSnap => {
+            allOrders.push({
+              id: docSnap.id,
+              accountId: acc.id,
+              accountName: acc.name,
+              ...docSnap.data()
+            });
+          });
+        }
+        
+        setCompletedSessionOrders(allOrders);
+      } catch (err) {
+        console.error('Error fetching completed session orders:', err);
+      } finally {
+        setIsLoadingCompletedOrders(false);
+      }
+    };
+
+    fetchCompletedOrders();
+  }, [viewingCompletedSession]);
 
   useEffect(() => {
     if (!viewingDeliveryOrder) {
@@ -94,8 +386,14 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       where('status', '==', 'completed')
     );
     const unsubComp = onSnapshot(qComp, (snap) => {
-      const allCompleted = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setValidatedSessions(allCompleted);
+      const todayString = new Date().toDateString();
+      const allCompleted = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const todayCompleted = allCompleted.filter((s: any) => {
+        const ts = s.payment?.timestamp || s.startTime;
+        if (!ts) return false;
+        return new Date(ts).toDateString() === todayString;
+      });
+      setValidatedSessions(todayCompleted);
     });
 
     return () => {
@@ -447,6 +745,102 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         </div>
       </header>
 
+      {/* SHIFT STATUS BANNER */}
+      <div className="mb-8">
+        {activeShift ? (
+          <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-black text-white p-6 rounded-[28px] shadow-xl border border-emerald-800/40 relative overflow-hidden">
+            <div className="absolute right-0 top-0 bottom-0 opacity-10 pointer-events-none flex items-center pr-8">
+              <ShieldCheck size={160} />
+            </div>
+            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
+                    Turno Activo: {activeShift.shiftName}
+                  </span>
+                  <span className="text-xs text-slate-300 font-bold bg-white/10 px-2.5 py-1 rounded-full">
+                    👤 Cajero: {activeShift.openedBy}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">
+                    Inició: {new Date(activeShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-4 pt-1 flex-wrap">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Fondo Inicial ($ / Bs)</span>
+                    <span className="text-xl font-black text-white">
+                      ${(Number(activeShift.initialCashUSD) || 0).toFixed(2)}
+                      <span className="text-xs text-emerald-400 font-bold ml-1.5">
+                        (Bs. {(Number(activeShift.initialCashBs) || 0).toFixed(2)})
+                      </span>
+                    </span>
+                  </div>
+                  <div className="border-l border-white/10 pl-4">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Efectivo Esperado en Caja</span>
+                    <span className="text-xl font-black text-emerald-400">
+                      ${expectedShiftCashUSD.toFixed(2)}
+                      <span className="text-xs text-slate-300 font-bold ml-1.5">
+                        (Bs. {expectedShiftCashBs.toFixed(2)})
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2.5 w-full md:w-auto shrink-0">
+                <button
+                  onClick={() => setIsCashMovementModalOpen(true)}
+                  className="flex-1 md:flex-none px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-white/10 transition-all"
+                >
+                  <PlusCircle size={15} className="text-emerald-400" />
+                  <span>Entrada / Salida</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setClosingCountedCashUSD(expectedShiftCashUSD > 0 ? expectedShiftCashUSD.toFixed(2) : '0.00');
+                    setClosingCountedCashBs(expectedShiftCashBs > 0 ? expectedShiftCashBs.toFixed(2) : '0.00');
+                    setClosingCountedTarjetaBs('');
+                    setIsClosingShiftModalOpen(true);
+                  }}
+                  className="flex-1 md:flex-none px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
+                >
+                  <Lock size={15} />
+                  <span>Cierre & Arqueo Z</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-slate-900/5 border border-amber-300/60 p-6 rounded-[28px] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-amber-500 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-md">
+                <Unlock size={24} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full">
+                    Caja Cerrada
+                  </span>
+                  <span className="text-xs text-slate-500 font-bold">Sin turno activo</span>
+                </div>
+                <h3 className="text-lg font-black text-slate-900 mt-1">Apertura de Turno Requerida</h3>
+                <p className="text-xs text-slate-500">
+                  Abre el turno de caja para registrar el fondo inicial de efectivo y consolidar las ventas del turno.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsOpeningShiftModalOpen(true)}
+              className="w-full sm:w-auto px-6 py-3.5 bg-slate-900 hover:bg-black text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shrink-0 transition-all"
+            >
+              <Key size={16} className="text-amber-400" />
+              <span>Abrir Turno de Caja</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* METRIC CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm flex flex-col justify-between">
@@ -519,6 +913,18 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
             <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
           )}
         </button>
+        <button 
+          onClick={() => setActiveTab('shifts')}
+          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative flex items-center gap-1.5 ${activeTab === 'shifts' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+        >
+          <span>Turnos & Cierres</span>
+          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${activeShift ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+            {activeShift ? '🟢 Abierto' : '🔒 Cerrado'}
+          </span>
+          {activeTab === 'shifts' && (
+            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
+          )}
+        </button>
       </div>
 
       {/* TAB RENDERS */}
@@ -526,6 +932,212 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         
         {/* Left column / core list depending on tab */}
         <div className="lg:col-span-2 space-y-6">
+          
+          {activeTab === 'shifts' && (
+            <div className="space-y-8">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <Receipt className="text-amber-600" size={20} />
+                  <span>Gestión de Turnos y Arqueos Z</span>
+                </h3>
+                {!activeShift ? (
+                  <button
+                    onClick={() => setIsOpeningShiftModalOpen(true)}
+                    className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all"
+                  >
+                    <Key size={14} className="text-amber-400" />
+                    <span>Abrir Nuevo Turno</span>
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsCashMovementModalOpen(true)}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors border border-slate-200"
+                    >
+                      <PlusCircle size={14} className="text-emerald-600" />
+                      <span>Movimiento Efectivo</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setClosingCountedCashUSD(expectedShiftCashUSD > 0 ? expectedShiftCashUSD.toFixed(2) : '0.00');
+                        setClosingCountedCashBs(expectedShiftCashBs > 0 ? expectedShiftCashBs.toFixed(2) : '0.00');
+                        setClosingCountedTarjetaBs('');
+                        setIsClosingShiftModalOpen(true);
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all"
+                    >
+                      <Lock size={14} />
+                      <span>Cierre Z</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ACTIVE SHIFT LIVE CARD */}
+              {activeShift ? (
+                <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
+                        <span className="font-black text-lg text-slate-900">{activeShift.shiftName}</span>
+                        <span className="text-xs bg-emerald-50 text-emerald-700 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                          Turno en Curso
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Apertura: {new Date(activeShift.openedAt).toLocaleString()} • Responsable: <strong className="text-slate-700">{activeShift.openedBy}</strong>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Fondo Inicial</span>
+                      <span className="text-sm font-black text-slate-900">${(Number(activeShift.initialCashUSD) || 0).toFixed(2)} USD</span>
+                      <span className="text-xs text-rose-600 font-bold block">Bs. {(Number(activeShift.initialCashBs) || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Breakdown grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">💵 Efectivo USD / Bs</span>
+                      <span className="text-base font-black text-slate-900">${shiftCashUSD.toFixed(2)}</span>
+                      <span className="text-[10px] font-bold text-rose-600 block">Bs. {shiftCashBs.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">📱 Pago Móvil</span>
+                      <span className="text-base font-black text-slate-900">${shiftPagoMovilUSD.toFixed(2)}</span>
+                      <span className="text-[10px] font-bold text-slate-500 block">Bs. {(shiftPagoMovilUSD * exchangeRate).toFixed(2)}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">📧 Zelle</span>
+                      <span className="text-base font-black text-slate-900">${shiftZelleUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">💳 Punto de Venta</span>
+                      <span className="text-base font-black text-slate-900">${shiftTarjetaUSD.toFixed(2)}</span>
+                      <span className="text-[10px] font-bold text-slate-500 block">Bs. {(shiftTarjetaUSD * exchangeRate).toFixed(2)}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">📜 Créditos por Cobrar</span>
+                      <span className="text-base font-black text-amber-700">${shiftCreditoUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase block">📦 Pedidos Cobrados</span>
+                      <span className="text-base font-black text-emerald-900">{shiftCompletedSessions.length} pedidos</span>
+                    </div>
+                  </div>
+
+                  {/* Cash movements section */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Calculator size={14} className="text-slate-400" />
+                        <span>Movimientos de Caja Chica ({shiftCashMovements.length})</span>
+                      </span>
+                      <button
+                        onClick={() => setIsCashMovementModalOpen(true)}
+                        className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                      >
+                        <PlusCircle size={12} />
+                        <span>Registrar Retiro / Ingreso</span>
+                      </button>
+                    </div>
+
+                    {shiftCashMovements.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                        No se han registrado entradas ni salidas de efectivo en este turno.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-thin pr-1">
+                        {shiftCashMovements.map((m: any, idx: number) => (
+                          <div key={m.id || idx} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${m.type === 'in' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                              <span className="font-bold text-slate-800">{m.reason}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                ({new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                              </span>
+                            </div>
+                            <div className="font-bold font-mono">
+                              {m.type === 'in' ? '+' : '-'}${Number(m.amountUSD || 0).toFixed(2)} USD
+                              {m.amountBs > 0 && <span className="text-[10px] text-slate-400 ml-1">(Bs. {m.amountBs})</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 rounded-[32px] p-8 text-center border border-dashed border-slate-200">
+                  <Unlock size={36} className="mx-auto text-amber-500 mb-3" />
+                  <h4 className="font-black text-slate-800 text-base">Caja Cerrada</h4>
+                  <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                    No hay ningún turno abierto en este momento. Presiona "Abrir Nuevo Turno" para iniciar operaciones.
+                  </p>
+                </div>
+              )}
+
+              {/* CLOSED SHIFTS HISTORY */}
+              <div className="space-y-4 pt-4">
+                <h4 className="font-black text-slate-900 text-sm flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="flex items-center gap-2">
+                    <Archive size={16} className="text-slate-400" />
+                    Histórico de Cierres de Turno (Reportes Z)
+                  </span>
+                  <span className="text-xs font-bold text-slate-400">{shiftsList.filter(s => s.status === 'closed').length} cierres</span>
+                </h4>
+
+                {shiftsList.filter(s => s.status === 'closed').length === 0 ? (
+                  <div className="text-center py-8 text-xs text-slate-400 italic bg-white rounded-2xl border border-slate-100 p-6">
+                    Aún no hay cierres de turno registrados.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {shiftsList.filter(s => s.status === 'closed').map((s: any) => {
+                      const diffUSD = Number(s.differenceUSD) || 0;
+                      const isExact = Math.abs(diffUSD) < 0.01;
+                      const isSurplus = diffUSD > 0.01;
+                      return (
+                        <div key={s.id} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-slate-200 transition-all">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-slate-900 text-sm">{s.shiftName}</span>
+                              <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full">
+                                Cajero: {s.closedBy || s.openedBy}
+                              </span>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                isExact ? 'bg-emerald-50 text-emerald-700' : isSurplus ? 'bg-blue-50 text-blue-700' : 'bg-rose-50 text-rose-700'
+                              }`}>
+                                {isExact ? '✨ Cuadrado' : isSurplus ? `🟢 Sobrante +$${diffUSD.toFixed(2)}` : `🔴 Faltante -$${Math.abs(diffUSD).toFixed(2)}`}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 font-medium">
+                              {new Date(s.openedAt).toLocaleDateString()} ({new Date(s.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(s.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
+                            <div className="text-right">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Consolidado Total</span>
+                              <span className="text-sm font-black text-slate-900">${(s.salesSummary?.totalCollectedUSD || 0).toFixed(2)}</span>
+                            </div>
+                            <button
+                              onClick={() => setViewingShiftDetails(s)}
+                              className="px-3.5 py-2 bg-slate-100 hover:bg-black hover:text-white text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0"
+                            >
+                              <Eye size={14} />
+                              <span>Ver Reporte Z</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           
           {activeTab === 'validation' && (
             <>
@@ -654,28 +1266,79 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 const displayName = isCredit 
                   ? session.payment?.creditClient?.nombre 
                   : session.customerName || accountName || 'Cliente';
+
+                const isDelivery = session.type === 'delivery' || session.tableId === 'delivery' || session.tableId?.startsWith('delivery');
+                const matchedTable = tables.find((t: any) => t.id === session.tableId);
+                const tableLabel = isDelivery 
+                  ? '🚚 Delivery' 
+                  : matchedTable 
+                    ? `🪑 Mesa ${matchedTable.number}` 
+                    : session.tableName 
+                      ? `🪑 ${session.tableName}` 
+                      : session.tableNumber 
+                        ? `🪑 Mesa ${session.tableNumber}` 
+                        : session.tableId && session.tableId.length < 10 
+                          ? `🪑 Mesa ${session.tableId}` 
+                          : '🪑 Mesa';
+                const waiterLabel = session.waiterName ? `👤 Mesero: ${session.waiterName}` : '👤 Mesero: N/A';
+                const totalUSD = session.payment?.totalUSD || session.totalAmount || 0;
+                const totalBs = totalUSD * exchangeRate;
+                const payMethod = session.payment?.method || session.paymentMethod || 'Pago';
+
                 return (
                   <div 
                     key={session.id} 
-                    className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between"
+                    onClick={() => setViewingCompletedSession(session)}
+                    className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between gap-2.5 group relative overflow-hidden text-left"
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <span className="font-bold text-sm block text-slate-900 line-clamp-1">{displayName}</span>
-                        <span className="text-[10px] text-slate-400 font-mono block">
-                          {session.payment?.timestamp 
-                            ? new Date(session.payment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                            : 'N/A'
-                          }
+                    {/* Hover indicator strip */}
+                    <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-sm block text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                          {displayName}
+                        </span>
+                        
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-500">
+                          <span className="font-semibold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[9px] uppercase">
+                            {tableLabel}
+                          </span>
+                          <span className="text-slate-400">
+                            {waiterLabel}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <span className="text-sm font-black text-slate-900 block">
+                          +${totalUSD.toFixed(2)}
+                        </span>
+                        <span className="text-[9px] text-slate-400 font-medium font-mono block">
+                          Bs. {totalBs.toFixed(2)}
                         </span>
                       </div>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${isCredit ? 'text-purple-600 bg-purple-50' : 'text-emerald-600 bg-emerald-50'}`}>
-                        +${(session.payment?.totalUSD || session.totalAmount || 0).toFixed(2)}
-                      </span>
                     </div>
+
                     <div className="flex justify-between items-center text-[10px] border-t border-slate-50 pt-2 text-slate-400">
-                      <span className="capitalize">Método: {session.payment?.method || session.paymentMethod || 'Pago'}</span>
-                      <span>Bs. {((session.payment?.totalUSD || session.totalAmount || 0) * exchangeRate).toFixed(2)}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-1.5 py-0.5 rounded font-black text-[8px] uppercase tracking-wider ${
+                          isCredit ? 'bg-purple-50 text-purple-600' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          {payMethod}
+                        </span>
+                        {session.payment?.reference && (
+                          <span className="font-mono text-slate-500">
+                            #{session.payment.reference}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-medium text-slate-400">
+                        {session.payment?.timestamp 
+                          ? new Date(session.payment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : 'N/A'
+                        }
+                      </span>
                     </div>
                   </div>
                 );
@@ -728,6 +1391,219 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                   alt="Voucher Zoomed" 
                   className="w-full h-full object-contain" 
                 />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* COMPLETED SESSION DETAILS MODAL */}
+      <AnimatePresence>
+        {viewingCompletedSession && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white rounded-[40px] w-full max-w-lg shadow-2xl overflow-hidden relative border border-slate-100 text-slate-800 text-left"
+            >
+              {/* Banner header */}
+              <div className="bg-indigo-600 text-white p-8 relative">
+                <button 
+                  onClick={() => setViewingCompletedSession(null)}
+                  className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors"
+                  title="Cerrar"
+                >
+                  <X size={18} />
+                </button>
+                <span className="text-[10px] bg-white/20 text-white font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                  Transacción Conciliada
+                </span>
+                <h3 className="text-2xl font-black mt-3 leading-tight truncate">
+                  {(() => {
+                    const isCredit = viewingCompletedSession.payment?.method === 'credito';
+                    const paidAccount = viewingCompletedSession.accounts?.find((a: any) => a.id === viewingCompletedSession.payment?.accountId || a.status === 'paid');
+                    const accountName = paidAccount ? paidAccount.name : (viewingCompletedSession.accounts?.[0]?.name || '');
+                    return isCredit 
+                      ? viewingCompletedSession.payment?.creditClient?.nombre 
+                      : viewingCompletedSession.customerName || accountName || 'Cliente';
+                  })()}
+                </h3>
+                <p className="text-white/80 text-xs mt-1">Historial y desglose completo del consumo</p>
+              </div>
+
+              {/* Body */}
+              <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+                {/* General Session Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 uppercase font-black block mb-1">Ubicación / Tipo</span>
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      {viewingCompletedSession.type === 'delivery' || viewingCompletedSession.tableId === 'delivery' || viewingCompletedSession.tableId?.startsWith('delivery') 
+                        ? '🚚 Delivery / Llevar' 
+                        : (() => {
+                            const matched = tables.find((t: any) => t.id === viewingCompletedSession.tableId);
+                            if (matched) return `🪑 Mesa ${matched.number}`;
+                            if (viewingCompletedSession.tableName) return `🪑 ${viewingCompletedSession.tableName}`;
+                            if (viewingCompletedSession.tableNumber) return `🪑 Mesa ${viewingCompletedSession.tableNumber}`;
+                            if (viewingCompletedSession.tableId && viewingCompletedSession.tableId.length < 10) return `🪑 Mesa ${viewingCompletedSession.tableId}`;
+                            return '🪑 Mesa';
+                          })()
+                      }
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 uppercase font-black block mb-1">Mesero Atendente</span>
+                    <span className="text-xs font-bold text-slate-800">
+                      👤 {viewingCompletedSession.waiterName || 'No especificado'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 uppercase font-black block mb-1">Hora de Apertura</span>
+                    <span className="text-xs font-medium text-slate-600">
+                      {viewingCompletedSession.startTime 
+                        ? new Date(viewingCompletedSession.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : 'N/A'
+                      }
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-[9px] text-slate-400 uppercase font-black block mb-1">Hora de Cierre</span>
+                    <span className="text-xs font-semibold text-emerald-600">
+                      {viewingCompletedSession.payment?.timestamp 
+                        ? new Date(viewingCompletedSession.payment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : 'N/A'
+                      }
+                    </span>
+                  </div>
+                </div>
+
+                {/* Delivery details if delivery */}
+                {(viewingCompletedSession.customerPhone || viewingCompletedSession.customerAddress) && (
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] uppercase font-black tracking-widest text-slate-400">Datos de Contacto y Envío</h4>
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-xs space-y-3">
+                      {viewingCompletedSession.customerPhone && (
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Teléfono</span>
+                          <span className="font-bold text-slate-800">{viewingCompletedSession.customerPhone}</span>
+                        </div>
+                      )}
+                      {viewingCompletedSession.deliveryZoneName && (
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Zona de Delivery</span>
+                          <span className="font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+                            🛵 {viewingCompletedSession.deliveryZoneName} (+${(viewingCompletedSession.deliveryFee || 0).toFixed(2)} USD)
+                          </span>
+                        </div>
+                      )}
+                      {viewingCompletedSession.customerAddress && (
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Dirección</span>
+                          <span className="font-medium text-slate-700 leading-relaxed">{viewingCompletedSession.customerAddress}</span>
+                        </div>
+                      )}
+                      {viewingCompletedSession.deliveryReference && (
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Punto de Referencia</span>
+                          <span className="font-medium text-slate-600 italic">{viewingCompletedSession.deliveryReference}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment summary */}
+                <div className="space-y-3">
+                  <h4 className="text-[10px] uppercase font-black tracking-widest text-slate-400">Información del Pago</h4>
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 text-xs grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Método de Pago</span>
+                      <span className="font-bold uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                        {viewingCompletedSession.payment?.method || viewingCompletedSession.paymentMethod || 'Pago'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Referencia</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {viewingCompletedSession.payment?.reference ? `#${viewingCompletedSession.payment.reference}` : 'Sin referencia'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Plates / Items detail */}
+                <div className="space-y-3">
+                  <h4 className="text-[10px] uppercase font-black tracking-widest text-slate-400">Platos y Consumos Solicitados</h4>
+                  
+                  {isLoadingCompletedOrders ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-slate-400 space-y-2">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500"></div>
+                      <span className="text-xs">Cargando platos...</span>
+                    </div>
+                  ) : completedSessionOrders.length === 0 ? (
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 text-center text-slate-400 text-xs italic">
+                      No se encontraron registros de platos ordenados.
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 space-y-3">
+                      {completedSessionOrders.map((order) => (
+                        <div 
+                          key={order.id} 
+                          className="flex justify-between items-start text-xs pb-3 border-b border-slate-200/50 last:border-0 last:pb-0"
+                        >
+                          <div className="space-y-0.5 text-left">
+                            <div>
+                              <span className="font-extrabold text-slate-900">{order.quantity || 1}x</span>{' '}
+                              <span className="font-bold text-slate-800">{order.itemName}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 block bg-slate-200/50 px-1.5 py-0.5 rounded-md w-fit">
+                              Cuenta: {order.accountName || 'Única'}
+                            </span>
+                          </div>
+                          
+                          <div className="text-right">
+                            <span className="font-mono font-bold text-slate-900 block">
+                              ${((order.price || 0) * (order.quantity || 1)).toFixed(2)}
+                            </span>
+                            <span className="text-[9px] text-slate-400 block">
+                              (${ (order.price || 0).toFixed(2) } c/u)
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Summary calculations */}
+                      <div className="pt-4 border-t border-slate-200/80 flex justify-between items-end">
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">Total Consumido</span>
+                          <span className="text-2xl font-black text-indigo-600">
+                            ${(viewingCompletedSession.payment?.totalUSD || viewingCompletedSession.totalAmount || 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-400 uppercase font-black block">En Bolívares</span>
+                          <span className="text-sm font-bold text-slate-700">
+                            Bs. {((viewingCompletedSession.payment?.totalUSD || viewingCompletedSession.totalAmount || 0) * exchangeRate).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Close button */}
+              <div className="p-8 bg-slate-50 border-t border-slate-100">
+                <button 
+                  onClick={() => setViewingCompletedSession(null)}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white p-4 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-slate-900/10"
+                >
+                  Cerrar Detalles
+                </button>
               </div>
             </motion.div>
           </div>
@@ -970,6 +1846,15 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                         </div>
                       )}
                     </div>
+                    {(viewingDeliveryOrder.paymentReceiptImage || viewingDeliveryOrder.pendingPayment?.receiptImage) && (
+                      <button 
+                        onClick={() => setViewingReceiptImage(viewingDeliveryOrder.paymentReceiptImage || viewingDeliveryOrder.pendingPayment?.receiptImage)}
+                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors border border-slate-200"
+                      >
+                        <Eye size={14} />
+                        Ver Imagen de Comprobante
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1022,6 +1907,521 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
           </div>
         )}
       </AnimatePresence>
+
+      {/* OPEN SHIFT MODAL */}
+      <AnimatePresence>
+        {isOpeningShiftModalOpen && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[32px] max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col"
+            >
+              <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950">
+                    <Key size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg">Apertura de Turno de Caja</h3>
+                    <p className="text-xs text-slate-400">Inicia un nuevo turno para controlar cobros y arqueos</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsOpeningShiftModalOpen(false)} className="text-slate-400 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nombre / Identificador del Turno</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+                    {['Turno Mañana', 'Turno Tarde', 'Turno Noche', 'Turno 24 Horas'].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setOpeningShiftName(preset)}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                          openingShiftName === preset ? 'bg-black text-white border-black' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={openingShiftName}
+                    onChange={e => setOpeningShiftName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
+                    placeholder="Ej. Turno Especial Fin de Semana"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Cajero(a) Responsable</label>
+                  <input
+                    type="text"
+                    value={openingCashierName}
+                    onChange={e => setOpeningCashierName(e.target.value)}
+                    placeholder={currentUser?.name || localStorage.getItem('demo_user_name') || 'Nombre del cajero'}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Fondo Inicial ($ USD)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={openingInitialCashUSD}
+                        onChange={e => setOpeningInitialCashUSD(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pl-7 text-sm font-bold text-slate-900"
+                        placeholder="50.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Fondo Inicial (Bs.)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">Bs</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={openingInitialCashBs}
+                        onChange={e => setOpeningInitialCashBs(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pl-9 text-sm font-bold text-slate-900"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Observaciones / Notas (Opcional)</label>
+                  <textarea
+                    value={openingNotes}
+                    onChange={e => setOpeningNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Ej. Recibido billetes de $5 y $10 para cambio"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+                <button
+                  onClick={() => setIsOpeningShiftModalOpen(false)}
+                  className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleOpenShift}
+                  className="flex-1 py-3 px-4 bg-black hover:bg-emerald-600 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg transition-all"
+                >
+                  Confirmar Apertura
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CASH MOVEMENT MODAL */}
+      <AnimatePresence>
+        {isCashMovementModalOpen && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] max-w-md w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col"
+            >
+              <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${movementType === 'in' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                    {movementType === 'in' ? <PlusCircle size={20} /> : <MinusCircle size={20} />}
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg">Movimiento de Caja Chica</h3>
+                    <p className="text-xs text-slate-400">Registra ingresos o retiros durante el turno</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsCashMovementModalOpen(false)} className="text-slate-400 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl">
+                  <button
+                    onClick={() => setMovementType('in')}
+                    className={`py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+                      movementType === 'in' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    + Ingreso / Inyección
+                  </button>
+                  <button
+                    onClick={() => setMovementType('out')}
+                    className={`py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+                      movementType === 'out' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    - Egreso / Retiro
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Monto en $ USD</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={movementAmountUSD}
+                      onChange={e => setMovementAmountUSD(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Monto en Bs.</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={movementAmountBs}
+                      onChange={e => setMovementAmountBs(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Motivo / Concepto *</label>
+                  <input
+                    type="text"
+                    value={movementReason}
+                    onChange={e => setMovementReason(e.target.value)}
+                    placeholder="Ej. Pago de hielo a proveedor, cambio de billetes, etc."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+                <button
+                  onClick={() => setIsCashMovementModalOpen(false)}
+                  className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveCashMovement}
+                  className={`flex-1 py-3 px-4 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg transition-all ${
+                    movementType === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  Guardar Movimiento
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CLOSE SHIFT & ARQUEO MODAL */}
+      <AnimatePresence>
+        {isClosingShiftModalOpen && activeShift && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] max-w-2xl w-full my-8 overflow-hidden shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-950">
+                    <Lock size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg">Cierre de Turno y Arqueo de Caja</h3>
+                    <p className="text-xs text-slate-400">Cuadre de efectivo real vs esperado del turno</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsClosingShiftModalOpen(false)} className="text-slate-400 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6 overflow-y-auto scrollbar-thin">
+                {/* System calculated expected totals */}
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center justify-between">
+                    <span>📊 Resumen Consolidado del Sistema</span>
+                    <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-full">
+                      {shiftCompletedSessions.length} pedidos cobrados
+                    </span>
+                  </h4>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Efectivo USD</span>
+                      <span className="font-black text-slate-900">${shiftCashUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Efectivo Bs</span>
+                      <span className="font-black text-slate-900">Bs. {shiftCashBs.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Pago Móvil</span>
+                      <span className="font-black text-slate-900">${shiftPagoMovilUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Zelle</span>
+                      <span className="font-black text-slate-900">${shiftZelleUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Punto de Venta</span>
+                      <span className="font-black text-slate-900">${shiftTarjetaUSD.toFixed(2)}</span>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Crédito</span>
+                      <span className="font-black text-amber-700">${shiftCreditoUSD.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-3 font-mono">
+                    <div>
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Esperado en Caja ($ USD)</span>
+                      <span className="text-lg font-black text-slate-900">${expectedShiftCashUSD.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Esperado en Caja (Bs.)</span>
+                      <span className="text-lg font-black text-rose-600">Bs. {expectedShiftCashBs.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PHYSICAL CASH COUNT INPUTS */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-slate-700 flex items-center gap-1.5">
+                    <Calculator size={16} className="text-emerald-600" />
+                    <span>Conteo Físico Real (Arqueo de Efectivo en Gaveta)</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Efectivo Contado ($ USD) *</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={closingCountedCashUSD}
+                          onChange={e => setClosingCountedCashUSD(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pl-7 text-base font-black text-slate-900"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Efectivo Contado (Bs.)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">Bs</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={closingCountedCashBs}
+                          onChange={e => setClosingCountedCashBs(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pl-9 text-base font-black text-slate-900"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* REALTIME DIFFERENCE STATUS */}
+                {(() => {
+                  const countedUSD = Number(closingCountedCashUSD) || 0;
+                  const diffUSD = countedUSD - expectedShiftCashUSD;
+                  const isExact = Math.abs(diffUSD) < 0.01;
+                  const isSurplus = diffUSD > 0.01;
+                  return (
+                    <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+                      isExact ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : isSurplus ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-rose-50 border-rose-200 text-rose-900'
+                    }`}>
+                      <div>
+                        <span className="text-[10px] uppercase font-black tracking-wider block">Resultado del Arqueo ($ USD)</span>
+                        <span className="font-black text-lg">
+                          {isExact ? '✨ Caja Cuadrada Exacta' : isSurplus ? `🟢 Sobrante de Caja: +$${diffUSD.toFixed(2)}` : `🔴 Faltante de Caja: -$${Math.abs(diffUSD).toFixed(2)}`}
+                        </span>
+                      </div>
+                      <div className="text-right font-mono font-bold text-sm">
+                        Diferencia: {diffUSD >= 0 ? '+' : ''}${diffUSD.toFixed(2)}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Observaciones de Cierre (Opcional)</label>
+                  <textarea
+                    value={closingNotes}
+                    onChange={e => setClosingNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Ej. Faltante aclarado con gerencia o billete deteriorado reemplazado"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0">
+                <button
+                  onClick={() => setIsClosingShiftModalOpen(false)}
+                  className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCloseShift}
+                  className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Lock size={16} />
+                  <span>Confirmar Cierre Z</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* SHIFT REPORT Z DETAILS MODAL */}
+      <AnimatePresence>
+        {viewingShiftDetails && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] max-w-xl w-full my-8 overflow-hidden shadow-2xl border border-slate-100 flex flex-col"
+            >
+              <div className="p-6 bg-black text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Receipt size={24} className="text-emerald-400" />
+                  <div>
+                    <h3 className="font-black text-lg">Reporte Z de Cierre de Turno</h3>
+                    <p className="text-xs text-slate-400">{viewingShiftDetails.shiftName}</p>
+                  </div>
+                </div>
+                <button onClick={() => setViewingShiftDetails(null)} className="text-slate-400 hover:text-white p-2">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6 font-mono text-xs text-slate-800">
+                <div className="border-b border-dashed border-slate-300 pb-4 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Apertura:</span>
+                    <span className="font-bold">{new Date(viewingShiftDetails.openedAt).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Cierre:</span>
+                    <span className="font-bold">{viewingShiftDetails.closedAt ? new Date(viewingShiftDetails.closedAt).toLocaleString() : 'En curso'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Responsable:</span>
+                    <span className="font-bold">{viewingShiftDetails.closedBy || viewingShiftDetails.openedBy}</span>
+                  </div>
+                </div>
+
+                <div className="border-b border-dashed border-slate-300 pb-4 space-y-1">
+                  <div className="font-bold text-slate-900 text-sm mb-2">Resumen de Ventas</div>
+                  <div className="flex justify-between">
+                    <span>Efectivo USD:</span>
+                    <span className="font-bold">${(viewingShiftDetails.salesSummary?.cashUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Efectivo Bs:</span>
+                    <span className="font-bold">Bs. {(viewingShiftDetails.salesSummary?.cashBs || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Pago Móvil:</span>
+                    <span className="font-bold">${(viewingShiftDetails.salesSummary?.pagoMovilUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Zelle:</span>
+                    <span className="font-bold">${(viewingShiftDetails.salesSummary?.zelleUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Punto de Venta:</span>
+                    <span className="font-bold">${(viewingShiftDetails.salesSummary?.tarjetaUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Créditos:</span>
+                    <span className="font-bold">${(viewingShiftDetails.salesSummary?.creditoUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm text-black pt-2 border-t border-slate-200">
+                    <span>Total Consolidado:</span>
+                    <span>${(viewingShiftDetails.salesSummary?.totalCollectedUSD || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
+                  <div className="font-bold text-slate-900 text-sm mb-2">Cuadre de Efectivo</div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Fondo Inicial ($):</span>
+                    <span>${(Number(viewingShiftDetails.initialCashUSD) || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Esperado en Caja ($):</span>
+                    <span>${(Number(viewingShiftDetails.expectedCashUSD) || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Contado Real ($):</span>
+                    <span>${(Number(viewingShiftDetails.actualCashUSD) || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm pt-2 border-t border-slate-200">
+                    <span>Diferencia:</span>
+                    <span className={viewingShiftDetails.differenceUSD >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                      {viewingShiftDetails.differenceUSD >= 0 ? '+' : ''}${(Number(viewingShiftDetails.differenceUSD) || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {viewingShiftDetails.closingNotes && (
+                  <div className="text-xs italic bg-amber-50 text-amber-900 p-3 rounded-xl border border-amber-200">
+                    <strong>Notas:</strong> {viewingShiftDetails.closingNotes}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+                <button
+                  onClick={() => window.print()}
+                  className="flex-1 py-3 px-4 bg-slate-900 hover:bg-black text-white rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+                >
+                  <Printer size={16} />
+                  <span>Imprimir Ticket Z</span>
+                </button>
+                <button
+                  onClick={() => setViewingShiftDetails(null)}
+                  className="py-3 px-6 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1034,6 +2434,7 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
   onApprove: () => void; 
   onReject: () => void; 
 }) {
+  const { tables } = useRestaurantData();
   const [items, setItems] = useState<any[]>([]);
 
   useEffect(() => {
@@ -1079,7 +2480,16 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
               </span>
             )}
             <span className="text-[10px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
-              {session.tableId.startsWith('delivery') ? 'Delivery' : `Mesa ${session.tableId}`}
+              {session.tableId.startsWith('delivery') 
+                ? 'Delivery' 
+                : (() => {
+                    const t = tables.find((item: any) => item.id === session.tableId);
+                    if (t) return `Mesa ${t.number}`;
+                    if (session.tableNumber) return `Mesa ${session.tableNumber}`;
+                    if (session.tableId.length < 10) return `Mesa ${session.tableId}`;
+                    return 'Mesa';
+                  })()
+              }
             </span>
           </div>
 
@@ -1103,7 +2513,19 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
             {session.customerAddress && (
               <div className="flex items-start gap-1.5 text-xs text-slate-500">
                 <MapPin size={14} className="text-slate-400 mt-0.5 shrink-0" />
-                {session.customerAddress}
+                <div>
+                  <span>{session.customerAddress}</span>
+                  {session.deliveryZoneName && (
+                    <span className="block font-bold text-[11px] text-amber-800 mt-0.5">
+                      Zona: {session.deliveryZoneName} (+${(session.deliveryFee || 0).toFixed(2)})
+                    </span>
+                  )}
+                  {session.deliveryReference && (
+                    <span className="block text-[10px] text-slate-500 italic">
+                      Ref: {session.deliveryReference}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1372,6 +2794,7 @@ function CreditApprovalCard({ session, exchangeRate, onApprove, onReject }: {
   onApprove: () => void; 
   onReject: () => void; 
 }) {
+  const { tables } = useRestaurantData();
   const client = session.pendingPayment?.creditClient || {};
   const totalAmount = session.pendingPayment?.totalUSD || session.totalAmount || 0;
 
@@ -1390,7 +2813,16 @@ function CreditApprovalCard({ session, exchangeRate, onApprove, onReject }: {
               💳 Solicitud de Crédito
             </span>
             <span className="text-[9px] font-bold text-slate-400">
-              {session.tableId.startsWith('delivery') ? 'Delivery' : `Mesa ${session.tableId}`}
+              {session.tableId.startsWith('delivery') 
+                ? 'Delivery' 
+                : (() => {
+                    const t = tables.find((item: any) => item.id === session.tableId);
+                    if (t) return `Mesa ${t.number}`;
+                    if (session.tableNumber) return `Mesa ${session.tableNumber}`;
+                    if (session.tableId.length < 10) return `Mesa ${session.tableId}`;
+                    return 'Mesa';
+                  })()
+              }
             </span>
             {session.waiterName && (
               <span className="text-[10px] bg-indigo-50 text-indigo-600 font-extrabold uppercase px-2 py-0.5 rounded-lg">

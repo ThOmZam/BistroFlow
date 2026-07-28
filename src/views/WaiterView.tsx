@@ -20,14 +20,16 @@ import {
   ExternalLink,
   Info,
   Check,
-  Star
+  Star,
+  Scissors,
+  UserCheck
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, onSnapshot, getDocs, collectionGroup, query, where, getDoc, deleteDoc } from 'firebase/firestore';
 import { logAction } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { playClickSound, playSuccessSound, playErrorSound } from '../lib/audio';
-import { Table, MenuItem, Session, CourseType, CourseStatus } from '../types';
+import { Table, MenuItem, Session, CourseType, CourseStatus, ExtraOption } from '../types';
 import { useBookmarks } from '../lib/bookmarks';
 import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
 
@@ -42,7 +44,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     course?: CourseType;
     courseStatus?: CourseStatus;
     seatNumber?: number;
+    selectedExtras?: ExtraOption[];
   }[]>([]);
+  const [selectedExtras, setSelectedExtras] = useState<ExtraOption[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [modalQty, setModalQty] = useState(1);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
@@ -128,22 +132,86 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     }
   }, [selectedTable]);
 
+  const DEFAULT_DELIVERY_ZONES = React.useMemo(() => [
+    { id: 'zone_casco_urbano', name: 'Casco Urbano / Centro', priceUSD: 2.00, coveredAreas: 'Centro, Av. Principal, Plaza Bolivar', estimatedTime: '20-30 min' },
+    { id: 'zone_norte_este', name: 'Zona Norte / Este', priceUSD: 3.50, coveredAreas: 'El Bosque, Las Chimeneas, Trigal', estimatedTime: '30-40 min' },
+    { id: 'zone_periferica', name: 'Zona Periférica / Lejana', priceUSD: 5.00, coveredAreas: 'Naguanagua, San Diego, Zonas Industriales', estimatedTime: '45-60 min' }
+  ], []);
+
+  const deliveryZones = React.useMemo(() => {
+    if (settings?.deliveryZones && settings.deliveryZones.length > 0) {
+      return settings.deliveryZones;
+    }
+    return DEFAULT_DELIVERY_ZONES;
+  }, [settings?.deliveryZones, DEFAULT_DELIVERY_ZONES]);
+
   const [isOpeningTable, setIsOpeningTable] = useState<Table | null>(null);
   const [firstAccountName, setFirstAccountName] = useState('');
+  const [isSubmittingStartSession, setIsSubmittingStartSession] = useState(false);
   const [isCreatingDelivery, setIsCreatingDelivery] = useState(false);
+  const [isSubmittingDelivery, setIsSubmittingDelivery] = useState(false);
+  const [isSendingOrder, setIsSendingOrder] = useState(false);
   const [deliveryName, setDeliveryName] = useState('');
+  const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('zone_casco_urbano');
+  const [deliveryReference, setDeliveryReference] = useState('');
+  const [deliveryPhone, setDeliveryPhone] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryPaymentMethod, setDeliveryPaymentMethod] = useState('Efectivo');
+  const [deliveryPaymentReference, setDeliveryPaymentReference] = useState('');
+  const [deliveryReceiptImage, setDeliveryReceiptImage] = useState<string | null>(null);
+
+  // Editing delivery states
+  const [isEditingDeliveryInfo, setIsEditingDeliveryInfo] = useState<any | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editDeliveryType, setEditDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
+  const [editSelectedZoneId, setEditSelectedZoneId] = useState<string>('zone_casco_urbano');
+  const [editDeliveryReference, setEditDeliveryReference] = useState('');
+  const [editCustomerPhone, setEditCustomerPhone] = useState('');
+  const [editCustomerAddress, setEditCustomerAddress] = useState('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState('Efectivo');
+  const [editPaymentReference, setEditPaymentReference] = useState('');
+  const [editDeliveryReceiptImage, setEditDeliveryReceiptImage] = useState<string | null>(null);
 
   const createDelivery = async () => {
+    if (isSubmittingDelivery) return;
     if (!deliveryName.trim()) return;
+    if (deliveryPaymentMethod !== 'Efectivo') {
+      if (!deliveryPaymentReference.trim()) {
+        alert('Por favor ingresa la referencia de pago.');
+        return;
+      }
+      if (!deliveryReceiptImage) {
+        alert('Es obligatorio adjuntar la captura o foto del comprobante de pago.');
+        return;
+      }
+    }
+
+    setIsSubmittingDelivery(true);
     try {
+      const activeZone = deliveryZones.find(z => z.id === selectedZoneId) || deliveryZones[0];
+      const isDeliveryMode = deliveryType === 'delivery';
+      const fee = isDeliveryMode ? (activeZone?.priceUSD || 0) : 0;
+
       const docRef = await addDoc(collection(db, 'sessions'), {
         tableId: 'delivery',
         type: 'delivery',
         customerName: deliveryName.trim(),
+        deliveryType: deliveryType,
+        customerPhone: deliveryPhone.trim(),
+        customerAddress: isDeliveryMode ? deliveryAddress.trim() : 'Retiro en Local (Pick Up)',
+        deliveryZoneId: isDeliveryMode ? (activeZone?.id || '') : '',
+        deliveryZoneName: isDeliveryMode ? (activeZone?.name || '') : '',
+        deliveryFee: fee,
+        deliveryReference: isDeliveryMode ? deliveryReference.trim() : '',
+        paymentMethod: deliveryPaymentMethod,
+        paymentReference: deliveryPaymentReference.trim(),
+        paymentReceiptImage: deliveryPaymentMethod === 'Efectivo' ? null : deliveryReceiptImage,
+        paymentStatus: 'pending',
         orderNumber: Math.floor(1000 + Math.random() * 9000),
         startTime: new Date().toISOString(),
         status: 'active',
-        totalAmount: 0,
+        totalAmount: fee,
         accounts: [{ id: 'default', name: deliveryName.trim(), status: 'active' }],
         waiterId: currentUser?.employeeId || localStorage.getItem('demo_employee_id') || 'fallback-waiter',
         waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero',
@@ -151,18 +219,27 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       });
       
       const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
-      await logAction('order', waiterName, 'Creó delivery manual', `Para: ${deliveryName.trim()}`);
+      await logAction('order', waiterName, 'Creó delivery manual', `Para: ${deliveryName.trim()} | Tipo: ${deliveryType === 'delivery' ? 'Delivery' : 'Pick Up'} | Fee: $${fee.toFixed(2)}`);
 
       setSelectedTable({ id: 'delivery-' + docRef.id, number: deliveryName.trim(), capacity: 1, status: 'occupied' });
       setActiveAccountId('default');
       setIsCreatingDelivery(false);
       setDeliveryName('');
+      setDeliveryPhone('');
+      setDeliveryAddress('');
+      setDeliveryReference('');
+      setDeliveryPaymentMethod('Efectivo');
+      setDeliveryPaymentReference('');
+      setDeliveryReceiptImage(null);
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsSubmittingDelivery(false);
     }
   };
 
   const startSession = async (table: Table) => {
+    if (isSubmittingStartSession) return;
     if (!firstAccountName.trim()) return;
     
     // Prevent duplicate sessions
@@ -173,6 +250,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       return;
     }
 
+    setIsSubmittingStartSession(true);
     try {
       const docRef = await addDoc(collection(db, 'sessions'), {
         tableId: table.id,
@@ -198,6 +276,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     } catch (err) {
       console.error(err);
       alert('Error al abrir la mesa');
+    } finally {
+      setIsSubmittingStartSession(false);
     }
   };
 
@@ -206,6 +286,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [selectedCourseStatus, setSelectedCourseStatus] = useState<CourseStatus>('fired');
   const [selectedSeatNumber, setSelectedSeatNumber] = useState<number>(1);
 
+  const getCartEntryPrice = (entry: { item: MenuItem; selectedExtras?: ExtraOption[] }) => {
+    const extrasTotal = (entry.selectedExtras || []).reduce((sum, ext) => sum + ext.price, 0);
+    return entry.item.price + extrasTotal;
+  };
+
   const addToCart = (
     item: MenuItem, 
     qty: number = 1, 
@@ -213,7 +298,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     excludedIngredientIds: string[] = [],
     course: CourseType = 'main',
     courseStatus: CourseStatus = 'fired',
-    seatNumber: number = 1
+    seatNumber: number = 1,
+    selectedExtras: ExtraOption[] = []
   ) => {
     playClickSound();
     setCart(prev => {
@@ -223,7 +309,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         i.course === course &&
         i.courseStatus === courseStatus &&
         i.seatNumber === seatNumber &&
-        JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds)
+        JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
+        JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras)
       );
       if (existing) {
         return prev.map(i => 
@@ -232,20 +319,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
            i.course === course &&
            i.courseStatus === courseStatus &&
            i.seatNumber === seatNumber &&
-           JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds))
+           JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
+           JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras))
             ? { ...i, qty: i.qty + qty }
             : i
         );
       }
-      return [...prev, { item, qty, note, excludedIngredientIds, course, courseStatus, seatNumber }];
+      return [...prev, { item, qty, note, excludedIngredientIds, course, courseStatus, seatNumber, selectedExtras }];
     });
   };
 
   const sendOrder = async () => {
-    if (!selectedTable || cart.length === 0) return;
+    if (isSendingOrder || !selectedTable || cart.length === 0) return;
     const session = getSessionForTable(selectedTable.id);
     if (!session) return;
 
+    setIsSendingOrder(true);
     try {
       const accountId = activeAccountId;
       const ordersRef = collection(db, 'sessions', session.id, 'accounts', accountId, 'orders');
@@ -255,10 +344,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       await logAction('order', waiterName, 'Envió un pedido a cocina', `Mesa ${selectedTable.number}: ${itemNames}`);
 
       for (const entry of cart) {
+        const itemPrice = getCartEntryPrice(entry);
         await addDoc(ordersRef, {
           menuItemId: entry.item.id,
           itemName: entry.item.name,
-          price: entry.item.price,
+          price: itemPrice,
           quantity: entry.qty,
           status: 'pending',
           timestamp: new Date().toISOString(),
@@ -267,6 +357,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           courseStatus: entry.courseStatus || 'fired',
           seatNumber: entry.seatNumber || 1,
           excludedIngredientIds: entry.excludedIngredientIds || [],
+          extras: entry.selectedExtras || [],
           batchId,
           tableName: 'MESA ' + selectedTable.number,
           waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'
@@ -279,6 +370,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     } catch (err) {
       console.error(err);
       playErrorSound();
+    } finally {
+      setIsSendingOrder(false);
     }
   };
 
@@ -291,6 +384,188 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [mixedPayments, setMixedPayments] = useState<{ id: string, method: string, amountUSD: number, currency: string, reference: string, receiptImage: string | null }[]>([]);
   const [currentMixtoCurrency, setCurrentMixtoCurrency] = useState('Bs');
   const [currentMixedAmount, setCurrentMixedAmount] = useState('');
+  const [includeTip, setIncludeTip] = useState(true);
+
+  const servicePercent = settings?.serviceChargePercent || 10;
+
+  // Itemized Split & Partial Payment States
+  const [isPartialModalOpen, setIsPartialModalOpen] = useState(false);
+  const [partialItemQuantities, setPartialItemQuantities] = useState<{ [orderId: string]: number }>({});
+  const [partialPayerName, setPartialPayerName] = useState('');
+  const [isProcessingPartialPayment, setIsProcessingPartialPayment] = useState(false);
+  const [partialPaymentStep, setPartialPaymentStep] = useState<'select' | 'pay'>('select');
+
+  const initPartialModal = () => {
+    const initialQtyMap: { [orderId: string]: number } = {};
+    activeOrders.forEach(o => {
+      initialQtyMap[o.id] = 0;
+    });
+    setPartialItemQuantities(initialQtyMap);
+    setPartialPayerName('');
+    setPartialPaymentStep('select');
+    setIsPartialModalOpen(true);
+  };
+
+  const partialSubtotal = activeOrders.reduce((sum, order) => {
+    const qty = partialItemQuantities[order.id] || 0;
+    return sum + (order.price || 0) * qty;
+  }, 0);
+
+  const partialTip = includeTip ? partialSubtotal * (servicePercent / 100) : 0;
+  const partialTotal = partialSubtotal + partialTip;
+  const partialTotalSelectedItems = Object.values(partialItemQuantities).reduce((a: number, b: number) => a + b, 0);
+
+  const handleMoveSelectedToNewPerson = async () => {
+    if (!selectedTable || partialTotalSelectedItems === 0) return;
+    const personName = partialPayerName.trim() || `Persona ${Date.now().toString().slice(-4)}`;
+    const session = getSessionForTable(selectedTable.id);
+    if (!session) return;
+
+    try {
+      const newAccId = `acc_${Date.now()}`;
+      const currentAccounts = session.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
+      const updatedAccounts = [...currentAccounts, { id: newAccId, name: personName, status: 'active' }];
+
+      await updateDoc(doc(db, 'sessions', session.id), { accounts: updatedAccounts });
+
+      for (const order of activeOrders) {
+        const qtyToMove = partialItemQuantities[order.id] || 0;
+        if (qtyToMove <= 0) continue;
+
+        const currentOrderRef = doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', order.id);
+        const newAccOrdersRef = collection(db, 'sessions', session.id, 'accounts', newAccId, 'orders');
+
+        const cleanOrderData = {
+          menuItemId: order.menuItemId || '',
+          itemName: order.itemName || '',
+          price: order.price || 0,
+          quantity: qtyToMove,
+          status: order.status || 'pending',
+          timestamp: order.timestamp || new Date().toISOString(),
+          note: order.note || '',
+          course: order.course || 'main',
+          courseStatus: order.courseStatus || 'fired',
+          seatNumber: order.seatNumber || 1,
+          excludedIngredientIds: order.excludedIngredientIds || [],
+          extras: order.extras || [],
+          batchId: order.batchId || '',
+          tableName: order.tableName || '',
+          waiterName: order.waiterName || ''
+        };
+
+        if (qtyToMove >= order.quantity) {
+          await addDoc(newAccOrdersRef, cleanOrderData);
+          await deleteDoc(currentOrderRef);
+        } else {
+          await addDoc(newAccOrdersRef, cleanOrderData);
+          await updateDoc(currentOrderRef, { quantity: order.quantity - qtyToMove });
+        }
+      }
+
+      const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+      await logAction('order', waiterName, 'Separó consumo por persona', `Mesa ${selectedTable.number}: Se movieron ${partialTotalSelectedItems} ítems a la cuenta de ${personName}`);
+
+      playSuccessSound();
+      setIsPartialModalOpen(false);
+      setActiveAccountId(newAccId);
+      alert(`✅ ${partialTotalSelectedItems} ítems movidos a la cuenta de ${personName}.`);
+    } catch (err) {
+      console.error('Error moving selected items to new person:', err);
+      playErrorSound();
+    }
+  };
+
+  const handleProcessPartialPayment = async () => {
+    if (!selectedTable || partialTotal <= 0) return;
+    const session = getSessionForTable(selectedTable.id);
+    if (!session) return;
+
+    const payerName = partialPayerName.trim() || 'Comensal';
+
+    if (paymentMethod !== 'divisa' && paymentMethod !== 'punto' && paymentMethod !== 'credito') {
+      if (!paymentRef.trim()) {
+        alert('Por favor, ingresa el número de referencia del pago.');
+        return;
+      }
+      if (!receiptImage) {
+        alert('Es obligatorio subir la imagen o captura del comprobante de pago.');
+        return;
+      }
+    }
+
+    try {
+      setIsProcessingPartialPayment(true);
+      const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+
+      // 1. Deduct or delete paid quantities
+      for (const order of activeOrders) {
+        const paidQty = partialItemQuantities[order.id] || 0;
+        if (paidQty <= 0) continue;
+
+        const orderRef = doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', order.id);
+        if (paidQty >= order.quantity) {
+          await deleteDoc(orderRef);
+        } else {
+          await updateDoc(orderRef, { quantity: order.quantity - paidQty });
+        }
+      }
+
+      // 2. Add transaction record
+      await addDoc(collection(db, 'transactions'), {
+        sessionId: session.id,
+        accountId: activeAccountId,
+        amount: partialTotal,
+        method: paymentMethod,
+        reference: paymentRef || null,
+        timestamp: new Date().toISOString(),
+        approvedBy: waiterName,
+        clientName: payerName,
+        isPartialPayment: true
+      });
+
+      // 3. Log action
+      await logAction(
+        'finance',
+        waiterName,
+        `Procesó pago parcial por consumo ($${partialTotal.toFixed(2)})`,
+        `Mesa ${selectedTable.number} - Cliente: ${payerName} - Método: ${paymentMethod.toUpperCase()}`
+      );
+
+      // 4. Check remaining orders across session accounts
+      let remainingOrdersCount = 0;
+      const currentAccounts = session.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
+      for (const acc of currentAccounts) {
+        const oSnap = await getDocs(collection(db, 'sessions', session.id, 'accounts', acc.id, 'orders'));
+        remainingOrdersCount += oSnap.size;
+      }
+
+      if (remainingOrdersCount === 0) {
+        const updatedAccounts = currentAccounts.map((a: any) => ({ ...a, status: 'paid' }));
+        await updateDoc(doc(db, 'sessions', session.id), {
+          status: 'completed',
+          paymentStatus: 'validated',
+          accounts: updatedAccounts
+        });
+        if (session.tableId && session.tableId !== 'delivery' && !session.tableId.startsWith('delivery')) {
+          await updateDoc(doc(db, 'tables', selectedTable.id), { status: 'free' });
+        }
+        alert(`🎉 ¡Pago de $${partialTotal.toFixed(2)} por ${payerName} procesado! Todos los consumos de la mesa fueron saldados. Mesa liberada.`);
+        setSelectedTable(null);
+      } else {
+        alert(`✅ Pago de $${partialTotal.toFixed(2)} por ${payerName} procesado con éxito. Se restaron los ítems de la cuenta de la mesa.`);
+      }
+
+      playSuccessSound();
+      setIsPartialModalOpen(false);
+      setReceiptImage(null);
+      setPaymentRef('');
+    } catch (err) {
+      console.error('Error processing partial payment:', err);
+      playErrorSound();
+    } finally {
+      setIsProcessingPartialPayment(false);
+    }
+  };
 
   // Delivery view modal states
   const [viewingDeliveryInfo, setViewingDeliveryInfo] = useState<Session | null>(null);
@@ -427,15 +702,31 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         }
       }
 
-      if ((paymentMethod === 'pago_movil' || paymentMethod === 'zelle') && !paymentRef.trim()) {
-        alert('Por favor, ingresa el número de referencia del pago.');
-        return;
+      // Enforce reference & receipt image for all electronic payment methods (online and on-site)
+      if (paymentMethod !== 'efectivo' && paymentMethod !== 'credito' && paymentMethod !== 'mixto') {
+        if (!paymentRef.trim()) {
+          alert('Por favor, ingresa el número de referencia del pago.');
+          return;
+        }
+        if (!receiptImage) {
+          alert('Es obligatorio subir la imagen o captura del comprobante de pago.');
+          return;
+        }
       }
 
-      // Mandatory receipt for Delivery/Pickup if Zelle/Pago Movil, and optional for Dine-in
-      if ((paymentMethod === 'pago_movil' || paymentMethod === 'zelle') && isDelivery && !receiptImage) {
-        alert('Para pedidos de Delivery / Pickup, es obligatorio subir la imagen del comprobante de pago.');
-        return;
+      if (paymentMethod === 'mixto') {
+        const hasDigitalInMixed = mixedPayments.some(p => p.method === 'pago_movil' || p.method === 'zelle' || p.method === 'punto' || p.method === 'transferencia');
+        if (hasDigitalInMixed) {
+          const missingRef = mixedPayments.some(p => (p.method === 'pago_movil' || p.method === 'zelle' || p.method === 'punto' || p.method === 'transferencia') && !p.reference?.trim());
+          if (missingRef) {
+            alert('Por favor, ingresa la referencia para cada método de pago electrónico en el pago mixto.');
+            return;
+          }
+          if (!receiptImage) {
+            alert('Es obligatorio subir la imagen o captura del comprobante de pago para la transacción.');
+            return;
+          }
+        }
       }
 
       const accounts = session.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
@@ -755,7 +1046,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       setCreditEmail('');
       setAdminPin('');
       setAdminPinError('');
-      setIncludeTip(false);
+      setIncludeTip(true);
       setNonCreditClientMode('none');
                   setMixedPayments([]);
                   setCurrentMixedAmount('');
@@ -835,14 +1126,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     }
   };
 
-  const [includeTip, setIncludeTip] = useState(true);
   const activeOrdersTotal = activeOrders.reduce((acc, o) => {
     const itemPrice = o.price !== undefined ? o.price : (menu.find(m => m.name === o.itemName)?.price || 0);
     return acc + (itemPrice * (o.quantity || 1));
   }, 0);
   
   const showServiceCharge = settings?.serviceChargeEnabled !== false && settings?.suggestedTipsEnabled !== false;
-  const servicePercent = showServiceCharge ? (settings?.serviceChargePercent !== undefined ? settings.serviceChargePercent : 10) : 0;
   const tipAmount = includeTip && showServiceCharge ? activeOrdersTotal * (servicePercent / 100) : 0;
   const finalTotal = activeOrdersTotal + tipAmount;
 
@@ -1080,7 +1369,27 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 return (
                   <div className="mx-6 mt-4 p-5 bg-amber-50/70 border border-amber-100 rounded-3xl text-xs space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-900 uppercase tracking-wider text-[10px]">Información del Pedido</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-amber-900 uppercase tracking-wider text-[10px]">Información del Pedido</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingDeliveryInfo(session);
+                            setEditCustomerName(session.customerName || '');
+                            setEditDeliveryType(session.deliveryType || 'delivery');
+                            setEditSelectedZoneId(session.deliveryZoneId || deliveryZones[0]?.id || '');
+                            setEditDeliveryReference(session.deliveryReference || '');
+                            setEditCustomerPhone(session.customerPhone || '');
+                            setEditCustomerAddress(session.customerAddress || '');
+                            setEditPaymentMethod(session.paymentMethod || 'Efectivo');
+                            setEditPaymentReference(session.paymentReference || '');
+                          }}
+                          className="text-[10px] text-amber-700 hover:text-amber-950 hover:underline font-extrabold flex items-center gap-0.5"
+                          title="Editar información de contacto y entrega"
+                        >
+                          ✏️ Editar
+                        </button>
+                      </div>
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
                         session.paymentStatus === 'validated' 
                           ? 'bg-emerald-100 text-emerald-800' 
@@ -1108,13 +1417,23 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="text-slate-700">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Tipo / Dirección</span>
+                    <div className="text-slate-700 space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Tipo de Entrega</span>
+                        {session.deliveryType === 'delivery' && (
+                          <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                            Envío: ${((session as any).deliveryFee || 0).toFixed(2)} USD
+                          </span>
+                        )}
+                      </div>
                       <span className="font-bold text-slate-900 block capitalize text-xs">
-                        {session.deliveryType === 'pickup' ? 'Retiro en Local' : 'Delivery a domicilio'}
+                        {session.deliveryType === 'pickup' ? '🛍️ Retiro en Local' : `🛵 Delivery (${(session as any).deliveryZoneName || 'Zona Estándar'})`}
                       </span>
                       {session.customerAddress && (
-                        <span className="text-slate-600 block mt-0.5 text-xs">{session.customerAddress}</span>
+                        <span className="text-slate-700 block text-xs font-medium">📍 {session.customerAddress}</span>
+                      )}
+                      {(session as any).deliveryReference && (
+                        <span className="text-slate-500 block text-[11px] italic">Ref: {(session as any).deliveryReference}</span>
                       )}
                     </div>
 
@@ -1135,146 +1454,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               })()
             )}
 
-            {selectedTable.id.startsWith('delivery-') ? (
-              (() => {
-                const session = getSessionForTable(selectedTable.id);
-                if (!session) {
-                  return (
-                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400">
-                      <AlertCircle size={32} className="mb-2" />
-                      <p>No se encontró la sesión del pedido.</p>
-                    </div>
-                  );
-                }
-
-                const totalUSD = activeOrders.reduce((sum, o) => sum + (o.price * o.quantity), 0);
-                const totalBs = totalUSD * exchangeRate;
-
-                return (
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* Compact, clean summary of delivery items */}
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                      
-                      {/* Products List */}
-                      <div className="space-y-3">
-                        <span className="text-[10px] uppercase font-black tracking-widest text-slate-400">Productos Solicitados</span>
-                        <div className="bg-slate-50 border border-slate-100/80 rounded-3xl p-5 space-y-3">
-                          {activeOrders.map(order => (
-                            <div key={order.id} className="flex justify-between items-center text-xs pb-3 border-b border-slate-200/40 last:border-0 last:pb-0">
-                              <div>
-                                <span className="font-extrabold text-slate-900">{order.quantity}x</span>{' '}
-                                <span className="font-medium text-slate-700">{order.itemName}</span>
-                                {order.status && (
-                                  <span className={`ml-2 text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${
-                                    order.status === 'ready' ? 'bg-emerald-100 text-emerald-800' :
-                                    order.status === 'preparing' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-600'
-                                  }`}>
-                                    {order.status === 'ready' ? 'Listo' : order.status === 'preparing' ? 'En cocina' : 'Pendiente'}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="font-mono font-bold text-slate-900">
-                                ${(order.price * order.quantity).toFixed(2)}
-                              </span>
-                            </div>
-                          ))}
-
-                          {activeOrders.length === 0 && (
-                            <p className="text-xs text-slate-400 italic text-center py-2">Sin productos agregados todavía.</p>
-                          )}
-
-                          {activeOrders.length > 0 && (
-                            <div className="pt-4 border-t border-slate-200/60 flex justify-between items-end">
-                              <div>
-                                <span className="text-[9px] text-slate-400 uppercase font-black block">Total del Pedido</span>
-                                <span className="text-xl font-light text-slate-900">
-                                  ${totalUSD.toFixed(2)}
-                                </span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-[9px] text-slate-400 uppercase font-black block">En Bolívares</span>
-                                <span className="text-sm font-bold text-slate-700">
-                                  Bs. {totalBs.toFixed(2)}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Info alert */}
-                      <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex gap-2 text-[11px] text-slate-500 leading-relaxed">
-                        <Info size={14} className="text-slate-400 shrink-0 mt-0.5" />
-                        <span>Este pedido fue realizado por {session.customerName}. El pago se encuentra en estado <strong className="text-slate-700 capitalize">"{session.paymentStatus === 'validated' ? 'validado' : 'esperando validación'}"</strong>. Una vez entregado al cliente, presiona el botón inferior para cerrar este pedido permanentemente.</span>
-                      </div>
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="p-6 bg-white border-t border-slate-100 flex flex-col gap-2">
-                      <button 
-                        onClick={async () => {
-                          try {
-                            // Mark as completed
-                            await updateDoc(doc(db, 'sessions', session.id), {
-                              status: 'completed',
-                              paymentStatus: 'validated', // automatically validate if delivered
-                              'payment.totalUSD': totalUSD,
-                              'payment.timestamp': new Date().toISOString()
-                            });
-
-                            // Mark all orders as delivered
-                            const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
-                            const orderSnaps = await getDocs(ordersRef);
-                            const promises = orderSnaps.docs.map(orderDoc => {
-                              return updateDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id), {
-                                status: 'delivered'
-                              });
-                            });
-                            await Promise.all(promises);
-
-                            // Write audit log
-                            const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
-                            await logAction('order', waiterName, 'Entregó y cerró delivery', `Pedido de ${session.customerName} - Total: $${totalUSD.toFixed(2)}`);
-
-                            setSelectedTable(null);
-                          } catch (err) {
-                            console.error('Error closing delivery session:', err);
-                            alert('Error al marcar como entregado.');
-                          }
-                        }}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.01] shadow-lg shadow-emerald-600/10"
-                      >
-                        <CheckCircle2 size={18} />
-                        Marcar como Entregado
-                      </button>
-
-                      <button 
-                        onClick={async () => {
-                          if (confirm('¿Está seguro de que desea cancelar este pedido?')) {
-                            try {
-                              await updateDoc(doc(db, 'sessions', session.id), {
-                                status: 'cancelled'
-                              });
-
-                              // Write audit log
-                              const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
-                              await logAction('order', waiterName, 'Canceló delivery', `Pedido de ${session.customerName}`);
-
-                              setSelectedTable(null);
-                            } catch (err) {
-                              console.error('Error cancelling delivery session:', err);
-                            }
-                          }
-                        }}
-                        className="w-full bg-rose-50 hover:bg-rose-100 text-rose-600 p-3 rounded-xl text-xs font-bold transition-all"
-                      >
-                        Cancelar Pedido
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()
-            ) : !getSessionForTable(selectedTable.id) ? (
+            {!getSessionForTable(selectedTable.id) ? (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
                   <Users className="text-slate-300" size={32} />
@@ -1334,54 +1514,6 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         title="Dividir cuenta / Agregar Persona"
                       >
                         <Plus size={14} /> + Persona
-                      </button>
-
-                      {/* Feature: 1-Click Bill Split by Seat */}
-                      <button
-                        onClick={async () => {
-                          if (!selectedTable) return;
-                          const session = getSessionForTable(selectedTable.id);
-                          if (!session) return;
-
-                          try {
-                            const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
-                            const snap = await getDocs(ordersRef);
-                            const orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-                            const seats = [...new Set(orders.map((o: any) => o.seatNumber || 1))].sort((a, b) => a - b);
-                            if (seats.length <= 1) {
-                              alert('Se requiere registrar items con al menos 2 asientos distintos para dividir automáticamente.');
-                              return;
-                            }
-
-                            const newAccounts = seats.map(s => ({
-                              id: `seat_${s}`,
-                              name: `Asiento ${s}`,
-                              status: 'active'
-                            }));
-
-                            await updateDoc(doc(db, 'sessions', session.id), { accounts: newAccounts });
-
-                            for (const orderDoc of snap.docs) {
-                              const o = orderDoc.data();
-                              const seat = o.seatNumber || 1;
-                              const targetAccId = `seat_${seat}`;
-
-                              await addDoc(collection(db, 'sessions', session.id, 'accounts', targetAccId, 'orders'), o);
-                              await deleteDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id));
-                            }
-
-                            playSuccessSound();
-                            alert(`✅ Cuenta dividida en ${seats.length} asientos automáticamente.`);
-                          } catch (err) {
-                            console.error('Error splitting by seat:', err);
-                            playErrorSound();
-                          }
-                        }}
-                        className="text-xs bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/80 px-3 py-1.5 rounded-xl font-extrabold flex items-center gap-1 transition-all shadow-sm"
-                        title="Dividir la cuenta por número de asiento registrado"
-                      >
-                        ⚡ Dividir por Asiento
                       </button>
                     </div>
                   </div>
@@ -1451,7 +1583,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-auto p-3 sm:p-4 grid grid-cols-2 gap-3 sm:gap-4">
+                    <div className="flex-1 overflow-auto p-3 sm:p-4 grid grid-cols-2 gap-3 sm:gap-4 content-start">
                       {filteredMenu.map(item => {
                         const stockAlert = getMenuItemStockAlert(item, ingredients);
                         const isOutOfStock = stockAlert.status === 'out_of_stock';
@@ -1459,7 +1591,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           <button
                             key={item.id}
                             disabled={isOutOfStock}
-                            onClick={() => { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); }}
+                            onClick={() => { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); setSelectedExtras([]); }}
                             className={`group border border-slate-100 hover:border-black rounded-2xl p-2.5 sm:p-3 text-left transition-all duration-200 flex flex-col hover:shadow-md bg-white relative ${
                               isOutOfStock ? 'opacity-55 cursor-not-allowed' : ''
                             }`}
@@ -1543,6 +1675,18 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             <div key={index} className="flex items-start justify-between text-xs group gap-2">
                               <span className="text-slate-500 block">
                                 <span className="font-bold text-black">{entry.qty}x</span> {entry.item.name}
+                                
+                                {/* Selected Extras list */}
+                                {entry.selectedExtras && entry.selectedExtras.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-0.5">
+                                    {entry.selectedExtras.map((extra, eIdx) => (
+                                      <span key={eIdx} className="text-[8px] bg-indigo-50 border border-indigo-100/30 text-indigo-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wide">
+                                        + {extra.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
                                 {entry.excludedIngredientIds && entry.excludedIngredientIds.length > 0 && (
                                   <span className="flex flex-wrap gap-1 mt-0.5">
                                     {entry.excludedIngredientIds.map(id => {
@@ -1561,7 +1705,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                 )}
                               </span>
                               <div className="flex items-center gap-2.5 flex-shrink-0">
-                                <span className="font-mono text-[11px]">${(entry.item.price * entry.qty).toFixed(2)}</span>
+                                <span className="font-mono text-[11px]">${(getCartEntryPrice(entry) * entry.qty).toFixed(2)}</span>
                                 <button
                                   onClick={() => setCart(cart.filter((_, i) => i !== index))}
                                   className="text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1577,22 +1721,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         <div className="flex items-center justify-between mb-2.5 pt-1">
                           <span className="font-bold text-xs text-slate-700">Total Nuevo Pedido</span>
                           <div className="text-right flex items-baseline gap-1.5">
-                            <span className="text-base font-black text-slate-950">${cart.reduce((acc, c) => acc + c.item.price * c.qty, 0).toFixed(2)}</span>
-                            <span className="text-xs text-slate-400 font-bold">Bs. {(cart.reduce((acc, c) => acc + c.item.price * c.qty, 0) * exchangeRate).toFixed(0)}</span>
+                            <span className="text-base font-black text-slate-950">${cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0).toFixed(2)}</span>
+                            <span className="text-xs text-slate-400 font-bold">Bs. {(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0) * exchangeRate).toFixed(0)}</span>
                           </div>
                         </div>
 
                         <button 
-                          disabled={cart.length === 0}
+                          disabled={cart.length === 0 || isSendingOrder}
                           onClick={sendOrder}
                           className={`w-full text-white py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                            cart.length > 0 
-                              ? 'bg-black hover:bg-slate-800 shadow-lg shadow-black/10 hover:scale-[1.01]' 
+                            cart.length > 0 && !isSendingOrder
+                              ? 'bg-black hover:bg-slate-800 shadow-lg shadow-black/10 hover:scale-[1.01] cursor-pointer' 
                               : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                           }`}
                         >
                           <ShoppingBag size={14} />
-                          Enviar a Cocina
+                          {isSendingOrder ? 'Enviando a Cocina...' : 'Enviar a Cocina'}
                         </button>
                       </div>
                     )}
@@ -1600,58 +1744,6 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 ) : (
                   <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden">
                     <div className="flex-1 overflow-auto p-3.5 sm:p-4">
-                      {/* TOAST FEATURE: Course Firing Bar */}
-                      <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3 mb-4 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black text-amber-900 uppercase tracking-wider flex items-center gap-1">
-                            <span>🔥 Pase por Tiempos (Pase de Cocina)</span>
-                          </span>
-                          {activeOrders.some(o => o.courseStatus === 'hold') && (
-                            <span className="text-[9px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded-full animate-pulse">
-                              Platos en Espera ⏳
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={async () => {
-                              if (!selectedTable) return;
-                              const session = getSessionForTable(selectedTable.id);
-                              if (!session) return;
-                              const ordersRef = collection(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders');
-                              const snap = await getDocs(ordersRef);
-                              const holds = snap.docs.filter(d => d.data().courseStatus === 'hold' && d.data().course === 'main');
-                              for (const d of holds) {
-                                await updateDoc(doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', d.id), { courseStatus: 'fired' });
-                              }
-                              playSuccessSound();
-                              alert('🔥 Platos Fuertes marchados a cocina.');
-                            }}
-                            className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1"
-                          >
-                            🔥 Marchar Fuertes
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (!selectedTable) return;
-                              const session = getSessionForTable(selectedTable.id);
-                              if (!session) return;
-                              const ordersRef = collection(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders');
-                              const snap = await getDocs(ordersRef);
-                              const holds = snap.docs.filter(d => d.data().courseStatus === 'hold' && d.data().course === 'dessert');
-                              for (const d of holds) {
-                                await updateDoc(doc(db, 'sessions', session.id, 'accounts', activeAccountId, 'orders', d.id), { courseStatus: 'fired' });
-                              }
-                              playSuccessSound();
-                              alert('🍰 Postres marchados a cocina.');
-                            }}
-                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-3 py-1.5 rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-1"
-                          >
-                            🍰 Marchar Postres
-                          </button>
-                        </div>
-                      </div>
-
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
                         <h4 className="font-bold text-xs sm:text-sm mb-3 flex justify-between uppercase tracking-wider text-slate-800">
                           <span>Items Registrados</span>
@@ -1660,8 +1752,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         <div className="space-y-3">
                           {activeOrders.map(order => {
                             const itemPrice = order.price !== undefined ? order.price : (menu.find(m => m.name === order.itemName)?.price || 0);
+                            const menuItem = menu.find(m => m.id === order.menuItemId || m.name === order.itemName);
+                            const prepTime = menuItem?.preparationTime;
+                            const orderElapsed = order.timestamp ? Math.max(0, Math.floor((Date.now() - new Date(order.timestamp).getTime()) / 60000)) : 0;
+                            const isDelayed = prepTime && orderElapsed > prepTime && (order.status === 'pending' || order.status === 'preparing');
                             return (
-                            <div key={order.id} className="flex justify-between items-start text-xs sm:text-sm border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
+                            <div key={order.id} className={`flex justify-between items-start text-xs sm:text-sm border-b border-slate-50 pb-2.5 last:border-0 last:pb-0 p-1.5 rounded-lg transition-colors ${isDelayed ? 'bg-rose-50/60 border-rose-100' : ''}`}>
                               <div className="flex flex-col flex-1 pr-2">
                                 <span className="font-semibold text-slate-900"><span className="font-bold text-black">{order.quantity}x</span> {order.itemName}</span>
                                 
@@ -1718,6 +1814,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                   }`}>
                                     {order.status === 'ready' ? 'Listo 🔔' : order.status === 'preparing' ? 'En cocina 🍳' : order.status === 'delivered' ? 'Entregado ✓' : 'Pendiente ⏳'}
                                   </span>
+
+                                  {prepTime ? (
+                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+                                      isDelayed 
+                                        ? 'bg-rose-100 text-rose-700 border border-rose-300 animate-pulse' 
+                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                    }`}>
+                                      ⏱️ {prepTime}m
+                                    </span>
+                                  ) : null}
+
+                                  {isDelayed && (
+                                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white animate-pulse">
+                                      ⚠️ Retrasado (+{orderElapsed - prepTime}m)
+                                    </span>
+                                  )}
 
                                   {order.status === 'ready' && (
                                     <button
@@ -1784,46 +1896,127 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     </div>
 
                     <div className="p-3.5 sm:p-4 bg-white border-t border-slate-100 flex flex-col gap-2 shrink-0">
-                      {activeOrders.length > 0 ? (
-                        <button 
-                          onClick={() => setIsPaying(true)}
-                          className="w-full bg-black text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-black/10"
-                        >
-                          <Receipt size={18} />
-                          Cerrar Mesa y Pagar
-                        </button>
-                      ) : (
-                        <button 
-                          onClick={async () => {
-                            if (!selectedTable) return;
-                            const session = getSessionForTable(selectedTable.id);
-                            if (!session) return;
-                            
-                            // Cancelar mesa sin consumo
-                            await updateDoc(doc(db, 'sessions', session.id), { status: 'cancelled' });
-                            
-                            // Close any ghost sessions for this table just in case
-                            const ghostSessions = activeSessions.filter(s => s.tableId === session.tableId && s.id !== session.id);
-                            for (const ghost of ghostSessions) {
-                              await updateDoc(doc(db, 'sessions', ghost.id), { status: 'cancelled' }).catch(console.error);
-                            }
-                            
-                            if (!selectedTable.id.startsWith('delivery-')) {
-                              await updateDoc(doc(db, 'tables', selectedTable.id), { status: 'free' });
-                            }
+                      {selectedTable.id.startsWith('delivery-') ? (
+                        <>
+                          {activeOrders.length > 0 ? (
+                            <>
+                              <button 
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const session = getSessionForTable(selectedTable.id);
+                                    if (!session) return;
+                                    
+                                    // Mark as completed
+                                    await updateDoc(doc(db, 'sessions', session.id), {
+                                      status: 'completed',
+                                      paymentStatus: 'validated', // automatically validate if delivered
+                                      'payment.totalUSD': finalTotal,
+                                      'payment.timestamp': new Date().toISOString()
+                                    });
 
-                            // Write audit log
-                            const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
-                            await logAction('order', waiterName, 'Canceló mesa (sin consumo)', `Mesa ${selectedTable.number}`);
-                            
-                            setSelectedTable(null);
-                            setActiveTab('menu');
-                          }}
-                          className="w-full bg-rose-50 text-rose-600 p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:bg-rose-100"
-                        >
-                          <X size={18} />
-                          Cancelar Mesa (Sin consumo)
-                        </button>
+                                    // Mark all orders as delivered
+                                    const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
+                                    const orderSnaps = await getDocs(ordersRef);
+                                    const promises = orderSnaps.docs.map(orderDoc => {
+                                      return updateDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id), {
+                                        status: 'delivered'
+                                      });
+                                    });
+                                    await Promise.all(promises);
+
+                                    const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+                                    await logAction('order', waiterName, 'Entregó y cerró delivery', `Pedido de ${session.customerName} - Total: $${finalTotal.toFixed(2)}`);
+
+                                    setSelectedTable(null);
+                                    alert('✅ Pedido entregado, cobrado y cerrado con éxito.');
+                                  } catch (err) {
+                                    console.error('Error closing delivery session:', err);
+                                    alert('Error al marcar como entregado.');
+                                  }
+                                }}
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-emerald-600/10"
+                              >
+                                <CheckCircle2 size={18} />
+                                Marcar como Entregado y Cerrar
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => setIsPaying(true)}
+                                className="w-full bg-black text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-black/10"
+                              >
+                                <Receipt size={18} />
+                                Cerrar Pedido y Procesar Pago
+                              </button>
+                            </>
+                          ) : (
+                            <button 
+                              type="button"
+                              onClick={async () => {
+                                if (!selectedTable) return;
+                                const session = getSessionForTable(selectedTable.id);
+                                if (!session) return;
+                                
+                                await updateDoc(doc(db, 'sessions', session.id), { status: 'cancelled' });
+                                
+                                const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+                                await logAction('order', waiterName, 'Canceló delivery (sin consumo)', `Pedido de ${session.customerName}`);
+                                
+                                setSelectedTable(null);
+                                setActiveTab('menu');
+                              }}
+                              className="w-full bg-rose-50 text-rose-600 p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:bg-rose-100"
+                            >
+                              <X size={18} />
+                              Cancelar Pedido (Sin consumo)
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        activeOrders.length > 0 ? (
+                          <button 
+                            type="button"
+                            onClick={() => setIsPaying(true)}
+                            className="w-full bg-black text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-black/10"
+                          >
+                            <Receipt size={18} />
+                            Cerrar Mesa y Pagar
+                          </button>
+                        ) : (
+                          <button 
+                            type="button"
+                            onClick={async () => {
+                              if (!selectedTable) return;
+                              const session = getSessionForTable(selectedTable.id);
+                              if (!session) return;
+                              
+                              // Cancelar mesa sin consumo
+                              await updateDoc(doc(db, 'sessions', session.id), { status: 'cancelled' });
+                              
+                              // Close any ghost sessions for this table just in case
+                              const ghostSessions = activeSessions.filter(s => s.tableId === session.tableId && s.id !== session.id);
+                              for (const ghost of ghostSessions) {
+                                await updateDoc(doc(db, 'sessions', ghost.id), { status: 'cancelled' }).catch(console.error);
+                              }
+                              
+                              if (!selectedTable.id.startsWith('delivery-')) {
+                                await updateDoc(doc(db, 'tables', selectedTable.id), { status: 'free' });
+                              }
+
+                              // Write audit log
+                              const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+                              await logAction('order', waiterName, 'Canceló mesa (sin consumo)', `Mesa ${selectedTable.number}`);
+                              
+                              setSelectedTable(null);
+                              setActiveTab('menu');
+                            }}
+                            className="w-full bg-rose-50 text-rose-600 p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:bg-rose-100"
+                          >
+                            <X size={18} />
+                            Cancelar Mesa (Sin consumo)
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -1838,17 +2031,21 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Creating Delivery Modal */}
       <AnimatePresence>
         {isCreatingDelivery && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl relative"
+              className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative my-8"
             >
               <button 
                 onClick={() => {
                   setIsCreatingDelivery(false);
                   setDeliveryName('');
+                  setDeliveryPhone('');
+                  setDeliveryAddress('');
+                  setDeliveryPaymentMethod('Efectivo');
+                  setDeliveryPaymentReference('');
                 }}
                 className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
                 title="Cerrar"
@@ -1856,12 +2053,42 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 <X size={20} />
               </button>
               
-              <h3 className="text-xl font-bold mb-4">Nuevo Delivery / Para Llevar</h3>
-              <p className="text-sm text-slate-500 mb-6">Ingresa el nombre del cliente</p>
+              <h3 className="text-xl font-bold mb-1">Nuevo Delivery / Para Llevar</h3>
+              <p className="text-sm text-slate-500 mb-6">Completa los datos del nuevo pedido.</p>
 
               <div className="space-y-4 mb-8">
+                {/* Delivery Type Selector */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del cliente</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tipo de Pedido</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryType('delivery')}
+                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                        deliveryType === 'delivery'
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>🚚 Delivery</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryType('pickup')}
+                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                        deliveryType === 'pickup'
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>🥡 Para Llevar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Customer Name */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Cliente</label>
                   <input 
                     type="text" 
                     value={deliveryName}
@@ -1869,11 +2096,166 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     placeholder="Ej. María Gómez"
                     autoFocus
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') createDelivery();
-                    }}
                   />
                 </div>
+
+                {/* Customer Phone */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Teléfono / WhatsApp</label>
+                  <input 
+                    type="tel" 
+                    value={deliveryPhone}
+                    onChange={e => setDeliveryPhone(e.target.value)}
+                    placeholder="Ej. +58 412 1234567"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                  />
+                </div>
+
+                {/* Delivery Address & Zone (only if type is delivery) */}
+                {deliveryType === 'delivery' && (
+                  <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                        Zona de Envío <span className="text-amber-600 font-bold">(Tarifa de Delivery)</span>
+                      </label>
+                      <div className="space-y-2">
+                        {deliveryZones.map(zone => {
+                          const isSelected = selectedZoneId === zone.id;
+                          return (
+                            <button
+                              key={zone.id}
+                              type="button"
+                              onClick={() => setSelectedZoneId(zone.id)}
+                              className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-black text-white border-black font-bold shadow-sm'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div>
+                                <span className="text-xs font-bold block">{zone.name}</span>
+                                {zone.coveredAreas && (
+                                  <span className={`text-[10px] block ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
+                                    {zone.coveredAreas}
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`text-xs font-black shrink-0 ${isSelected ? 'text-amber-300' : 'text-slate-900'}`}>
+                                +${zone.priceUSD.toFixed(2)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Dirección de Entrega</label>
+                      <textarea 
+                        value={deliveryAddress}
+                        onChange={e => setDeliveryAddress(e.target.value)}
+                        placeholder="Calle, avenida, edificio, nro de casa..."
+                        rows={2}
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Punto de Referencia</label>
+                      <input 
+                        type="text" 
+                        value={deliveryReference}
+                        onChange={e => setDeliveryReference(e.target.value)}
+                        placeholder="Ej. Frente a la panadería, portón negro..."
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment Method Selector */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
+                  <select
+                    value={deliveryPaymentMethod}
+                    onChange={e => setDeliveryPaymentMethod(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                  >
+                    <option value="Efectivo">Efectivo ($ / Bs)</option>
+                    <option value="Pago Móvil">Pago Móvil (Bs)</option>
+                    <option value="Zelle">Zelle ($)</option>
+                    <option value="Transferencia">Transferencia Bancaria</option>
+                    <option value="Punto de Venta">Punto de Venta (Bs)</option>
+                  </select>
+                </div>
+
+                {/* Payment Reference & Receipt Photo for non-cash delivery */}
+                {deliveryPaymentMethod !== 'Efectivo' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                        Referencia de Pago <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={deliveryPaymentReference}
+                        onChange={e => setDeliveryPaymentReference(e.target.value)}
+                        placeholder="Nro de referencia o confirmación"
+                        required
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Comprobante / Foto de Pago <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
+                        </label>
+                        {deliveryReceiptImage && (
+                          <button 
+                            type="button" 
+                            onClick={() => setDeliveryReceiptImage(null)} 
+                            className="text-[10px] font-bold text-rose-500 hover:underline"
+                          >
+                            Eliminar foto
+                          </button>
+                        )}
+                      </div>
+
+                      <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-3 cursor-pointer transition-all ${deliveryReceiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setDeliveryReceiptImage(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }} 
+                          className="hidden" 
+                        />
+                        {deliveryReceiptImage ? (
+                          <div className="flex items-center gap-3 w-full">
+                            <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 border border-emerald-200 shrink-0">
+                              <img src={deliveryReceiptImage} alt="Comprobante" className="w-full h-full object-cover" />
+                            </div>
+                            <div className="text-left">
+                              <span className="text-xs font-bold text-emerald-800 block">Comprobante Adjuntado ✓</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-1">
+                            <span className="text-xs font-bold text-slate-600 block">Subir captura / foto del comprobante</span>
+                            <span className="text-[10px] text-slate-400 block">Soporta PNG, JPG</span>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button 
@@ -1883,6 +2265,222 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               >
                 Crear Pedido
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Editing Delivery Info Modal */}
+      <AnimatePresence>
+        {isEditingDeliveryInfo && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative my-8"
+            >
+              <button 
+                onClick={() => setIsEditingDeliveryInfo(null)}
+                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                title="Cerrar"
+              >
+                <X size={20} />
+              </button>
+              
+              <h3 className="text-xl font-bold mb-1">Editar Datos del Pedido</h3>
+              <p className="text-sm text-slate-500 mb-6">Actualiza los datos de contacto y envío de este pedido.</p>
+
+              <div className="space-y-4 mb-8">
+                {/* Delivery Type Selector */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tipo de Pedido</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditDeliveryType('delivery')}
+                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                        editDeliveryType === 'delivery'
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>🚚 Delivery</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditDeliveryType('pickup')}
+                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                        editDeliveryType === 'pickup'
+                          ? 'bg-black text-white border-black shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>🥡 Para Llevar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Customer Name */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Cliente</label>
+                  <input 
+                    type="text" 
+                    value={editCustomerName}
+                    onChange={e => setEditCustomerName(e.target.value)}
+                    placeholder="Ej. María Gómez"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                  />
+                </div>
+
+                {/* Customer Phone */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Teléfono / WhatsApp</label>
+                  <input 
+                    type="tel" 
+                    value={editCustomerPhone}
+                    onChange={e => setEditCustomerPhone(e.target.value)}
+                    placeholder="Ej. +58 412 1234567"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                  />
+                </div>
+
+                {/* Delivery Address & Zone (only if type is delivery) */}
+                {editDeliveryType === 'delivery' && (
+                  <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                        Zona de Envío <span className="text-amber-600 font-bold">(Tarifa de Delivery)</span>
+                      </label>
+                      <div className="space-y-2">
+                        {deliveryZones.map(zone => {
+                          const isSelected = editSelectedZoneId === zone.id;
+                          return (
+                            <button
+                              key={zone.id}
+                              type="button"
+                              onClick={() => setEditSelectedZoneId(zone.id)}
+                              className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-black text-white border-black shadow-sm'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              <div>
+                                <span className="text-xs font-bold block">{zone.name}</span>
+                                {zone.coveredAreas && (
+                                  <span className={`text-[10px] block ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
+                                    {zone.coveredAreas}
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`text-xs font-black shrink-0 ${isSelected ? 'text-amber-300' : 'text-slate-900'}`}>
+                                +${zone.priceUSD.toFixed(2)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Dirección de Entrega</label>
+                      <textarea 
+                        value={editCustomerAddress}
+                        onChange={e => setEditCustomerAddress(e.target.value)}
+                        placeholder="Calle, avenida, edificio, nro de casa..."
+                        rows={2}
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Punto de Referencia</label>
+                      <input 
+                        type="text" 
+                        value={editDeliveryReference}
+                        onChange={e => setEditDeliveryReference(e.target.value)}
+                        placeholder="Ej. Frente a la panadería, portón negro..."
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment Method Selector */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
+                  <select
+                    value={editPaymentMethod}
+                    onChange={e => setEditPaymentMethod(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                  >
+                    <option value="Efectivo">Efectivo ($ / Bs)</option>
+                    <option value="Pago Móvil">Pago Móvil (Bs)</option>
+                    <option value="Zelle">Zelle ($)</option>
+                    <option value="Transferencia">Transferencia Bancaria</option>
+                    <option value="Punto de Venta">Punto de Venta (Bs)</option>
+                  </select>
+                </div>
+
+                {/* Payment Reference */}
+                {editPaymentMethod !== 'Efectivo' && (
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Referencia de Pago / Banco (Opcional)</label>
+                    <input 
+                      type="text" 
+                      value={editPaymentReference}
+                      onChange={e => setEditPaymentReference(e.target.value)}
+                      placeholder="Nro de referencia o confirmación"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsEditingDeliveryInfo(null)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 p-4 rounded-xl font-bold text-sm transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={async () => {
+                    if (!editCustomerName.trim()) return;
+                    try {
+                      const activeZone = deliveryZones.find(z => z.id === editSelectedZoneId) || deliveryZones[0];
+                      const isDeliveryMode = editDeliveryType === 'delivery';
+                      const fee = isDeliveryMode ? (activeZone?.priceUSD || 0) : 0;
+
+                      await updateDoc(doc(db, 'sessions', isEditingDeliveryInfo.id), {
+                        customerName: editCustomerName.trim(),
+                        deliveryType: editDeliveryType,
+                        customerPhone: editCustomerPhone.trim(),
+                        customerAddress: isDeliveryMode ? editCustomerAddress.trim() : 'Retiro en Local (Pick Up)',
+                        deliveryZoneId: isDeliveryMode ? (activeZone?.id || '') : '',
+                        deliveryZoneName: isDeliveryMode ? (activeZone?.name || '') : '',
+                        deliveryFee: fee,
+                        deliveryReference: isDeliveryMode ? editDeliveryReference.trim() : '',
+                        paymentMethod: editPaymentMethod,
+                        paymentReference: editPaymentReference.trim(),
+                        accounts: [{ id: 'default', name: editCustomerName.trim(), status: 'active' }]
+                      });
+                      
+                      setSelectedTable(prev => prev ? { ...prev, number: editCustomerName.trim() } : null);
+                      setIsEditingDeliveryInfo(null);
+                    } catch (err) {
+                      console.error('Error saving delivery details edit:', err);
+                    }
+                  }}
+                  disabled={!editCustomerName.trim()}
+                  className={`flex-1 text-white p-4 rounded-xl font-bold transition-all ${editCustomerName.trim() ? 'bg-black hover:bg-slate-800' : 'bg-slate-300 cursor-not-allowed'}`}
+                >
+                  Guardar Cambios
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1997,36 +2595,69 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isPaying && selectedTable && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-lg shadow-2xl relative my-8"
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-[28px] sm:rounded-[36px] w-full max-w-lg shadow-2xl relative flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden border border-slate-100"
             >
-              <button 
-                onClick={() => {
-                  setIsPaying(false);
-                  setReceiptImage(null);
-                  setSelectedClientIdForCredit('');
-                  setCreditName('');
-                  setCreditPhone('');
-                  setCreditId('');
-                  setCreditAddress('');
-                  setCreditEmail('');
-                  setAdminPin('');
-                  setAdminPinError('');
-                  setNonCreditClientMode('none');
-                }}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-              >
-                <X size={20} />
-              </button>
-              
-              <h3 className="text-xl font-bold mb-1">Procesar Pago</h3>
-              <p className="text-sm text-slate-500 mb-6">
-                {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number}
-              </p>
+              {/* Header */}
+              <div className="p-5 sm:p-6 border-b border-slate-100 bg-white z-10 shrink-0 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg sm:text-xl font-black text-slate-900">Procesar Pago</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsPaying(false);
+                    setReceiptImage(null);
+                    setSelectedClientIdForCredit('');
+                    setCreditName('');
+                    setCreditPhone('');
+                    setCreditId('');
+                    setCreditAddress('');
+                    setCreditEmail('');
+                    setAdminPin('');
+                    setAdminPinError('');
+                    setNonCreditClientMode('none');
+                  }}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5">
+                {/* Option to pay only specific items / consumption at table close */}
+                {!selectedTable.id.startsWith('delivery-') && (
+                  <div className="bg-purple-50/80 border border-purple-200/80 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <Scissors size={18} />
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-purple-950 block">¿Pago parcial o dividido por consumo?</span>
+                          <span className="text-[10px] text-purple-700 font-medium block">Cobrar únicamente los platos consumidos por 1 persona</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPaying(false);
+                          initPartialModal();
+                        }}
+                        className="text-xs bg-purple-900 hover:bg-black text-white font-extrabold px-3.5 py-2 rounded-xl transition-all shrink-0 shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>Seleccionar Platos</span> →
+                      </button>
+                    </div>
+                  </div>
+                )}
 
               {/* Total Card */}
               <div className="bg-slate-50 p-6 rounded-3xl mb-6 border border-slate-100">
@@ -2209,43 +2840,40 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 )}
 
                 {/* Image Upload and Reference for digital payments */}
-                {(paymentMethod === 'pago_movil' || paymentMethod === 'zelle') && paymentMethod !== 'mixto' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Moneda del Pago</label>
-                        <select 
-                          value={paymentCurrency}
-                          onChange={(e) => setPaymentCurrency(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm appearance-none"
-                        >
-                          <option value="Bs">Bolívares (Bs)</option>
-                          <option value="USD">Dólares ($)</option>
-                        </select>
+                {(paymentMethod === 'pago_movil' || paymentMethod === 'zelle' || paymentMethod === 'punto' || paymentMethod === 'transferencia' || paymentMethod === 'mixto') && (
+                  <div className="space-y-4 mt-4">
+                    {paymentMethod !== 'mixto' && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Moneda del Pago</label>
+                          <select 
+                            value={paymentCurrency}
+                            onChange={(e) => setPaymentCurrency(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm appearance-none"
+                          >
+                            <option value="Bs">Bolívares (Bs)</option>
+                            <option value="USD">Dólares ($)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Referencia <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span></label>
+                          <input 
+                            type="text" 
+                            value={paymentRef}
+                            onChange={e => setPaymentRef(e.target.value)}
+                            placeholder="Ej. 123456"
+                            required
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm font-mono"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Referencia (Obligatorio)</label>
-                        <input 
-                          type="text" 
-                          value={paymentRef}
-                          onChange={e => setPaymentRef(e.target.value)}
-                          placeholder="Ej. 123456"
-                          required
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm font-mono"
-                        />
-                      </div>
-                    </div>
+                    )}
 
                     {/* Image Receipt Uploader */}
                     <div>
                       <div className="flex justify-between items-center mb-2">
                         <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                          Comprobante de Pago 
-                          {selectedTable.id.startsWith('delivery-') ? (
-                            <span className="text-rose-500 ml-1 font-extrabold">(OBLIGATORIO)</span>
-                          ) : (
-                            <span className="text-slate-400 ml-1 font-normal">(Opcional)</span>
-                          )}
+                          Comprobante / Captura de Pago <span className="text-rose-500 ml-1 font-extrabold">(OBLIGATORIO)</span>
                         </label>
                         {receiptImage && (
                           <button 
@@ -2259,7 +2887,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
 
                       <div className="flex items-center gap-4">
-                        <label className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-4 cursor-pointer transition-all ${receiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
+                        <label className={`w-full flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-4 cursor-pointer transition-all ${receiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
                           <input 
                             type="file" 
                             accept="image/*" 
@@ -2285,32 +2913,6 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             </div>
                           )}
                         </label>
-
-                        {/* Demo generator for convenience */}
-                        {!receiptImage && (
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              // generate a small mock blue/green image of a voucher
-                              const mockCanvas = document.createElement('canvas');
-                              mockCanvas.width = 100;
-                              mockCanvas.height = 100;
-                              const ctx = mockCanvas.getContext('2d');
-                              if (ctx) {
-                                ctx.fillStyle = '#065f46';
-                                ctx.fillRect(0, 0, 100, 100);
-                                ctx.fillStyle = '#ffffff';
-                                ctx.font = 'bold 12px sans-serif';
-                                ctx.fillText('VOUCHER', 18, 45);
-                                ctx.fillText('OK', 40, 65);
-                                setReceiptImage(mockCanvas.toDataURL('image/jpeg'));
-                              }
-                            }}
-                            className="p-3 bg-slate-100 hover:bg-slate-200 rounded-2xl text-[10px] font-bold text-slate-600 transition-colors"
-                          >
-                            Demo Voucher
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -2597,29 +3199,32 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </div>
                 )}
               </div>
+            </div>
 
-              {/* Confirm Action Button */}
-              <button 
-                onClick={handlePayment}
-                disabled={isUploadingReceipt || isSubmittingPayment}
-                className="w-full bg-black text-white p-4 rounded-xl font-bold shadow-lg hover:scale-[1.02] flex justify-center items-center gap-2 transition-transform mt-8"
-              >
-                {isSubmittingPayment ? (
-                  <>
-                    <span className="animate-spin">⏳</span>
-                    Procesando...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 size={18} />
-                    {paymentMethod === 'pago_movil' || paymentMethod === 'zelle' 
-                      ? 'Confirmar Pago (Enviar a Caja)' 
-                      : paymentMethod === 'credito' && !adminPin.trim()
-                        ? 'Solicitar Crédito'
-                        : 'Confirmar y Cerrar'}
-                  </>
-                )}
-              </button>
+              {/* Sticky Footer Confirm Action Button */}
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 shrink-0 z-10">
+                <button 
+                  onClick={handlePayment}
+                  disabled={isUploadingReceipt || isSubmittingPayment}
+                  className="w-full bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-bold shadow-lg flex justify-center items-center gap-2 transition-all cursor-pointer text-sm"
+                >
+                  {isSubmittingPayment ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      Procesando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} />
+                      {paymentMethod === 'pago_movil' || paymentMethod === 'zelle' 
+                        ? 'Confirmar Pago (Enviar a Caja)' 
+                        : paymentMethod === 'credito' && !adminPin.trim()
+                          ? 'Solicitar Crédito'
+                          : 'Confirmar y Cerrar'}
+                    </>
+                  )}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -2796,10 +3401,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-8 flex flex-col max-h-[90vh]"
+              className="bg-white rounded-[24px] sm:rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-4 flex flex-col max-h-[92vh] sm:max-h-[90vh]"
             >
               {/* Header */}
-              <div className="relative aspect-[16/10] w-full bg-slate-100 flex-shrink-0">
+              <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
                 <img src={selectedItem.image || 'https://via.placeholder.com/300'} alt={selectedItem.name} className="w-full h-full object-cover" />
                 <button 
                   onClick={() => setSelectedItem(null)}
@@ -2858,6 +3463,52 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                               className="accent-black rounded border-slate-300 w-3.5 h-3.5"
                             />
                             <span className="text-xs font-semibold">{ing.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Ingredientes Extras */}
+                {selectedItem.extras && selectedItem.extras.length > 0 && (
+                  <div className="mb-6 p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl">
+                    <h5 className="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <span>🧀</span> Agregar Adicionales / Extras
+                    </h5>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      Añade extras deliciosos al plato:
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {selectedItem.extras.map((extra, idx) => {
+                        const isSelected = selectedExtras.some(e => e.name === extra.name);
+                        return (
+                          <label 
+                            key={idx} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none transition-all ${
+                              isSelected 
+                                ? 'bg-indigo-50 border-indigo-200 text-indigo-950 shadow-sm font-bold' 
+                                : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  if (isSelected) {
+                                    setSelectedExtras(prev => prev.filter(e => e.name !== extra.name));
+                                  } else {
+                                    setSelectedExtras(prev => [...prev, extra]);
+                                  }
+                                }}
+                                className="accent-indigo-600 rounded border-indigo-300 w-3.5 h-3.5"
+                              />
+                              <span className="text-xs">{extra.name}</span>
+                            </div>
+                            <span className="text-xs font-black text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-lg border border-indigo-100/40">
+                              +${extra.price.toFixed(2)}
+                            </span>
                           </label>
                         );
                       })}
@@ -3025,14 +3676,319 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       excludedIds, 
                       selectedCourse, 
                       selectedCourseStatus, 
-                      selectedSeatNumber
+                      selectedSeatNumber,
+                      selectedExtras
                     );
                     setSelectedItem(null);
                   }}
                   className="flex-1 bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg"
                 >
-                  Agregar al Pedido
+                  <span>Agregar al Pedido</span>
+                  <span className="opacity-40 font-normal">|</span>
+                  <span>${(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty).toFixed(2)}</span>
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal for Itemized Split & Partial Payment by Consumption */}
+      <AnimatePresence>
+        {isPartialModalOpen && selectedTable && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4 sm:p-6 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[32px] p-6 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col my-auto"
+            >
+              <button
+                onClick={() => setIsPartialModalOpen(false)}
+                className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="mb-4 pr-8">
+                <div className="flex items-center gap-2 text-purple-600 mb-1 font-extrabold text-xs uppercase tracking-wider">
+                  <Scissors size={16} /> Pago y Separación por Consumo
+                </div>
+                <h3 className="text-xl font-black text-slate-900">
+                  Seleccionar Ítems a Pagar
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedTable.id.startsWith('delivery-') ? 'Pedido: ' : 'Mesa '}{selectedTable.number} • Escoge qué platos va a pagar o separar esta persona.
+                </p>
+              </div>
+
+              {/* Name input */}
+              <div className="mb-4">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+                  Nombre de la Persona / Comensal
+                </label>
+                <div className="relative">
+                  <UserCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Ej: Thomas"
+                    value={partialPayerName}
+                    onChange={e => setPartialPayerName(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-purple-600 transition-colors text-xs font-bold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Quick select controls */}
+              <div className="flex justify-between items-center mb-2 px-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Platos en la Cuenta ({activeOrders.length})
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allMap: { [id: string]: number } = {};
+                      activeOrders.forEach(o => { allMap[o.id] = o.quantity || 1; });
+                      setPartialItemQuantities(allMap);
+                    }}
+                    className="text-[10px] font-bold text-indigo-600 hover:underline"
+                  >
+                    Seleccionar Todos
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const zeroMap: { [id: string]: number } = {};
+                      activeOrders.forEach(o => { zeroMap[o.id] = 0; });
+                      setPartialItemQuantities(zeroMap);
+                    }}
+                    className="text-[10px] font-bold text-slate-400 hover:underline"
+                  >
+                    Deseleccionar
+                  </button>
+                </div>
+              </div>
+
+              {/* List of items */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 my-2 max-h-[280px]">
+                {activeOrders.map(order => {
+                  const selectedQty = partialItemQuantities[order.id] || 0;
+                  const maxQty = order.quantity || 1;
+                  const unitPrice = order.price || 0;
+                  const isSelected = selectedQty > 0;
+
+                  return (
+                    <div
+                      key={order.id}
+                      className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between ${
+                        isSelected ? 'bg-purple-50/60 border-purple-200 shadow-xs' : 'bg-slate-50 border-slate-100'
+                      }`}
+                    >
+                      <div className="pr-2 min-w-0">
+                        <div className="font-bold text-xs text-slate-800 truncate">{order.itemName}</div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          ${unitPrice.toFixed(2)} c/u {order.seatNumber ? `• 💺 Asiento ${order.seatNumber}` : ''}
+                        </div>
+                        {isSelected && (
+                          <div className="text-[10px] font-black text-purple-700 mt-0.5">
+                            Subtotal: ${(unitPrice * selectedQty).toFixed(2)} USD
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quantity Controls */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xs">
+                          <button
+                            type="button"
+                            onClick={() => setPartialItemQuantities(prev => ({ ...prev, [order.id]: Math.max(0, selectedQty - 1) }))}
+                            className="px-2.5 py-1 text-slate-600 font-black hover:bg-slate-100 transition-colors"
+                          >-</button>
+                          <span className="px-2 text-xs font-black font-mono w-10 text-center">
+                            {selectedQty}/{maxQty}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPartialItemQuantities(prev => ({ ...prev, [order.id]: Math.min(maxQty, selectedQty + 1) }))}
+                            className="px-2.5 py-1 text-slate-600 font-black hover:bg-slate-100 transition-colors"
+                          >+</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {activeOrders.length === 0 && (
+                  <div className="p-8 text-center text-slate-400 italic text-xs">
+                    No hay ítems consumidos registrados en esta cuenta.
+                  </div>
+                )}
+              </div>
+
+              {/* Summary Footer */}
+              <div className="mt-4 pt-4 border-t border-slate-100 bg-slate-50/80 -mx-6 sm:-mx-8 -mb-6 sm:-mb-8 p-6 sm:p-8 rounded-b-[32px] space-y-4">
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 space-y-2">
+                  <div className="flex justify-between items-center text-xs text-slate-600">
+                    <span className="font-bold">Subtotal Platos ({partialTotalSelectedItems} ítems):</span>
+                    <span className="font-mono font-bold text-slate-900">${partialSubtotal.toFixed(2)} USD</span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-100">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={includeTip}
+                        onChange={e => setIncludeTip(e.target.checked)}
+                        className="w-4 h-4 rounded text-purple-700 accent-purple-700 cursor-pointer"
+                      />
+                      <span className="font-bold text-slate-700">
+                        + Servicio de Mesa ({servicePercent}%)
+                      </span>
+                    </label>
+                    <span className="font-mono font-bold text-purple-700">${partialTip.toFixed(2)} USD</span>
+                  </div>
+
+                  <div className="flex justify-between items-end pt-2 border-t border-slate-200">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
+                        Total Comensal
+                      </span>
+                      <div className="text-2xl font-black text-slate-900">
+                        ${partialTotal.toFixed(2)} USD
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
+                        En Bolívares
+                      </span>
+                      <div className="text-lg font-extrabold text-purple-800 font-mono">
+                        Bs. {(partialTotal * exchangeRate).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {partialPaymentStep === 'select' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={handleMoveSelectedToNewPerson}
+                      disabled={partialTotalSelectedItems === 0}
+                      className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 py-3.5 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all border border-slate-200"
+                    >
+                      <Users size={16} /> Mover a Nueva Persona
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPartialPaymentStep('pay')}
+                      disabled={partialTotalSelectedItems === 0}
+                      className="w-full bg-purple-700 hover:bg-purple-800 disabled:opacity-40 text-white py-3.5 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-purple-200"
+                    >
+                      <CreditCard size={16} /> Cobrar Este Consumo
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 bg-white p-4 rounded-2xl border border-purple-100">
+                    <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                      <span className="text-xs font-bold text-slate-700">Procesando Pago de {partialPayerName || 'Comensal'}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setPartialPaymentStep('select')}
+                        className="text-[10px] font-bold text-purple-600 hover:underline"
+                      >
+                        ← Cambiar selección
+                      </button>
+                    </div>
+
+                    {/* Payment Method Selector */}
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'pago_movil', label: 'Pago Móvil' },
+                          { id: 'zelle', label: 'Zelle' },
+                          { id: 'divisa', label: 'Divisa ($)' },
+                          { id: 'punto', label: 'Punto (Bs)' },
+                          { id: 'credito', label: 'Crédito' }
+                        ].map(m => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setPaymentMethod(m.id)}
+                            className={`py-2 px-3 rounded-xl border text-[11px] font-bold transition-all ${paymentMethod === m.id ? 'bg-purple-900 text-white border-purple-900 shadow-xs' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Reference & Receipt Image for Digital Payments */}
+                    {paymentMethod !== 'divisa' && paymentMethod !== 'punto' && paymentMethod !== 'credito' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+                            Nro. de Referencia <span className="text-rose-500 font-bold">(Obligatorio)</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej. 123456"
+                            value={paymentRef}
+                            onChange={e => setPaymentRef(e.target.value)}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-purple-600 text-xs font-mono font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              Foto / Captura Comprobante <span className="text-rose-500 font-bold">(Obligatorio)</span>
+                            </label>
+                            {receiptImage && (
+                              <button type="button" onClick={() => setReceiptImage(null)} className="text-[9px] font-bold text-rose-500 hover:underline">
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
+                          <label className={`flex items-center justify-center p-3 border-2 border-dashed rounded-xl cursor-pointer transition-all ${receiptImage ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-purple-600'}`}>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onloadend = () => setReceiptImage(reader.result as string);
+                                reader.readAsDataURL(file);
+                              }}
+                              className="hidden"
+                            />
+                            {receiptImage ? (
+                              <div className="flex items-center gap-2">
+                                <img src={receiptImage} alt="Comprobante" className="w-8 h-8 rounded object-cover border border-emerald-300" />
+                                <span className="text-xs font-bold text-emerald-800">Comprobante Adjuntado ✓</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs font-bold text-slate-500">📷 Subir foto de pago</span>
+                            )}
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleProcessPartialPayment}
+                      disabled={isProcessingPartialPayment || partialTotal <= 0}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white py-3.5 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-200"
+                    >
+                      {isProcessingPartialPayment ? 'Procesando...' : `Confirmar Pago Parcial de $${partialTotal.toFixed(2)}`}
+                    </button>
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>
