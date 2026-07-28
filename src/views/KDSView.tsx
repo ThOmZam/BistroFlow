@@ -39,6 +39,13 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
       }
     }
 
+    if (Array.isArray(item.extras) && item.extras.length > 0) {
+      const extraNames = item.extras.map((e: any) => typeof e === 'string' ? e : e.name).filter(Boolean);
+      if (extraNames.length > 0) {
+        details.push(`EXTRA: ${extraNames.join(', ')}`);
+      }
+    }
+
     return details;
   };
   
@@ -163,7 +170,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
       const promises = ticket.items.map(async (item: any) => {
         const orderRef = doc(db, item.path);
         await updateDoc(orderRef, { status: 'ready', readyAt: new Date().toISOString() });
-        await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || []);
+        await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || [], item.extras || []);
       });
       await Promise.all(promises);
 

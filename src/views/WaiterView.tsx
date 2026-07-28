@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Phone,
   MapPin,
+  Navigation,
   ExternalLink,
   Info,
   Check,
@@ -155,6 +156,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
   const [selectedZoneId, setSelectedZoneId] = useState<string>('zone_casco_urbano');
   const [deliveryReference, setDeliveryReference] = useState('');
+  const [deliveryWhatsappLocation, setDeliveryWhatsappLocation] = useState('');
   const [deliveryPhone, setDeliveryPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryPaymentMethod, setDeliveryPaymentMethod] = useState('Efectivo');
@@ -167,11 +169,59 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [editDeliveryType, setEditDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
   const [editSelectedZoneId, setEditSelectedZoneId] = useState<string>('zone_casco_urbano');
   const [editDeliveryReference, setEditDeliveryReference] = useState('');
+  const [editWhatsappLocation, setEditWhatsappLocation] = useState('');
   const [editCustomerPhone, setEditCustomerPhone] = useState('');
   const [editCustomerAddress, setEditCustomerAddress] = useState('');
   const [editPaymentMethod, setEditPaymentMethod] = useState('Efectivo');
   const [editPaymentReference, setEditPaymentReference] = useState('');
   const [editDeliveryReceiptImage, setEditDeliveryReceiptImage] = useState<string | null>(null);
+  const [viewingReceiptModal, setViewingReceiptModal] = useState<string | null>(null);
+  const [isDeliveryInfoCollapsed, setIsDeliveryInfoCollapsed] = useState(false);
+
+  const renderPaymentAccountDetails = (method: string) => {
+    if (method === 'Pago Móvil') {
+      return (
+        <div className="p-3 bg-indigo-50/90 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-1 my-2">
+          <div className="flex items-center gap-1.5 font-bold text-indigo-900">
+            <Info size={14} className="text-indigo-600 shrink-0" /> Datos de Pago Móvil del Local:
+          </div>
+          <div className="text-[11px] pl-5 space-y-0.5">
+            <div>Banco: <strong className="text-indigo-700">{settings?.pagoMovilBanco || 'Banesco'}</strong></div>
+            <div>Teléfono: <strong className="text-indigo-700">{settings?.pagoMovilPhone || '0412-1234567'}</strong></div>
+            <div>Cédula / RIF: <strong className="text-indigo-700">{settings?.pagoMovilId || 'V-12345678'}</strong></div>
+          </div>
+        </div>
+      );
+    }
+    if (method === 'Zelle') {
+      return (
+        <div className="p-3 bg-indigo-50/90 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-1 my-2">
+          <div className="flex items-center gap-1.5 font-bold text-indigo-900">
+            <Info size={14} className="text-indigo-600 shrink-0" /> Datos de Zelle del Local:
+          </div>
+          <div className="text-[11px] pl-5 space-y-0.5">
+            <div>Correo Zelle: <strong className="text-indigo-700">{settings?.zelleEmail || 'pagos@bistroflow.com'}</strong></div>
+            <div>Beneficiario: <strong className="text-indigo-700">{settings?.zelleName || 'BistroFlow SL'}</strong></div>
+          </div>
+        </div>
+      );
+    }
+    if (method === 'Transferencia') {
+      return (
+        <div className="p-3 bg-indigo-50/90 border border-indigo-100 rounded-2xl text-xs text-indigo-950 space-y-1 my-2">
+          <div className="flex items-center gap-1.5 font-bold text-indigo-900">
+            <Info size={14} className="text-indigo-600 shrink-0" /> Datos de Transferencia Bancaria del Local:
+          </div>
+          <div className="text-[11px] pl-5 space-y-0.5">
+            <div>Banco: <strong className="text-indigo-700">{settings?.pagoMovilBanco || 'Banesco'}</strong></div>
+            <div>Cuenta / Teléfono: <strong className="text-indigo-700">{settings?.pagoMovilPhone || '0412-1234567'}</strong></div>
+            <div>RIF / Titular: <strong className="text-indigo-700">{settings?.pagoMovilId || 'V-12345678'}</strong></div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   const createDelivery = async () => {
     if (isSubmittingDelivery) return;
@@ -204,6 +254,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         deliveryZoneName: isDeliveryMode ? (activeZone?.name || '') : '',
         deliveryFee: fee,
         deliveryReference: isDeliveryMode ? deliveryReference.trim() : '',
+        whatsappLocation: isDeliveryMode ? deliveryWhatsappLocation.trim() : '',
         paymentMethod: deliveryPaymentMethod,
         paymentReference: deliveryPaymentReference.trim(),
         paymentReceiptImage: deliveryPaymentMethod === 'Efectivo' ? null : deliveryReceiptImage,
@@ -228,6 +279,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       setDeliveryPhone('');
       setDeliveryAddress('');
       setDeliveryReference('');
+      setDeliveryWhatsappLocation('');
       setDeliveryPaymentMethod('Efectivo');
       setDeliveryPaymentReference('');
       setDeliveryReceiptImage(null);
@@ -1345,18 +1397,26 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             initial={{ x: 100, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 100, opacity: 0 }}
-            className="w-full lg:w-[480px] h-full bg-white rounded-[32px] border border-slate-100 shadow-xl flex flex-col overflow-hidden"
+            className="fixed inset-0 z-40 lg:relative lg:inset-auto lg:z-auto w-full lg:w-[480px] h-full bg-white lg:rounded-[32px] border-0 lg:border border-slate-100 shadow-2xl lg:shadow-xl flex flex-col overflow-hidden min-h-0"
           >
-            <div className="p-4 sm:p-5 border-b border-slate-50 flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="font-bold text-base sm:text-lg">
-                  {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
-                </h3>
-                <p className="text-slate-400 text-[11px] sm:text-xs">Gestión de comanda</p>
+            <div className="p-3.5 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedTable(null)}
+                  className="lg:hidden p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-black flex items-center gap-1 mr-1"
+                >
+                  ← Volver
+                </button>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg text-slate-900 leading-tight">
+                    {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
+                  </h3>
+                  <p className="text-slate-400 text-[10px] sm:text-xs">Gestión de comanda</p>
+                </div>
               </div>
               <button 
                 onClick={() => setSelectedTable(null)}
-                className="p-1.5 hover:bg-slate-50 text-slate-400 rounded-full transition-colors text-xs sm:text-sm font-bold"
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors text-xs font-bold hidden sm:block"
               >
                 Cerrar
               </button>
@@ -1367,10 +1427,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 const session = getSessionForTable(selectedTable.id);
                 if (!session) return null;
                 return (
-                  <div className="mx-6 mt-4 p-5 bg-amber-50/70 border border-amber-100 rounded-3xl text-xs space-y-3">
+                  <div className="mx-3 sm:mx-6 mt-2 sm:mt-4 p-3 sm:p-4 bg-amber-50/80 border border-amber-200/80 rounded-2xl text-xs space-y-2 shrink-0">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-amber-900 uppercase tracking-wider text-[10px]">Información del Pedido</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-amber-950 uppercase tracking-wider text-[10px]">Info Pedido</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -1379,15 +1439,24 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             setEditDeliveryType(session.deliveryType || 'delivery');
                             setEditSelectedZoneId(session.deliveryZoneId || deliveryZones[0]?.id || '');
                             setEditDeliveryReference(session.deliveryReference || '');
+                            setEditWhatsappLocation((session as any).whatsappLocation || (session as any).locationUrl || '');
                             setEditCustomerPhone(session.customerPhone || '');
                             setEditCustomerAddress(session.customerAddress || '');
                             setEditPaymentMethod(session.paymentMethod || 'Efectivo');
                             setEditPaymentReference(session.paymentReference || '');
+                            setEditDeliveryReceiptImage((session as any).paymentReceiptImage || (session as any).payment?.receiptImage || null);
                           }}
-                          className="text-[10px] text-amber-700 hover:text-amber-950 hover:underline font-extrabold flex items-center gap-0.5"
-                          title="Editar información de contacto y entrega"
+                          className="text-[10px] text-amber-800 hover:text-amber-950 hover:underline font-extrabold flex items-center gap-0.5"
+                          title="Editar información"
                         >
                           ✏️ Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsDeliveryInfoCollapsed(!isDeliveryInfoCollapsed)}
+                          className="text-[10px] text-indigo-700 hover:underline font-extrabold ml-1 bg-amber-100/80 px-2 py-0.5 rounded-lg"
+                        >
+                          {isDeliveryInfoCollapsed ? ' Ver más ▼' : ' Ocultar ▲'}
                         </button>
                       </div>
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
@@ -1395,60 +1464,94 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           ? 'bg-emerald-100 text-emerald-800' 
                           : 'bg-amber-100 text-amber-800'
                       }`}>
-                        Pago: {session.paymentStatus === 'validated' ? 'Validado' : 'Por Validar'}
+                        {session.paymentStatus === 'validated' ? 'Validado' : 'Por Validar'}
                       </span>
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-3 text-slate-700">
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Cliente</span>
-                        <span className="font-bold text-slate-900">{session.customerName || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Teléfono</span>
-                        <a 
-                          href={`https://wa.me/${session.customerPhone?.replace(/[^0-9+]/g, '')}`} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="font-bold text-indigo-600 hover:underline flex items-center gap-1"
-                        >
-                          {session.customerPhone || 'N/A'}
-                        </a>
-                      </div>
-                    </div>
 
-                    <div className="text-slate-700 space-y-1">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Tipo de Entrega</span>
-                        {session.deliveryType === 'delivery' && (
-                          <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                            Envío: ${((session as any).deliveryFee || 0).toFixed(2)} USD
+                    {!isDeliveryInfoCollapsed ? (
+                      <div className="space-y-2 pt-1 border-t border-amber-200/40">
+                        <div className="grid grid-cols-2 gap-2 text-slate-700">
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Cliente</span>
+                            <span className="font-bold text-slate-900">{session.customerName || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Teléfono</span>
+                            <a 
+                              href={`https://wa.me/${session.customerPhone?.replace(/[^0-9+]/g, '')}`} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                            >
+                              {session.customerPhone || 'N/A'}
+                            </a>
+                          </div>
+                        </div>
+
+                        <div className="text-slate-700 space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold">Tipo de Entrega</span>
+                            {session.deliveryType === 'delivery' && (
+                              <span className="text-[9px] font-extrabold text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded-full">
+                                Envío: ${((session as any).deliveryFee || 0).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-bold text-slate-900 block capitalize text-xs">
+                            {session.deliveryType === 'pickup' ? '🛍️ Retiro en Local' : `🛵 Delivery (${(session as any).deliveryZoneName || 'Zona Estándar'})`}
                           </span>
+                          {session.customerAddress && (
+                            <span className="text-slate-700 block text-xs font-medium">📍 {session.customerAddress}</span>
+                          )}
+                          {(session as any).deliveryReference && (
+                            <span className="text-slate-500 block text-[11px] italic">Ref: {(session as any).deliveryReference}</span>
+                          )}
+                          {((session as any).whatsappLocation || (session as any).locationUrl) && (
+                            <a 
+                              href={((session as any).whatsappLocation || (session as any).locationUrl).startsWith('http') ? ((session as any).whatsappLocation || (session as any).locationUrl) : `https://${((session as any).whatsappLocation || (session as any).locationUrl)}`} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-extrabold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-2 py-0.5 rounded-xl mt-1 transition-colors cursor-pointer"
+                            >
+                              <Navigation size={11} className="-rotate-45 text-indigo-600" /> Abrir GPS
+                              <ExternalLink size={9} className="ml-0.5 opacity-70" />
+                            </a>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-amber-200/40 text-slate-700">
+                          <div>
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Pago</span>
+                            <span className="font-bold text-slate-900 uppercase">{session.paymentMethod || 'Efectivo'}</span>
+                          </div>
+                          {session.paymentReference && (
+                            <div>
+                              <span className="text-[9px] text-slate-400 uppercase font-bold block">Referencia</span>
+                              <span className="font-bold text-slate-900 font-mono">#{session.paymentReference}</span>
+                            </div>
+                          )}
+                        </div>
+                        {((session as any).paymentReceiptImage || (session as any).payment?.receiptImage) && (
+                          <div className="pt-1 border-t border-amber-200/40 flex items-center justify-between">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold">Comprobante</span>
+                            <button
+                              type="button"
+                              onClick={() => setViewingReceiptModal((session as any).paymentReceiptImage || (session as any).payment?.receiptImage)}
+                              className="inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              📷 Ver Comprobante
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <span className="font-bold text-slate-900 block capitalize text-xs">
-                        {session.deliveryType === 'pickup' ? '🛍️ Retiro en Local' : `🛵 Delivery (${(session as any).deliveryZoneName || 'Zona Estándar'})`}
-                      </span>
-                      {session.customerAddress && (
-                        <span className="text-slate-700 block text-xs font-medium">📍 {session.customerAddress}</span>
-                      )}
-                      {(session as any).deliveryReference && (
-                        <span className="text-slate-500 block text-[11px] italic">Ref: {(session as any).deliveryReference}</span>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-amber-200/40 text-slate-700">
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Método de Pago</span>
-                        <span className="font-bold text-slate-900 uppercase">{session.paymentMethod || 'Efectivo'}</span>
+                    ) : (
+                      <div className="text-[11px] text-slate-700 flex items-center justify-between font-medium">
+                        <span className="truncate max-w-[220px]">
+                          <strong>{session.customerName}</strong> • {session.deliveryType === 'pickup' ? '🛍️ Retiro' : '🛵 Delivery'} ({session.paymentMethod || 'Efectivo'})
+                        </span>
+                        <span className="text-indigo-700 font-bold shrink-0">📍 {session.customerAddress ? 'Con Dirección' : 'Sin Dir'}</span>
                       </div>
-                      {session.paymentReference && (
-                        <div>
-                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Referencia</span>
-                          <span className="font-bold text-slate-900 font-mono">#{session.paymentReference}</span>
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
                 );
               })()
@@ -1583,7 +1686,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-auto p-3 sm:p-4 grid grid-cols-2 gap-3 sm:gap-4 content-start">
+                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 gap-2.5 sm:gap-4 content-start pb-28 sm:pb-12">
                       {filteredMenu.map(item => {
                         const stockAlert = getMenuItemStockAlert(item, ingredients);
                         const isOutOfStock = stockAlert.status === 'out_of_stock';
@@ -1592,16 +1695,16 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             key={item.id}
                             disabled={isOutOfStock}
                             onClick={() => { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); setSelectedExtras([]); }}
-                            className={`group border border-slate-100 hover:border-black rounded-2xl p-2.5 sm:p-3 text-left transition-all duration-200 flex flex-col hover:shadow-md bg-white relative ${
+                            className={`group border border-slate-100 hover:border-black rounded-2xl p-2 sm:p-3 text-left transition-all duration-200 flex flex-col hover:shadow-md bg-white relative ${
                               isOutOfStock ? 'opacity-55 cursor-not-allowed' : ''
                             }`}
                           >
-                            <div className="aspect-[4/3] bg-slate-50 rounded-xl mb-2 overflow-hidden w-full relative">
+                            <div className="aspect-[16/10] sm:aspect-[4/3] bg-slate-50 rounded-xl mb-2 overflow-hidden w-full relative">
                               <img src={item.image || 'https://via.placeholder.com/150'} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                               
                               {/* Custom tags badges overlay */}
                               {item.alerts && item.alerts.length > 0 && (
-                                <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1 z-10">
+                                <div className="absolute bottom-1.5 left-1.5 right-1.5 flex flex-wrap gap-1 z-10">
                                   {item.alerts.map(tagId => {
                                     const labelMap: { [key: string]: string } = {
                                       'Spicy': '🌶️',
@@ -1626,7 +1729,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                       'Chef-Special': 'Recomendado'
                                     };
                                     return (
-                                      <span key={tagId} title={labelTitle[tagId] || tagId} className="px-1 py-0.5 bg-black/85 backdrop-blur text-white text-[10px] font-bold rounded-md">
+                                      <span key={tagId} title={labelTitle[tagId] || tagId} className="px-1 py-0.5 bg-black/85 backdrop-blur text-white text-[9px] font-bold rounded-md">
                                         {labelMap[tagId] || tagId}
                                       </span>
                                     );
@@ -1636,7 +1739,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                               {isOutOfStock && (
                                 <div className="absolute inset-0 bg-rose-950/60 backdrop-blur-[1px] flex items-center justify-center">
-                                  <span className="bg-white/95 px-2.5 py-1 text-[9px] font-black text-rose-600 rounded-lg shadow-sm tracking-wider uppercase">
+                                  <span className="bg-white/95 px-2 py-0.5 text-[8px] sm:text-[9px] font-black text-rose-600 rounded-lg shadow-sm tracking-wider uppercase">
                                     Agotado 🚫
                                   </span>
                                 </div>
@@ -1645,15 +1748,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                             {/* Inventory status helper text */}
                             {stockAlert.status !== 'available' && (
-                              <span className={`text-[9px] font-extrabold uppercase tracking-wider mb-1 block ${
+                              <span className={`text-[8px] sm:text-[9px] font-extrabold uppercase tracking-wider mb-0.5 block ${
                                 isOutOfStock ? 'text-rose-500' : 'text-amber-500 animate-pulse'
                               }`}>
                                 {stockAlert.text}
                               </span>
                             )}
                             
-                            <h5 className="font-bold text-xs sm:text-sm text-slate-900 tracking-tight leading-tight truncate w-full mb-1">{item.name}</h5>
-                            <div className="flex items-baseline justify-between gap-1 mt-auto w-full">
+                            <h5 className="font-extrabold text-xs sm:text-sm text-slate-900 tracking-tight leading-tight line-clamp-2 w-full mb-1 min-h-[2rem] flex items-center">{item.name}</h5>
+                            <div className="flex items-baseline justify-between gap-1 mt-auto w-full pt-1 border-t border-slate-50">
                               <span className="text-xs sm:text-sm text-slate-950 font-black">${item.price.toFixed(2)}</span>
                               <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">Bs. {(item.price * exchangeRate).toFixed(0)}</span>
                             </div>
@@ -2031,32 +2134,37 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Creating Delivery Modal */}
       <AnimatePresence>
         {isCreatingDelivery && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative my-8"
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] flex flex-col"
             >
-              <button 
-                onClick={() => {
-                  setIsCreatingDelivery(false);
-                  setDeliveryName('');
-                  setDeliveryPhone('');
-                  setDeliveryAddress('');
-                  setDeliveryPaymentMethod('Efectivo');
-                  setDeliveryPaymentReference('');
-                }}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                title="Cerrar"
-              >
-                <X size={20} />
-              </button>
-              
-              <h3 className="text-xl font-bold mb-1">Nuevo Delivery / Para Llevar</h3>
-              <p className="text-sm text-slate-500 mb-6">Completa los datos del nuevo pedido.</p>
+              <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Nuevo Delivery / Para Llevar</h3>
+                  <p className="text-xs text-slate-500">Completa los datos del nuevo pedido.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsCreatingDelivery(false);
+                    setDeliveryName('');
+                    setDeliveryPhone('');
+                    setDeliveryAddress('');
+                    setDeliveryReference('');
+                    setDeliveryWhatsappLocation('');
+                    setDeliveryPaymentMethod('Efectivo');
+                    setDeliveryPaymentReference('');
+                  }}
+                  className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
+                  title="Cerrar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-              <div className="space-y-4 mb-8">
+              <div className="space-y-4 overflow-y-auto pr-1 scrollbar-thin my-2 flex-1">
                 {/* Delivery Type Selector */}
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tipo de Pedido</label>
@@ -2064,7 +2172,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     <button
                       type="button"
                       onClick={() => setDeliveryType('delivery')}
-                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
                         deliveryType === 'delivery'
                           ? 'bg-black text-white border-black shadow-sm'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -2075,7 +2183,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     <button
                       type="button"
                       onClick={() => setDeliveryType('pickup')}
-                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
                         deliveryType === 'pickup'
                           ? 'bg-black text-white border-black shadow-sm'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -2088,37 +2196,37 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                 {/* Customer Name */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Cliente</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Nombre del Cliente</label>
                   <input 
                     type="text" 
                     value={deliveryName}
                     onChange={e => setDeliveryName(e.target.value)}
                     placeholder="Ej. María Gómez"
                     autoFocus
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
                   />
                 </div>
 
                 {/* Customer Phone */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Teléfono / WhatsApp</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Teléfono / WhatsApp</label>
                   <input 
                     type="tel" 
                     value={deliveryPhone}
                     onChange={e => setDeliveryPhone(e.target.value)}
                     placeholder="Ej. +58 412 1234567"
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
                   />
                 </div>
 
                 {/* Delivery Address & Zone (only if type is delivery) */}
                 {deliveryType === 'delivery' && (
-                  <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="space-y-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">
                         Zona de Envío <span className="text-amber-600 font-bold">(Tarifa de Delivery)</span>
                       </label>
-                      <div className="space-y-2">
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                         {deliveryZones.map(zone => {
                           const isSelected = selectedZoneId === zone.id;
                           return (
@@ -2126,7 +2234,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                               key={zone.id}
                               type="button"
                               onClick={() => setSelectedZoneId(zone.id)}
-                              className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                              className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
                                 isSelected
                                   ? 'bg-black text-white border-black font-bold shadow-sm'
                                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -2150,36 +2258,50 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Dirección de Entrega</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Dirección de Entrega</label>
                       <textarea 
                         value={deliveryAddress}
                         onChange={e => setDeliveryAddress(e.target.value)}
                         placeholder="Calle, avenida, edificio, nro de casa..."
                         rows={2}
-                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm resize-none"
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-2.5 outline-none focus:border-black font-medium text-xs resize-none"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Punto de Referencia</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Punto de Referencia</label>
                       <input 
                         type="text" 
                         value={deliveryReference}
                         onChange={e => setDeliveryReference(e.target.value)}
                         placeholder="Ej. Frente a la panadería, portón negro..."
-                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-2.5 outline-none focus:border-black font-medium text-xs"
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Enlace de Ubicación GPS (Opcional)</label>
+                      <div className="relative flex items-center">
+                        <Navigation className="absolute left-3 text-slate-400 -rotate-45" size={14} />
+                        <input 
+                          type="text" 
+                          value={deliveryWhatsappLocation}
+                          onChange={e => setDeliveryWhatsappLocation(e.target.value)}
+                          placeholder="Ej. https://maps.google.com/?q=... o link de WhatsApp"
+                          className="w-full bg-white border border-slate-200 rounded-2xl pl-8 pr-3 py-2.5 outline-none focus:border-black font-medium text-xs"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {/* Payment Method Selector */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Método de Pago</label>
                   <select
                     value={deliveryPaymentMethod}
                     onChange={e => setDeliveryPaymentMethod(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs"
                   >
                     <option value="Efectivo">Efectivo ($ / Bs)</option>
                     <option value="Pago Móvil">Pago Móvil (Bs)</option>
@@ -2191,9 +2313,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                 {/* Payment Reference & Receipt Photo for non-cash delivery */}
                 {deliveryPaymentMethod !== 'Efectivo' && (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
+                    {renderPaymentAccountDetails(deliveryPaymentMethod)}
+
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
                         Referencia de Pago <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
                       </label>
                       <input 
@@ -2202,12 +2326,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         onChange={e => setDeliveryPaymentReference(e.target.value)}
                         placeholder="Nro de referencia o confirmación"
                         required
-                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm font-mono"
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs font-mono"
                       />
                     </div>
 
                     <div>
-                      <div className="flex justify-between items-center mb-2">
+                      <div className="flex justify-between items-center mb-1.5">
                         <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
                           Comprobante / Foto de Pago <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span>
                         </label>
@@ -2215,14 +2339,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           <button 
                             type="button" 
                             onClick={() => setDeliveryReceiptImage(null)} 
-                            className="text-[10px] font-bold text-rose-500 hover:underline"
+                            className="text-[10px] font-bold text-rose-500 hover:underline cursor-pointer"
                           >
                             Eliminar foto
                           </button>
                         )}
                       </div>
 
-                      <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-3 cursor-pointer transition-all ${deliveryReceiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
+                      <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-2.5 cursor-pointer transition-all ${deliveryReceiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
                         <input 
                           type="file" 
                           accept="image/*" 
@@ -2258,13 +2382,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 )}
               </div>
 
-              <button 
-                onClick={createDelivery}
-                disabled={!deliveryName.trim()}
-                className={`w-full text-white p-4 rounded-xl font-bold transition-all flex justify-center items-center gap-2 ${deliveryName.trim() ? 'bg-black shadow-lg hover:scale-[1.02]' : 'bg-slate-300 cursor-not-allowed'}`}
-              >
-                Crear Pedido
-              </button>
+              <div className="pt-3 border-t border-slate-100 shrink-0">
+                <button 
+                  onClick={createDelivery}
+                  disabled={!deliveryName.trim()}
+                  className={`w-full text-white py-3.5 px-4 rounded-2xl font-bold text-sm transition-all flex justify-center items-center gap-2 cursor-pointer ${deliveryName.trim() ? 'bg-black shadow-lg hover:scale-[1.01]' : 'bg-slate-300 cursor-not-allowed'}`}
+                >
+                  Crear Pedido
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -2273,33 +2399,36 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Editing Delivery Info Modal */}
       <AnimatePresence>
         {isEditingDeliveryInfo && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative my-8"
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] flex flex-col"
             >
-              <button 
-                onClick={() => setIsEditingDeliveryInfo(null)}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                title="Cerrar"
-              >
-                <X size={20} />
-              </button>
-              
-              <h3 className="text-xl font-bold mb-1">Editar Datos del Pedido</h3>
-              <p className="text-sm text-slate-500 mb-6">Actualiza los datos de contacto y envío de este pedido.</p>
+              <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Editar Datos del Pedido</h3>
+                  <p className="text-xs text-slate-500">Actualiza los datos de contacto y envío de este pedido.</p>
+                </div>
+                <button 
+                  onClick={() => setIsEditingDeliveryInfo(null)}
+                  className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
+                  title="Cerrar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-              <div className="space-y-4 mb-8">
+              <div className="space-y-4 overflow-y-auto pr-1 scrollbar-thin my-2 flex-1">
                 {/* Delivery Type Selector */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tipo de Pedido</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Tipo de Pedido</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => setEditDeliveryType('delivery')}
-                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
                         editDeliveryType === 'delivery'
                           ? 'bg-black text-white border-black shadow-sm'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -2310,7 +2439,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     <button
                       type="button"
                       onClick={() => setEditDeliveryType('pickup')}
-                      className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all ${
+                      className={`py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
                         editDeliveryType === 'pickup'
                           ? 'bg-black text-white border-black shadow-sm'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
@@ -2323,36 +2452,36 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                 {/* Customer Name */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Cliente</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Nombre del Cliente</label>
                   <input 
                     type="text" 
                     value={editCustomerName}
                     onChange={e => setEditCustomerName(e.target.value)}
                     placeholder="Ej. María Gómez"
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
                   />
                 </div>
 
                 {/* Customer Phone */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Teléfono / WhatsApp</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Teléfono / WhatsApp</label>
                   <input 
                     type="tel" 
                     value={editCustomerPhone}
                     onChange={e => setEditCustomerPhone(e.target.value)}
                     placeholder="Ej. +58 412 1234567"
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
                   />
                 </div>
 
                 {/* Delivery Address & Zone (only if type is delivery) */}
                 {editDeliveryType === 'delivery' && (
-                  <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="space-y-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">
                         Zona de Envío <span className="text-amber-600 font-bold">(Tarifa de Delivery)</span>
                       </label>
-                      <div className="space-y-2">
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                         {deliveryZones.map(zone => {
                           const isSelected = editSelectedZoneId === zone.id;
                           return (
@@ -2360,7 +2489,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                               key={zone.id}
                               type="button"
                               onClick={() => setEditSelectedZoneId(zone.id)}
-                              className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                              className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between gap-2 cursor-pointer ${
                                 isSelected
                                   ? 'bg-black text-white border-black shadow-sm'
                                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -2384,36 +2513,50 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Dirección de Entrega</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Dirección de Entrega</label>
                       <textarea 
                         value={editCustomerAddress}
                         onChange={e => setEditCustomerAddress(e.target.value)}
                         placeholder="Calle, avenida, edificio, nro de casa..."
                         rows={2}
-                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm resize-none"
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-2.5 outline-none focus:border-black font-medium text-xs resize-none"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Punto de Referencia</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Punto de Referencia</label>
                       <input 
                         type="text" 
                         value={editDeliveryReference}
                         onChange={e => setEditDeliveryReference(e.target.value)}
                         placeholder="Ej. Frente a la panadería, portón negro..."
-                        className="w-full bg-white border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-sm"
+                        className="w-full bg-white border border-slate-200 rounded-2xl p-2.5 outline-none focus:border-black font-medium text-xs"
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Enlace de Ubicación GPS (Opcional)</label>
+                      <div className="relative flex items-center">
+                        <Navigation className="absolute left-3 text-slate-400 -rotate-45" size={14} />
+                        <input 
+                          type="text" 
+                          value={editWhatsappLocation}
+                          onChange={e => setEditWhatsappLocation(e.target.value)}
+                          placeholder="Ej. https://maps.google.com/?q=... o link de WhatsApp"
+                          className="w-full bg-white border border-slate-200 rounded-2xl pl-8 pr-3 py-2.5 outline-none focus:border-black font-medium text-xs"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {/* Payment Method Selector */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Método de Pago</label>
                   <select
                     value={editPaymentMethod}
                     onChange={e => setEditPaymentMethod(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs"
                   >
                     <option value="Efectivo">Efectivo ($ / Bs)</option>
                     <option value="Pago Móvil">Pago Móvil (Bs)</option>
@@ -2423,26 +2566,79 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </select>
                 </div>
 
-                {/* Payment Reference */}
+                {/* Payment Reference & Receipt Photo */}
                 {editPaymentMethod !== 'Efectivo' && (
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Referencia de Pago / Banco (Opcional)</label>
-                    <input 
-                      type="text" 
-                      value={editPaymentReference}
-                      onChange={e => setEditPaymentReference(e.target.value)}
-                      placeholder="Nro de referencia o confirmación"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
-                    />
+                  <div className="space-y-3">
+                    {renderPaymentAccountDetails(editPaymentMethod)}
+
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Referencia de Pago / Banco (Opcional)</label>
+                      <input 
+                        type="text" 
+                        value={editPaymentReference}
+                        onChange={e => setEditPaymentReference(e.target.value)}
+                        placeholder="Nro de referencia o confirmación"
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          Comprobante / Foto de Pago (Opcional)
+                        </label>
+                        {editDeliveryReceiptImage && (
+                          <button 
+                            type="button" 
+                            onClick={() => setEditDeliveryReceiptImage(null)} 
+                            className="text-[10px] font-bold text-rose-500 hover:underline cursor-pointer"
+                          >
+                            Eliminar foto
+                          </button>
+                        )}
+                      </div>
+
+                      <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-2.5 cursor-pointer transition-all ${editDeliveryReceiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setEditDeliveryReceiptImage(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }} 
+                          className="hidden" 
+                        />
+                        {editDeliveryReceiptImage ? (
+                          <div className="flex items-center gap-3 w-full">
+                            <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 border border-emerald-200 shrink-0">
+                              <img src={editDeliveryReceiptImage} alt="Comprobante" className="w-full h-full object-cover" />
+                            </div>
+                            <div className="text-left">
+                              <span className="text-xs font-bold text-emerald-800 block">Comprobante Adjuntado ✓</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-1">
+                            <span className="text-xs font-bold text-slate-600 block">Subir captura / foto del comprobante</span>
+                            <span className="text-[10px] text-slate-400 block">Soporta PNG, JPG</span>
+                          </div>
+                        )}
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-2 pt-3 border-t border-slate-100 shrink-0">
                 <button 
                   type="button"
                   onClick={() => setIsEditingDeliveryInfo(null)}
-                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 p-4 rounded-xl font-bold text-sm transition-colors"
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold text-xs transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -2464,8 +2660,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         deliveryZoneName: isDeliveryMode ? (activeZone?.name || '') : '',
                         deliveryFee: fee,
                         deliveryReference: isDeliveryMode ? editDeliveryReference.trim() : '',
+                        whatsappLocation: isDeliveryMode ? editWhatsappLocation.trim() : '',
                         paymentMethod: editPaymentMethod,
                         paymentReference: editPaymentReference.trim(),
+                        paymentReceiptImage: editDeliveryReceiptImage,
                         accounts: [{ id: 'default', name: editCustomerName.trim(), status: 'active' }]
                       });
                       
@@ -3990,6 +4188,41 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </div>
                 )}
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Full Resolution Receipt Image Modal */}
+      <AnimatePresence>
+        {viewingReceiptModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-4 max-w-lg w-full relative shadow-2xl space-y-3"
+            >
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                  🧾 Comprobante de Pago
+                </h3>
+                <button 
+                  onClick={() => setViewingReceiptModal(null)}
+                  className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="max-h-[75vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-950 flex items-center justify-center p-2">
+                <img src={viewingReceiptModal} alt="Comprobante de Pago" className="max-w-full max-h-[70vh] object-contain rounded-xl" />
+              </div>
+              <button 
+                onClick={() => setViewingReceiptModal(null)}
+                className="w-full bg-black text-white font-bold py-2.5 rounded-xl text-xs cursor-pointer"
+              >
+                Cerrar
+              </button>
             </motion.div>
           </div>
         )}

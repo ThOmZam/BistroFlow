@@ -60,6 +60,8 @@ export type CourseStatus = 'hold' | 'fired';
 export interface ExtraOption {
   name: string;
   price: number;
+  ingredientId?: string;
+  quantity?: number;
 }
 
 export interface OrderItem {

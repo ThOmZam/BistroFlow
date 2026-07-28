@@ -1512,6 +1512,19 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                           <span className="font-medium text-slate-600 italic">{viewingCompletedSession.deliveryReference}</span>
                         </div>
                       )}
+                      {(viewingCompletedSession.whatsappLocation || viewingCompletedSession.locationUrl) && (
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Ubicación GPS</span>
+                          <a 
+                            href={(viewingCompletedSession.whatsappLocation || viewingCompletedSession.locationUrl).startsWith('http') ? (viewingCompletedSession.whatsappLocation || viewingCompletedSession.locationUrl) : `https://${viewingCompletedSession.whatsappLocation || viewingCompletedSession.locationUrl}`} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:underline"
+                          >
+                            📍 Abrir enlace de ubicación GPS
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1529,9 +1542,22 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                     <div>
                       <span className="text-[9px] text-slate-400 uppercase font-black block mb-0.5">Referencia</span>
                       <span className="font-mono font-bold text-slate-800">
-                        {viewingCompletedSession.payment?.reference ? `#${viewingCompletedSession.payment.reference}` : 'Sin referencia'}
+                        {viewingCompletedSession.payment?.reference ? `#${viewingCompletedSession.payment.reference}` : (viewingCompletedSession.paymentReference ? `#${viewingCompletedSession.paymentReference}` : 'Sin referencia')}
                       </span>
                     </div>
+                    {(viewingCompletedSession.paymentReceiptImage || viewingCompletedSession.payment?.receiptImage) && (
+                      <div className="col-span-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[9px] text-slate-400 uppercase font-black block">Comprobante de Pago</span>
+                        <a 
+                          href={viewingCompletedSession.paymentReceiptImage || viewingCompletedSession.payment?.receiptImage} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-xl transition-colors"
+                        >
+                          📷 Ver Comprobante Adjunto
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
 

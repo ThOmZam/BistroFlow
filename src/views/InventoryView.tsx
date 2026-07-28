@@ -21,7 +21,12 @@ import {
   Eye, 
   PackageCheck,
   TrendingDown,
-  ShoppingBag
+  ShoppingBag,
+  Search,
+  Filter,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 interface IngredientWithCost extends Ingredient {
@@ -67,6 +72,16 @@ export default function InventoryView() {
   const [wasteNote, setWasteNote] = useState('');
   const [isSubmittingWaste, setIsSubmittingWaste] = useState(false);
   const [wastes, setWastes] = useState<any[]>([]);
+
+  // Search, Filter & Sort states for Insumos (Stock)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'critical' | 'optimal'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'cost' | 'status'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Search & Filter states for Recetas
+  const [recipeSearchTerm, setRecipeSearchTerm] = useState('');
+  const [recipeCategoryFilter, setRecipeCategoryFilter] = useState<string>('all');
 
   useEffect(() => {
     return onSnapshot(collection(db, 'inventory_wastes'), (snap) => {
@@ -395,8 +410,61 @@ export default function InventoryView() {
     }, 0);
   };
 
-  // Low stocks count
-  const lowStockCount = ingredients.filter(ing => ing.stock <= ing.minStock).length;
+  // Stock status counts
+  const criticalCount = ingredients.filter(ing => ing.stock <= ing.minStock).length;
+  const optimalCount = ingredients.filter(ing => ing.stock > ing.minStock).length;
+  const lowStockCount = criticalCount;
+
+  // Filtered & sorted ingredients list for Insumos (Stock) tab
+  const filteredAndSortedIngredients = ingredients
+    .filter((ing) => {
+      const term = searchTerm.trim().toLowerCase();
+      const matchesSearch = !term || 
+        ing.name.toLowerCase().includes(term) || 
+        ing.unit.toLowerCase().includes(term);
+
+      const isLow = ing.stock <= ing.minStock;
+      if (filterStatus === 'critical' && !isLow) return false;
+      if (filterStatus === 'optimal' && isLow) return false;
+
+      return matchesSearch;
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'name') {
+        comparison = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+      } else if (sortBy === 'stock') {
+        comparison = a.stock - b.stock;
+      } else if (sortBy === 'cost') {
+        comparison = (a.cost || 0) - (b.cost || 0);
+      } else if (sortBy === 'status') {
+        const aLow = a.stock <= a.minStock ? 1 : 0;
+        const bLow = b.stock <= b.minStock ? 1 : 0;
+        comparison = bLow - aLow; // Critical first by default
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+  // Alphabetically sorted ingredients for Purchase and Waste form selectors
+  const sortedIngredientsAlphabetical = [...ingredients].sort((a, b) => 
+    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  );
+
+  // Categories for Recipe Filter
+  const recipeCategories = Array.from(new Set(menu.map(i => i.category))).filter(Boolean);
+
+  // Filtered Recipes list
+  const filteredRecipes = menu.filter((item) => {
+    const term = recipeSearchTerm.trim().toLowerCase();
+    const matchesSearch = !term || 
+      item.name.toLowerCase().includes(term) || 
+      item.category.toLowerCase().includes(term);
+
+    if (recipeCategoryFilter !== 'all' && item.category !== recipeCategoryFilter) {
+      return false;
+    }
+    return matchesSearch;
+  });
 
   return (
     <div className="max-w-7xl mx-auto w-full pb-16 px-4 sm:px-6">
@@ -484,160 +552,347 @@ export default function InventoryView() {
       ) : (
         <>
           {activeTab === 'stock' && (
-            <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-slate-50/50 border-b border-slate-100">
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Insumo</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Costo Unitario ($)</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Stock Actual</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Alerta Min.</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Estado</th>
-                      <th className="p-6"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ingredients.map((ing) => {
-                      const isLow = ing.stock <= ing.minStock;
-                      return (
-                        <tr key={ing.id} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
-                          <td className="p-6">
-                            <div className="font-bold text-slate-900">{ing.name}</div>
-                            <div className="text-[10px] text-slate-400 font-mono uppercase">Unidad: {ing.unit}</div>
-                          </td>
-                          <td className="p-6">
-                            <div className="font-mono font-bold text-slate-800">
-                              ${(ing.cost || 0).toFixed(ing.unit === 'ml' ? 4 : 2)}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              Bs. {((ing.cost || 0) * exchangeRate).toFixed(2)}
-                            </div>
-                          </td>
-                          <td className="p-6">
-                            <div className={`font-mono font-bold text-lg ${isLow ? 'text-rose-500' : 'text-slate-900'}`}>
-                              {ing.stock} <span className="text-xs text-slate-400 font-bold uppercase">{ing.unit}</span>
-                            </div>
-                          </td>
-                          <td className="p-6">
-                            <div className="font-mono text-slate-400 text-sm">
-                              {ing.minStock} <span className="text-[10px] uppercase">{ing.unit}</span>
-                            </div>
-                          </td>
-                          <td className="p-6">
-                            {isLow ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-rose-50 text-rose-600 border border-rose-100">
-                                <AlertTriangle size={10} /> Stock Crítico
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-emerald-50 text-emerald-600 border border-emerald-100">
-                                Óptimo
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-6 text-right">
-                            <div className="flex gap-2 justify-end">
-                              <button 
-                                onClick={() => handleEditIng(ing)}
-                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-black transition-colors"
-                                title="Editar Insumo"
-                              >
-                                <Edit size={16} />
-                              </button>
-                              <button 
-                                onClick={() => handleDeleteIng(ing.id)}
-                                className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
-                                title="Eliminar Insumo"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </td>
+            <div className="space-y-4">
+              {/* Controls Bar: Search & Filters */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  {/* Search Bar */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar insumo por nombre o unidad (ej. Queso, Carne, kg)..."
+                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-medium placeholder:text-slate-400 outline-none focus:border-black focus:bg-white transition-all"
+                    />
+                    {searchTerm && (
+                      <button 
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none shrink-0">
+                    <button
+                      onClick={() => setFilterStatus('all')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        filterStatus === 'all' 
+                          ? 'bg-black text-white shadow-xs' 
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>Todos</span>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${filterStatus === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                        {ingredients.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setFilterStatus('critical')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        filterStatus === 'critical' 
+                          ? 'bg-rose-600 text-white shadow-xs' 
+                          : 'bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100'
+                      }`}
+                    >
+                      <AlertTriangle size={12} />
+                      <span>Stock Crítico</span>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${filterStatus === 'critical' ? 'bg-white/20 text-white' : 'bg-rose-200/60 text-rose-800'}`}>
+                        {criticalCount}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setFilterStatus('optimal')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        filterStatus === 'optimal' 
+                          ? 'bg-emerald-600 text-white shadow-xs' 
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <span>Óptimo</span>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${filterStatus === 'optimal' ? 'bg-white/20 text-white' : 'bg-emerald-200/60 text-emerald-800'}`}>
+                        {optimalCount}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sort Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
+                  <div className="flex items-center gap-2 text-slate-500 font-medium flex-wrap">
+                    <div className="flex items-center gap-1 text-slate-400">
+                      <Filter size={13} />
+                      <span>Ordenar por:</span>
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                      {[
+                        { id: 'name', label: 'Nombre' },
+                        { id: 'stock', label: 'Stock' },
+                        { id: 'cost', label: 'Costo' },
+                        { id: 'status', label: 'Estado' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => {
+                            if (sortBy === s.id) {
+                              setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                            } else {
+                              setSortBy(s.id as any);
+                              setSortOrder('asc');
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                            sortBy === s.id 
+                              ? 'bg-white text-black shadow-xs' 
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      title="Cambiar orden ascendente/descendente"
+                    >
+                      {sortOrder === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+                      <span>{sortOrder === 'asc' ? 'Ascendente' : 'Descendente'}</span>
+                    </button>
+
+                    {(searchTerm || filterStatus !== 'all') && (
+                      <button
+                        onClick={() => { setSearchTerm(''); setFilterStatus('all'); }}
+                        className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer ml-1"
+                      >
+                        Limpiar Filtros
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Insumos Table */}
+              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
+                {filteredAndSortedIngredients.length === 0 ? (
+                  <div className="py-16 px-4 text-center space-y-3">
+                    <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
+                      <Search size={22} />
+                    </div>
+                    <h5 className="font-bold text-slate-800 text-sm">No se encontraron insumos</h5>
+                    <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                      No hay insumos que coincidan con la búsqueda o el filtro seleccionado.
+                    </p>
+                    <button
+                      onClick={() => { setSearchTerm(''); setFilterStatus('all'); }}
+                      className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-black transition-colors inline-block mt-2"
+                    >
+                      Mostrar Todos los Insumos
+                    </button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[600px]">
+                      <thead>
+                        <tr className="bg-slate-50/50 border-b border-slate-100">
+                          <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Insumo</th>
+                          <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Costo Unitario ($)</th>
+                          <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Stock Actual</th>
+                          <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Alerta Min.</th>
+                          <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Estado</th>
+                          <th className="p-6"></th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {filteredAndSortedIngredients.map((ing) => {
+                          const isLow = ing.stock <= ing.minStock;
+                          return (
+                            <tr key={ing.id} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
+                              <td className="p-6">
+                                <div className="font-bold text-slate-900">{ing.name}</div>
+                                <div className="text-[10px] text-slate-400 font-mono uppercase">Unidad: {ing.unit}</div>
+                              </td>
+                              <td className="p-6">
+                                <div className="font-mono font-bold text-slate-800">
+                                  ${(ing.cost || 0).toFixed(ing.unit === 'ml' ? 4 : 2)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  Bs. {((ing.cost || 0) * exchangeRate).toFixed(2)}
+                                </div>
+                              </td>
+                              <td className="p-6">
+                                <div className={`font-mono font-bold text-lg ${isLow ? 'text-rose-500' : 'text-slate-900'}`}>
+                                  {ing.stock} <span className="text-xs text-slate-400 font-bold uppercase">{ing.unit}</span>
+                                </div>
+                              </td>
+                              <td className="p-6">
+                                <div className="font-mono text-slate-400 text-sm">
+                                  {ing.minStock} <span className="text-[10px] uppercase">{ing.unit}</span>
+                                </div>
+                              </td>
+                              <td className="p-6">
+                                {isLow ? (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-rose-50 text-rose-600 border border-rose-100">
+                                    <AlertTriangle size={10} /> Stock Crítico
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-emerald-50 text-emerald-600 border border-emerald-100">
+                                    Óptimo
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-6 text-right">
+                                <div className="flex gap-2 justify-end">
+                                  <button 
+                                    onClick={() => handleEditIng(ing)}
+                                    className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-black transition-colors"
+                                    title="Editar Insumo"
+                                  >
+                                    <Edit size={16} />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteIng(ing.id)}
+                                    className="p-2 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                                    title="Eliminar Insumo"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {activeTab === 'recipes' && (
-            <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[650px]">
-                  <thead>
-                    <tr className="bg-slate-50/50 border-b border-slate-100">
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Plato / Bebida</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Precio Venta</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Costo Estimado (Alimentos)</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Margen Bruto ($)</th>
-                      <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Margen %</th>
-                      <th className="p-6"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {menu.map((item) => {
-                      const foodCost = calculateFoodCost(item);
-                      const grossMargin = item.price - foodCost;
-                      const marginPercent = item.price > 0 ? (grossMargin / item.price) * 100 : 0;
-                      
-                      return (
-                        <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
-                          <td className="p-6 flex items-center gap-4">
-                            {item.image && (
-                              <img src={item.image} alt={item.name} className="w-12 h-12 rounded-xl object-cover" />
-                            )}
-                            <div>
-                              <div className="font-bold text-slate-900">{item.name}</div>
-                              <div className="text-[10px] text-slate-400 font-mono uppercase">{item.category}</div>
-                              <div className="text-[10px] text-slate-400 block mt-0.5">
-                                Receta: {item.recipe?.length || 0} ingredientes
-                              </div>
-                            </div>
-                          </td>
-                          <td className="p-6">
-                            <div className="font-mono font-bold text-slate-900">${item.price.toFixed(2)}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">Bs. {(item.price * exchangeRate).toFixed(2)}</div>
-                          </td>
-                          <td className="p-6">
-                            <div className="font-mono font-bold text-slate-800">${foodCost.toFixed(2)}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">Bs. {(foodCost * exchangeRate).toFixed(2)}</div>
-                          </td>
-                          <td className="p-6">
-                            <div className={`font-mono font-bold ${grossMargin > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                              ${grossMargin.toFixed(2)}
-                            </div>
-                          </td>
-                          <td className="p-6">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                                marginPercent > 60 
-                                  ? 'bg-emerald-50 text-emerald-700' 
-                                  : marginPercent > 40 
-                                  ? 'bg-amber-50 text-amber-700' 
-                                  : 'bg-rose-50 text-rose-700'
-                              }`}>
-                                {marginPercent.toFixed(1)}%
-                              </span>
-                              {marginPercent < 40 && (
-                                <span className="text-slate-400" title="Margen bajo para estándares de restauración"><TrendingDown size={14} className="text-rose-400" /></span>
+            <div className="space-y-4">
+              {/* Recipe Search & Category Bar */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input 
+                    type="text"
+                    value={recipeSearchTerm}
+                    onChange={(e) => setRecipeSearchTerm(e.target.value)}
+                    placeholder="Buscar plato o receta..."
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-medium placeholder:text-slate-400 outline-none focus:border-black focus:bg-white transition-all"
+                  />
+                  {recipeSearchTerm && (
+                    <button 
+                      onClick={() => setRecipeSearchTerm('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <span className="text-xs text-slate-400 font-bold shrink-0">Categoría:</span>
+                  <select
+                    value={recipeCategoryFilter}
+                    onChange={(e) => setRecipeCategoryFilter(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2 text-xs font-bold outline-none focus:border-black w-full sm:w-auto"
+                  >
+                    <option value="all">Todas ({menu.length})</option>
+                    {recipeCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[650px]">
+                    <thead>
+                      <tr className="bg-slate-50/50 border-b border-slate-100">
+                        <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Plato / Bebida</th>
+                        <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Precio Venta</th>
+                        <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Costo Estimado (Alimentos)</th>
+                        <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Margen Bruto ($)</th>
+                        <th className="p-6 text-[10px] uppercase tracking-widest font-bold text-slate-400">Margen %</th>
+                        <th className="p-6"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRecipes.map((item) => {
+                        const foodCost = calculateFoodCost(item);
+                        const grossMargin = item.price - foodCost;
+                        const marginPercent = item.price > 0 ? (grossMargin / item.price) * 100 : 0;
+                        
+                        return (
+                          <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
+                            <td className="p-6 flex items-center gap-4">
+                              {item.image && (
+                                <img src={item.image} alt={item.name} className="w-12 h-12 rounded-xl object-cover" />
                               )}
-                            </div>
-                          </td>
-                          <td className="p-6 text-right">
-                            <button 
-                              onClick={() => handleOpenRecipeModal(item)}
-                              className="text-xs bg-black text-white hover:bg-slate-800 px-4 py-2 rounded-xl font-bold transition-colors"
-                            >
-                              Configurar Receta
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                              <div>
+                                <div className="font-bold text-slate-900">{item.name}</div>
+                                <div className="text-[10px] text-slate-400 font-mono uppercase">{item.category}</div>
+                                <div className="text-[10px] text-slate-400 block mt-0.5">
+                                  Receta: {item.recipe?.length || 0} ingredientes
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-6">
+                              <div className="font-mono font-bold text-slate-900">${item.price.toFixed(2)}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">Bs. {(item.price * exchangeRate).toFixed(2)}</div>
+                            </td>
+                            <td className="p-6">
+                              <div className="font-mono font-bold text-slate-800">${foodCost.toFixed(2)}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">Bs. {(foodCost * exchangeRate).toFixed(2)}</div>
+                            </td>
+                            <td className="p-6">
+                              <div className={`font-mono font-bold ${grossMargin > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                ${grossMargin.toFixed(2)}
+                              </div>
+                            </td>
+                            <td className="p-6">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
+                                  marginPercent > 60 
+                                    ? 'bg-emerald-50 text-emerald-700' 
+                                    : marginPercent > 40 
+                                    ? 'bg-amber-50 text-amber-700' 
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}>
+                                  {marginPercent.toFixed(1)}%
+                                </span>
+                                {marginPercent < 40 && (
+                                  <span className="text-slate-400" title="Margen bajo para estándares de restauración"><TrendingDown size={14} className="text-rose-400" /></span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-6 text-right">
+                              <button 
+                                onClick={() => handleOpenRecipeModal(item)}
+                                className="text-xs bg-black text-white hover:bg-slate-800 px-4 py-2 rounded-xl font-bold transition-colors cursor-pointer"
+                              >
+                                Configurar Receta
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -663,7 +918,7 @@ export default function InventoryView() {
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:border-black"
                     >
                       <option value="">Selecciona...</option>
-                      {ingredients.map(i => (
+                      {sortedIngredientsAlphabetical.map(i => (
                         <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>
                       ))}
                     </select>
@@ -816,7 +1071,7 @@ export default function InventoryView() {
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:border-black"
                       >
                         <option value="">Selecciona...</option>
-                        {ingredients.map(i => (
+                        {sortedIngredientsAlphabetical.map(i => (
                           <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>
                         ))}
                       </select>
@@ -1106,7 +1361,7 @@ export default function InventoryView() {
                       className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:border-black"
                     >
                       <option value="">Insumo...</option>
-                      {ingredients.map(ing => (
+                      {sortedIngredientsAlphabetical.map(ing => (
                         <option key={ing.id} value={ing.id}>{ing.name} ({ing.unit})</option>
                       ))}
                     </select>

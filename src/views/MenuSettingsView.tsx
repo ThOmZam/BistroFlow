@@ -24,6 +24,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     price: 0, 
     category: '', 
     image: '',
+    recipe: [] as { ingredientId: string; quantity: number }[],
     scheduleType: 'always' as 'always' | 'breakfast' | 'lunch' | 'dinner' | 'custom',
     availableFrom: '',
     availableTo: '',
@@ -31,6 +32,16 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     extras: [] as ExtraOption[],
     preparationTime: '' as number | ''
   });
+
+  // Recipe form state inside modal
+  const [modalRecipeIngId, setModalRecipeIngId] = useState('');
+  const [modalRecipeQty, setModalRecipeQty] = useState('1');
+
+  // Extras form state
+  const [extraFormIngId, setExtraFormIngId] = useState('');
+  const [extraFormName, setExtraFormName] = useState('');
+  const [extraFormPrice, setExtraFormPrice] = useState('');
+  const [extraFormQty, setExtraFormQty] = useState('1');
 
   // Promotions State
   const [editingPromo, setEditingPromo] = useState<Promotion | null>(null);
@@ -208,6 +219,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       price: item.price, 
       category: item.category, 
       image: item.image || '',
+      recipe: item.recipe || [],
       scheduleType: item.scheduleType || 'always',
       availableFrom: item.availableFrom || '',
       availableTo: item.availableTo || '',
@@ -215,6 +227,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       extras: item.extras || [],
       preparationTime: item.preparationTime || ''
     });
+    setModalRecipeIngId('');
+    setModalRecipeQty('1');
   };
   const handleSaveMenu = async () => {
     if (isSavingMenu) return;
@@ -225,6 +239,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         price: Number(menuData.price),
         category: menuData.category,
         image: menuData.image,
+        recipe: menuData.recipe || [],
         scheduleType: menuData.scheduleType || 'always',
         availableFrom: menuData.availableFrom || '',
         availableTo: menuData.availableTo || '',
@@ -1589,11 +1604,11 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       {/* MODALS */}
       <AnimatePresence>
         {(editingItem || isCreatingMenu) && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative">
-              <button onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }} className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400"><X size={20} /></button>
-              <h3 className="text-xl font-bold mb-6">{isCreatingMenu ? 'Nuevo Platillo' : 'Editar Platillo'}</h3>
-              <div className="space-y-4 mb-8 max-h-[55vh] overflow-y-auto pr-2 scrollbar-thin">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-3xl sm:rounded-[40px] p-5 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col">
+              <button onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }} className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer"><X size={20} /></button>
+              <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6 pr-8">{isCreatingMenu ? 'Nuevo Platillo' : 'Editar Platillo'}</h3>
+              <div className="space-y-4 mb-4 sm:mb-6 max-h-[65vh] sm:max-h-[70vh] overflow-y-auto pr-1 sm:pr-2 scrollbar-thin">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre</label>
                   <input type="text" value={menuData.name} onChange={e => setMenuData({...menuData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium" />
@@ -1754,73 +1769,302 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   </div>
                 </div>
 
+                {/* Receta Base / Escandallo del Plato */}
+                <div className="pt-4 border-t border-slate-100">
+                  {(() => {
+                    const baseFoodCost = (menuData.recipe || []).reduce((acc, ri) => {
+                      const ing = ingredients.find(i => i.id === ri.ingredientId);
+                      return acc + ((ing?.cost || 0) * ri.quantity);
+                    }, 0);
+                    const foodCostMargin = menuData.price > 0 ? ((baseFoodCost / menuData.price) * 100) : 0;
+
+                    return (
+                      <>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Receta Base / Insumos Principales</label>
+                          {baseFoodCost > 0 && (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                              foodCostMargin > 35 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}>
+                              Costo: ${baseFoodCost.toFixed(2)} ({foodCostMargin.toFixed(1)}% FC)
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mb-3">Insumos que se descontarán automáticamente del inventario al preparar este plato:</p>
+
+                        {/* List of current base recipe ingredients */}
+                        <div className="space-y-2 mb-3">
+                          {(menuData.recipe || []).map((recipeItem, idx) => {
+                            const ing = ingredients.find(i => i.id === recipeItem.ingredientId);
+                            const ingCost = (ing?.cost || 0) * recipeItem.quantity;
+                            return (
+                              <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-2.5 gap-2">
+                                <div className="flex items-center gap-2 flex-wrap flex-1">
+                                  <span className="text-xs font-bold text-slate-800">📦 {ing ? ing.name : 'Insumo sin nombre'}</span>
+                                  {ing && (
+                                    <span className="text-[10px] text-slate-400 font-medium">(Stock: {ing.stock} {ing.unit})</span>
+                                  )}
+                                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-0.5 rounded-lg ml-auto">
+                                    <span className="text-[10px] font-bold text-slate-500">Cant:</span>
+                                    <input 
+                                      type="number"
+                                      step="any"
+                                      min="0.01"
+                                      value={recipeItem.quantity}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        const updated = [...(menuData.recipe || [])];
+                                        updated[idx] = { ...updated[idx], quantity: val };
+                                        setMenuData({ ...menuData, recipe: updated });
+                                      }}
+                                      className="w-16 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-xs font-black text-slate-900 outline-none text-center"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-600">{ing ? ing.unit : 'und'}</span>
+                                  </div>
+                                  {ingCost > 0 && (
+                                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                                      ${ingCost.toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (menuData.recipe || []).filter((_, i) => i !== idx);
+                                    setMenuData({ ...menuData, recipe: updated });
+                                  }}
+                                  className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {(menuData.recipe || []).length === 0 && (
+                            <p className="text-[10px] italic text-slate-400">No hay ingredientes en la receta base. Agrega insumos para descontar stock al cocinar.</p>
+                          )}
+                        </div>
+
+                        {/* Add base ingredient form */}
+                        <div className="flex gap-2 items-center bg-slate-50/70 border border-slate-200/70 rounded-2xl p-2.5">
+                          <div className="flex-1">
+                            <select
+                              value={modalRecipeIngId}
+                              onChange={(e) => setModalRecipeIngId(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-medium text-slate-800"
+                            >
+                              <option value="">-- Seleccionar Insumo de Inventario --</option>
+                              {ingredients.map(ing => (
+                                <option key={ing.id} value={ing.id}>
+                                  📦 {ing.name} (Stock: {ing.stock} {ing.unit})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="w-24 relative flex items-center">
+                            <input 
+                              type="number"
+                              step="any"
+                              min="0.01"
+                              placeholder="Cant."
+                              value={modalRecipeQty}
+                              onChange={(e) => setModalRecipeQty(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-extrabold text-slate-900"
+                            />
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              if (modalRecipeIngId) {
+                                const qty = parseFloat(modalRecipeQty) || 1;
+                                const existingIdx = (menuData.recipe || []).findIndex(r => r.ingredientId === modalRecipeIngId);
+                                let updated = [...(menuData.recipe || [])];
+                                if (existingIdx >= 0) {
+                                  updated[existingIdx] = { ...updated[existingIdx], quantity: updated[existingIdx].quantity + qty };
+                                } else {
+                                  updated.push({ ingredientId: modalRecipeIngId, quantity: qty });
+                                }
+                                setMenuData({ ...menuData, recipe: updated });
+                                setModalRecipeIngId('');
+                                setModalRecipeQty('1');
+                              }
+                            }}
+                            className="px-3 h-[34px] bg-black hover:bg-slate-800 text-white rounded-xl font-black text-xs cursor-pointer flex items-center justify-center shrink-0"
+                            title="Agregar Insumo a la Receta Base"
+                          >
+                            <Plus size={16} />
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
                 <div className="pt-4 border-t border-slate-100">
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Ingredientes Extras / Adicionales</label>
                   <p className="text-[10px] text-slate-400 mb-3">Define los ingredientes adicionales que los clientes pueden agregar a este platillo:</p>
                   
                   {/* List of current extras */}
                   <div className="space-y-2 mb-3">
-                    {(menuData.extras || []).map((extra, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-700">{extra.name}</span>
-                          <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg">+${extra.price.toFixed(2)}</span>
+                    {(menuData.extras || []).map((extra, idx) => {
+                      const linkedIng = ingredients.find(i => i.id === extra.ingredientId || i.name.toLowerCase() === extra.name.toLowerCase());
+                      return (
+                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-2.5 gap-2">
+                          <div className="flex items-center gap-2 flex-wrap flex-1">
+                            <span className="text-xs font-bold text-slate-800">{extra.name}</span>
+                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-lg">+${extra.price.toFixed(2)}</span>
+                            {linkedIng ? (
+                              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-lg">
+                                <span className="text-[10px] font-bold text-emerald-800">📦 Descontar:</span>
+                                <input 
+                                  type="number"
+                                  step="any"
+                                  min="0.01"
+                                  value={extra.quantity ?? 1}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    const updated = [...(menuData.extras || [])];
+                                    updated[idx] = { 
+                                      ...updated[idx], 
+                                      ingredientId: linkedIng.id, 
+                                      quantity: val 
+                                    };
+                                    setMenuData({ ...menuData, extras: updated });
+                                  }}
+                                  className="w-16 bg-white border border-emerald-300 rounded px-1.5 py-0.5 text-xs font-black text-emerald-900 outline-none text-center"
+                                />
+                                <span className="text-[10px] font-bold text-emerald-700">{linkedIng.unit} de {linkedIng.name}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">(Sin insumo vinculado)</span>
+                            )}
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const updated = (menuData.extras || []).filter((_, i) => i !== idx);
+                              setMenuData({ ...menuData, extras: updated });
+                            }}
+                            className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded-lg transition-colors cursor-pointer shrink-0"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const updated = (menuData.extras || []).filter((_, i) => i !== idx);
-                            setMenuData({ ...menuData, extras: updated });
-                          }}
-                          className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {(menuData.extras || []).length === 0 && (
                       <p className="text-[10px] italic text-slate-400">No hay adicionales configurados para este plato.</p>
                     )}
                   </div>
 
                   {/* Add extra form */}
-                  <div className="flex gap-2 items-center bg-slate-50/50 border border-slate-100 rounded-2xl p-3">
-                    <div className="flex-1">
-                      <input 
-                        type="text" 
-                        placeholder="Nombre (ej: Queso Cheddar)" 
-                        id="new-extra-name"
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none focus:border-black text-xs font-medium"
-                      />
-                    </div>
-                    <div className="w-24">
-                      <input 
-                        type="number" 
-                        placeholder="Precio $" 
-                        id="new-extra-price"
-                        step="0.1"
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none focus:border-black text-xs font-bold text-indigo-600"
-                      />
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        const nameEl = document.getElementById('new-extra-name') as HTMLInputElement;
-                        const priceEl = document.getElementById('new-extra-price') as HTMLInputElement;
-                        const name = nameEl?.value?.trim();
-                        const price = Number(priceEl?.value || '0');
-                        if (name) {
-                          const updated = [...(menuData.extras || []), { name, price }];
-                          setMenuData({ ...menuData, extras: updated });
-                          if (nameEl) nameEl.value = '';
-                          if (priceEl) priceEl.value = '';
-                        }
-                      }}
-                      className="px-3 py-2 bg-black hover:bg-slate-800 text-white rounded-lg font-black text-xs cursor-pointer flex items-center justify-center h-[34px]"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
+                  {(() => {
+                    const selectedIngForForm = ingredients.find(i => i.id === extraFormIngId);
+                    return (
+                      <div className="flex flex-col gap-2.5 bg-slate-50/70 border border-slate-200/70 rounded-2xl p-3">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                            Vincular Insumo de Inventario (Opcional)
+                          </label>
+                          <select
+                            value={extraFormIngId}
+                            onChange={(e) => {
+                              const ingId = e.target.value;
+                              setExtraFormIngId(ingId);
+                              const selectedIng = ingredients.find(i => i.id === ingId);
+                              if (selectedIng) {
+                                if (!extraFormName) setExtraFormName(selectedIng.name);
+                              }
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded-xl p-2.5 outline-none focus:border-black text-xs font-medium text-slate-800"
+                          >
+                            <option value="">-- Sin Vincular a Inventario --</option>
+                            {ingredients.map(ing => (
+                              <option key={ing.id} value={ing.id}>
+                                📦 {ing.name} (Stock: {ing.stock} {ing.unit})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-5 sm:col-span-5">
+                            <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">Nombre Extra</label>
+                            <input 
+                              type="text" 
+                              placeholder="Ej: Tocineta Extra" 
+                              value={extraFormName}
+                              onChange={(e) => setExtraFormName(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-medium"
+                            />
+                          </div>
+
+                          <div className="col-span-3 sm:col-span-3">
+                            <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                              Cant. ({selectedIngForForm ? selectedIngForForm.unit : 'uds'})
+                            </label>
+                            <div className="relative flex items-center">
+                              <input 
+                                type="number" 
+                                placeholder="Cant." 
+                                value={extraFormQty}
+                                onChange={(e) => setExtraFormQty(e.target.value)}
+                                step="any"
+                                min="0.01"
+                                className="w-full bg-white border border-slate-200 rounded-xl p-2 pr-6 outline-none focus:border-black text-xs font-extrabold text-emerald-800"
+                              />
+                              {selectedIngForForm && (
+                                <span className="absolute right-2 text-[9px] font-extrabold text-emerald-700 pointer-events-none">
+                                  {selectedIngForForm.unit}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="col-span-3 sm:col-span-3">
+                            <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">Precio $</label>
+                            <input 
+                              type="number" 
+                              placeholder="0.00" 
+                              value={extraFormPrice}
+                              onChange={(e) => setExtraFormPrice(e.target.value)}
+                              step="0.01"
+                              min="0"
+                              className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-bold text-indigo-600"
+                            />
+                          </div>
+
+                          <div className="col-span-1 flex justify-end">
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const name = extraFormName.trim();
+                                const price = parseFloat(extraFormPrice) || 0;
+                                const qty = parseFloat(extraFormQty) || 1;
+
+                                if (name) {
+                                  const newExtraOption: ExtraOption = {
+                                    name,
+                                    price,
+                                    ...(extraFormIngId ? { ingredientId: extraFormIngId, quantity: qty } : {})
+                                  };
+                                  setMenuData({ ...menuData, extras: [...(menuData.extras || []), newExtraOption] });
+                                  setExtraFormIngId('');
+                                  setExtraFormName('');
+                                  setExtraFormPrice('');
+                                  setExtraFormQty('1');
+                                }
+                              }}
+                              className="w-full h-[34px] bg-black hover:bg-slate-800 text-white rounded-xl font-black text-xs cursor-pointer flex items-center justify-center transition-colors"
+                              title="Agregar Adicional"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
               <button onClick={handleSaveMenu} className="w-full bg-black text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0"><Save size={18}/> Guardar Cambios</button>

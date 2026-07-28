@@ -24,12 +24,13 @@ import {
   Download,
   MessageCircle,
   ExternalLink,
-  Upload
+  Upload,
+  Truck
 } from 'lucide-react';
 import { collection, addDoc, doc, updateDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { useRestaurantData } from '../hooks/useRestaurantData';
+import { useRestaurantData, DEFAULT_DELIVERY_ZONES } from '../hooks/useRestaurantData';
 import { logAction } from '../lib/logger';
 import { MenuItem, ExtraOption } from '../types';
 import PromotionsBanner from '../components/PromotionsBanner';
@@ -1406,29 +1407,31 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* CHECKOUT FLOW WIZARD MODAL */}
       <AnimatePresence>
         {isOrdering && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
             <motion.div 
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl"
+              className="w-full max-w-lg bg-white rounded-t-[32px] sm:rounded-3xl p-4 sm:p-6 max-h-[92vh] flex flex-col shadow-2xl relative"
             >
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3 shrink-0">
                 <div>
-                  <h3 className="text-2xl font-black tracking-tight">
+                  <h3 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
                     {qrTable ? `Mesa ${qrTable.number} - Enviar a Cocina` : 'Formulario de Pago'}
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     {qrTable ? 'Ingresa tu nombre para procesar tu orden.' : 'Completa tus datos de envío y pago.'}
                   </p>
                 </div>
                 <button 
                   onClick={() => setIsOrdering(false)}
-                  className="text-xs font-bold text-slate-400 hover:text-rose-500 uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100"
+                  className="text-xs font-bold text-slate-500 hover:text-rose-500 uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-full cursor-pointer transition-colors"
                 >
                   Cerrar
                 </button>
               </div>
+
+              <div className="overflow-y-auto pr-1 scrollbar-thin my-1 flex-1 space-y-4">
 
               {qrTable ? (
                 /* Streamlined Dine-in QR Checkout */
@@ -1865,6 +1868,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   </button>
                 </>
               )}
+              </div>
             </motion.div>
           </div>
         )}

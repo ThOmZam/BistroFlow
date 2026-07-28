@@ -71,6 +71,44 @@ export default function ChatView({ currentUser }: { currentUser: any }) {
     }
   };
 
+  const formatDateHeader = (date: Date) => {
+    const now = new Date();
+    const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const diffTime = todayDay.getTime() - msgDay.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+
+    if (diffDays === 0) return 'Hoy';
+    if (diffDays === 1) return 'Ayer';
+    
+    return date.toLocaleDateString('es-ES', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'short'
+    });
+  };
+
+  const formatMessageTime = (timestamp: any) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (isToday) return timeStr;
+
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+
+    if (isYesterday) return `Ayer ${timeStr}`;
+
+    return `${date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })} • ${timeStr}`;
+  };
+
   const getAreaIcon = (role: string) => {
     switch (role) {
       case 'admin':
@@ -130,51 +168,69 @@ export default function ChatView({ currentUser }: { currentUser: any }) {
             <p className="text-xs">¡Inicia la conversación! Envía un mensaje o usa una de las respuestas rápidas inferiores.</p>
           </div>
         ) : (
-          messages.map((msg, index) => {
-            const isSelf = msg.senderName === currentUser.name && msg.senderRole === currentUser.role;
-            const timeStr = msg.timestamp 
-              ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-              : '';
+          (() => {
+            let lastDateStr = '';
+            return messages.map((msg, index) => {
+              const isSelf = msg.senderName === currentUser.name && msg.senderRole === currentUser.role;
+              const msgDate = msg.timestamp ? new Date(msg.timestamp) : null;
+              const hasValidDate = msgDate && !isNaN(msgDate.getTime());
+              const dateHeaderStr = hasValidDate ? formatDateHeader(msgDate!) : '';
+              const showDateSeparator = hasValidDate && dateHeaderStr && dateHeaderStr !== lastDateStr;
+              if (showDateSeparator) {
+                lastDateStr = dateHeaderStr;
+              }
 
-            return (
-              <div 
-                key={msg.id || index}
-                className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
-              >
-                {/* Meta info block */}
-                <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] text-slate-400 font-bold mb-1">
-                  {!isSelf && getAreaIcon(msg.senderRole)}
-                  <span className={`${isSelf ? 'text-slate-600' : 'text-slate-700'}`}>
-                    {msg.senderArea} • <strong className="text-slate-900">{msg.senderName}</strong>
-                  </span>
-                  <Clock size={9} className="ml-0.5 opacity-55" />
-                  <span>{timeStr}</span>
-                </div>
+              const formattedTime = formatMessageTime(msg.timestamp);
 
-                {/* Bubble */}
-                <div className={`p-3 sm:p-4 rounded-[20px] sm:rounded-[24px] border shadow-sm text-xs leading-relaxed flex flex-col gap-1 ${
-                  isSelf 
-                    ? 'bg-black text-white border-black rounded-tr-none' 
-                    : `${getAreaBg(msg.senderRole, false)} rounded-tl-none`
-                }`}>
-                  {/* Workspace Origin Indicator */}
-                  <div className={`flex items-center gap-1 text-[8px] sm:text-[9px] font-black tracking-widest uppercase pb-1 border-b ${
-                    isSelf 
-                      ? 'text-indigo-300 border-white/10' 
-                      : msg.senderRole === 'cook' ? 'text-rose-600 border-rose-200/50' :
-                        msg.senderRole === 'finance' ? 'text-indigo-600 border-indigo-200/50' :
-                        msg.senderRole === 'admin' ? 'text-amber-600 border-amber-200/50' :
-                        'text-sky-600 border-sky-200/50'
-                  }`}>
-                    {msg.senderRole === 'cook' ? '🔥 Cocina' :
-                     msg.senderRole === 'finance' ? '💵 Caja / Finanzas' :
-                     msg.senderRole === 'admin' ? '🛡️ Administración' : '🛎️ Salón / Mesero'}
+              return (
+                <React.Fragment key={msg.id || index}>
+                  {showDateSeparator && (
+                    <div className="flex items-center justify-center my-3">
+                      <div className="bg-slate-200/90 text-slate-700 text-[10px] font-extrabold uppercase tracking-wider px-3 py-0.5 rounded-full shadow-xs border border-slate-300/60 flex items-center gap-1">
+                        <span>📅 {dateHeaderStr}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div 
+                    className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isSelf ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                  >
+                    {/* Meta info block */}
+                    <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] text-slate-400 font-bold mb-1">
+                      {!isSelf && getAreaIcon(msg.senderRole)}
+                      <span className={`${isSelf ? 'text-slate-600' : 'text-slate-700'}`}>
+                        {msg.senderArea} • <strong className="text-slate-900">{msg.senderName}</strong>
+                      </span>
+                      <Clock size={9} className="ml-0.5 opacity-55" />
+                      <span className="text-slate-500 font-mono">{formattedTime}</span>
+                    </div>
+
+                    {/* Bubble */}
+                    <div className={`p-3 sm:p-4 rounded-[20px] sm:rounded-[24px] border shadow-sm text-xs leading-relaxed flex flex-col gap-1 ${
+                      isSelf 
+                        ? 'bg-black text-white border-black rounded-tr-none' 
+                        : `${getAreaBg(msg.senderRole, false)} rounded-tl-none`
+                    }`}>
+                      {/* Workspace Origin Indicator */}
+                      <div className={`flex items-center gap-1 text-[8px] sm:text-[9px] font-black tracking-widest uppercase pb-1 border-b ${
+                        isSelf 
+                          ? 'text-indigo-300 border-white/10' 
+                          : msg.senderRole === 'cook' ? 'text-rose-600 border-rose-200/50' :
+                            msg.senderRole === 'finance' ? 'text-indigo-600 border-indigo-200/50' :
+                            msg.senderRole === 'admin' ? 'text-amber-600 border-amber-200/50' :
+                            'text-sky-600 border-sky-200/50'
+                      }`}>
+                        {msg.senderRole === 'cook' ? '🔥 Cocina' :
+                         msg.senderRole === 'finance' ? '💵 Caja / Finanzas' :
+                         msg.senderRole === 'admin' ? '🛡️ Administración' : '🛎️ Salón / Mesero'}
+                      </div>
+                      <p className="font-semibold">{msg.text}</p>
+                    </div>
                   </div>
-                  <p className="font-semibold">{msg.text}</p>
-                </div>
-              </div>
-            );
-          })
+                </React.Fragment>
+              );
+            });
+          })()
         )}
         <div ref={messagesEndRef} />
       </div>
