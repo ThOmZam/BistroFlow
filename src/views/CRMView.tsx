@@ -501,7 +501,7 @@ export default function CRMView() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16 px-4 sm:px-6" id="crm-enterprise-view">
+    <div className="w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16" id="crm-enterprise-view">
       
       {/* SECTION HEADER */}
       <div className="border-b border-slate-200/60 pb-5 shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">

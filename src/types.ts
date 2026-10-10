@@ -143,3 +143,74 @@ export interface CustomerFeedback {
   timestamp: string;
 }
 
+export type CurrencyCode = 'USD' | 'EUR' | 'USDT';
+
+export interface ExchangeRateInfo {
+  code: CurrencyCode;
+  name: string;
+  symbol: string;
+  rate: number; // Tasa en Bolívares (VES)
+  source: string;
+  lastUpdated?: string;
+}
+
+export interface AppCurrencyRates {
+  USD: ExchangeRateInfo;
+  EUR: ExchangeRateInfo;
+  USDT: ExchangeRateInfo;
+}
+
+export interface PaymentMethodItem {
+  id: string;
+  name: string;
+  type: 'pago_movil' | 'punto' | 'zelle' | 'divisa' | 'credito' | 'custom';
+  currency: 'USD' | 'Bs' | 'EUR' | 'USDT' | 'any';
+  enabled: boolean;
+  requiresReference: boolean;
+  details?: {
+    bank?: string;
+    phone?: string;
+    idNumber?: string;
+    email?: string;
+    accountHolder?: string;
+    notes?: string;
+  };
+}
+
+export interface Coupon {
+  id: string;
+  code: string;
+  title: string;
+  description?: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  minSpend?: number;
+  maxDiscount?: number;
+  usageLimit?: number | null;
+  usedCount: number;
+  perUserLimit?: number;
+  expiresAt?: string;
+  startsAt?: string;
+  status: 'active' | 'paused' | 'expired';
+  applicableChannel?: 'all' | 'delivery' | 'dine-in';
+  createdAt: string;
+}
+
+export interface FlashDeal {
+  id: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  badge: string;
+  image?: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  appliesTo: 'all' | 'category' | 'items';
+  targetCategory?: string;
+  targetItemIds?: string[];
+  startsAt: string;
+  endsAt: string;
+  status: 'active' | 'scheduled' | 'expired' | 'paused';
+  createdAt: string;
+}
+

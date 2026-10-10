@@ -103,7 +103,7 @@ export default function MyShiftView({ currentUser }: MyShiftViewProps) {
         id: empId,
         name,
         role,
-        pin: role === 'admin' ? '1111' : role === 'waiter' ? '2222' : role === 'cook' ? '3333' : role === 'finance' ? '4444' : '0000'
+        pin: ''
       };
     }
 
@@ -405,7 +405,7 @@ export default function MyShiftView({ currentUser }: MyShiftViewProps) {
 
 
   return (
-    <div className="max-w-6xl w-full mx-auto pb-20 px-4 min-w-0">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8">
         <h2 className="text-2xl font-black tracking-tight text-slate-900">Mi Control de Asistencia</h2>
         <p className="text-slate-400 text-sm mt-1">Registra tu jornada de trabajo y revisa tus horarios.</p>

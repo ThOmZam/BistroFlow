@@ -45,6 +45,7 @@ import {
   Info
 } from 'lucide-react';
 import { useRestaurantData } from '../hooks/useRestaurantData';
+import { useCurrency } from '../context/CurrencyContext';
 import {
   AreaChart,
   Area,
@@ -97,7 +98,18 @@ interface SupplierBill {
 
 export default function FinanceView() {
   const { settings, tables } = useRestaurantData();
-  const exchangeRate = settings?.exchangeRate || 40;
+  const { 
+    activeCurrency, 
+    currentRateBs, 
+    currencySymbol,
+    convert,
+    toBolivares,
+    formatPrice,
+    formatActive,
+    formatBs,
+    formatWithBs 
+  } = useCurrency();
+  const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
 
   // Real-time states
   const [sessions, setSessions] = useState<any[]>([]);
@@ -171,8 +183,8 @@ Referencia:  ${reference}
         const total = qty * price;
         const qtyStr = `${qty}x`.padEnd(5);
         const nameStr = (o.itemName || o.menuItem?.name || 'Producto').substring(0, 22).padEnd(22);
-        const priceStr = `$${price.toFixed(2)}`.padStart(6);
-        const totalStr = `$${total.toFixed(2)}`.padStart(7);
+        const priceStr = formatPrice(price).padStart(8);
+        const totalStr = formatPrice(total).padStart(9);
         text += `${qtyStr}${nameStr}${priceStr} ${totalStr}\n`;
         if (o.note) {
           text += `     * Nota: ${o.note}\n`;
@@ -181,8 +193,8 @@ Referencia:  ${reference}
       text += `----------------------------------------\n`;
     }
 
-    text += `MONTO TOTAL:`.padEnd(30) + `$${entry.amount.toFixed(2)}`.padStart(10) + `\n`;
-    text += `EQUIVALENTE:`.padEnd(25) + `Bs. ${(entry.amount * exchangeRate).toFixed(2)}`.padStart(15) + `\n`;
+    text += `MONTO TOTAL:`.padEnd(26) + formatPrice(entry.amount).padStart(14) + `\n`;
+    text += `EQUIVALENTE:`.padEnd(20) + formatBs(toBolivares(entry.amount)).padStart(20) + `\n`;
 
     if (entry.isFiscal) {
       text += `----------------------------------------\n`;
@@ -226,8 +238,8 @@ Referencia:  ${reference}
               <tr>
                 <td>${o.quantity || 1}x</td>
                 <td>${o.itemName || o.menuItem?.name || 'Producto'}</td>
-                <td align="right">$${Number(o.price || 0).toFixed(2)}</td>
-                <td align="right">$${((o.price || 0) * (o.quantity || 1)).toFixed(2)}</td>
+                <td align="right">${formatPrice(Number(o.price || 0))}</td>
+                <td align="right">${formatPrice((o.price || 0) * (o.quantity || 1))}</td>
               </tr>
               ${o.note ? `<tr><td colspan="4" style="font-style: italic; font-size: 9px; padding-left: 10px;">* Nota: ${o.note}</td></tr>` : ''}
             `).join('')}
@@ -271,11 +283,11 @@ Referencia:  ${reference}
               <hr />
               <div class="flex-row" style="margin: 5px 0;">
                 <span class="bold">TOTAL:</span>
-                <span class="bold">$${entry.amount.toFixed(2)}</span>
+                <span class="bold">${formatPrice(entry.amount)}</span>
               </div>
               <div class="flex-row" style="margin: 5px 0;">
                 <span class="bold">EQUIVALENTE:</span>
-                <span class="bold">Bs. ${(entry.amount * exchangeRate).toFixed(2)}</span>
+                <span class="bold">${formatBs(toBolivares(entry.amount))}</span>
               </div>
               ${entry.isFiscal ? `
                 <hr />
@@ -997,7 +1009,7 @@ Referencia:  ${reference}
   }
 
   return (
-    <div className="max-w-7xl mx-auto w-full pb-16 px-4 sm:px-6">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       {/* Header */}
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>

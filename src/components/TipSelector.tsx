@@ -1,9 +1,10 @@
 import React from 'react';
 import { DollarSign, Sparkles } from 'lucide-react';
+import { useCurrency } from '../context/CurrencyContext';
 
 interface TipSelectorProps {
   subtotalUSD: number;
-  exchangeRate: number;
+  exchangeRate?: number;
   tipAmountUSD: number;
   setTipAmountUSD: (amount: number) => void;
   tipPercent: number | null;
@@ -14,7 +15,7 @@ interface TipSelectorProps {
 
 export default function TipSelector({
   subtotalUSD,
-  exchangeRate,
+  exchangeRate: propExchangeRate,
   tipAmountUSD,
   setTipAmountUSD,
   tipPercent,
@@ -22,6 +23,9 @@ export default function TipSelector({
   enabled = true,
   tipOptions = [10, 15, 20]
 }: TipSelectorProps) {
+  const { activeCurrency, currentRateBs, formatPrice, toBolivares, formatBs } = useCurrency();
+  const exchangeRate = propExchangeRate || currentRateBs;
+
   if (!enabled) return null;
 
   const handleSelectPercent = (pct: number) => {
@@ -44,7 +48,7 @@ export default function TipSelector({
         </span>
         {tipAmountUSD > 0 && (
           <span className="text-xs font-extrabold bg-amber-500 text-white px-2.5 py-0.5 rounded-full">
-            +${tipAmountUSD.toFixed(2)} (Bs. {(tipAmountUSD * exchangeRate).toFixed(2)})
+            +{formatPrice(tipAmountUSD)} ({formatBs(toBolivares(tipAmountUSD))})
           </span>
         )}
       </div>
@@ -65,7 +69,7 @@ export default function TipSelector({
               }`}
             >
               <div className="text-xs font-black">{pct}%</div>
-              <div className="text-[10px] opacity-90">${valUSD.toFixed(2)}</div>
+              <div className="text-[10px] opacity-90">{formatPrice(valUSD)}</div>
             </button>
           );
         })}
@@ -80,13 +84,13 @@ export default function TipSelector({
           }`}
         >
           <div className="text-xs font-bold">Sin Propina</div>
-          <div className="text-[10px] opacity-75">$0.00</div>
+          <div className="text-[10px] opacity-75">{formatPrice(0)}</div>
         </button>
       </div>
 
       {/* Manual Tip Amount Input if user wants another amount */}
       <div className="pt-1 flex items-center gap-2">
-        <label className="text-[10px] font-bold text-amber-900 shrink-0">Otro Monto ($):</label>
+        <label className="text-[10px] font-bold text-amber-900 shrink-0">Otro Monto ({activeCurrency}):</label>
         <input
           type="number"
           step="0.5"

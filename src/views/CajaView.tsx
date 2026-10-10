@@ -45,11 +45,27 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useRestaurantData } from '../hooks/useRestaurantData';
+import { useCurrency } from '../context/CurrencyContext';
+import CurrencySelector from '../components/CurrencySelector';
 import { playClickSound, playCashSound, playSuccessSound, playErrorSound } from '../lib/audio';
 
 export default function CajaView({ currentUser }: { currentUser?: any }) {
   const { settings, tables } = useRestaurantData();
-  const exchangeRate = settings?.exchangeRate || 40;
+  const { 
+    activeCurrency, 
+    setActiveCurrency, 
+    rates, 
+    currentRate, 
+    currentRateBs, 
+    currencySymbol,
+    convert,
+    toBolivares,
+    formatPrice,
+    formatActive,
+    formatBs,
+    formatWithBs 
+  } = useCurrency();
+  const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
 
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [validatedSessions, setValidatedSessions] = useState<any[]>([]);
@@ -168,6 +184,10 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
 
   const handleOpenShift = async () => {
     if (isSubmittingShift) return;
+    if (activeShift) {
+      showToast('⚠️ Ya existe un turno de caja abierto actualmente.');
+      return;
+    }
     setIsSubmittingShift(true);
     try {
       const cashier = openingCashierName.trim() || currentUser?.name || localStorage.getItem('demo_user_name') || 'Cajero';
@@ -512,6 +532,13 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   };
 
   const executeApprovePayment = async (session: any) => {
+    if (!activeShift) {
+      playErrorSound();
+      showToast('⚠️ Operación bloqueada: Es obligatorio abrir un turno de caja antes de validar pagos.');
+      setIsOpeningShiftModalOpen(true);
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const isDelivery = session.type === 'delivery' || session.tableId === 'delivery';
@@ -535,7 +562,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         'finance',
         reviewerName,
         `${actionType} (${tableLabel})`,
-        `Cliente: ${payerName} - Total: $${totalAmount.toFixed(2)} - Método: ${paymentMethod.toUpperCase()}`
+        `Turno: ${activeShift.shiftName} - Cliente: ${payerName} - Total: $${totalAmount.toFixed(2)} - Método: ${paymentMethod.toUpperCase()}`
       );
 
       // Record transaction
@@ -545,7 +572,10 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
           await addDoc(collection(db, 'transactions'), {
             sessionId: session.id,
             accountId: accountId,
+            shiftId: activeShift.id,
+            shiftName: activeShift.shiftName,
             amount: mp.amountUSD,
+            amountCents: Math.round(mp.amountUSD * 100),
             method: mp.method,
             reference: mp.reference || null,
             timestamp: new Date().toISOString(),
@@ -556,16 +586,20 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         await addDoc(collection(db, 'transactions'), {
           sessionId: session.id,
           accountId: accountId,
+          shiftId: activeShift.id,
+          shiftName: activeShift.shiftName,
           amount: totalAmount,
+          amountCents: Math.round(totalAmount * 100),
           method: paymentMethod,
           timestamp: new Date().toISOString(),
           approvedBy: 'Caja'
         });
       }
 
-      let resolvedClientId = session.pendingPayment?.creditClient?.clientId || session.pendingPayment?.client?.clientId || null;
-      if (paymentMethod === 'credito' && session.pendingPayment?.creditClient) {
-        const resId = await processClientCreditDebt(session.pendingPayment.creditClient, totalAmount);
+      const creditClientData = session.pendingPayment?.creditClient || session.creditClient;
+      let resolvedClientId = creditClientData?.clientId || session.pendingPayment?.client?.clientId || null;
+      if (paymentMethod === 'credito' && creditClientData) {
+        const resId = await processClientCreditDebt(creditClientData, totalAmount);
         if (resId) {
           resolvedClientId = resId;
         }
@@ -726,7 +760,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto pb-16 px-4 sm:px-6 w-full min-w-0 overflow-x-hidden md:overflow-x-visible">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
@@ -841,15 +875,20 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </div>
 
+      {/* TASA DE CAMBIO BAR & CURRENCY SELECTOR */}
+      <div className="mb-6">
+        <CurrencySelector variant="bar" />
+      </div>
+
       {/* METRIC CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm flex flex-col justify-between">
           <div>
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block mb-1">Total Conciliado Hoy</span>
-            <div className="text-3xl font-black text-slate-900">${totalReconciled.toFixed(2)}</div>
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block mb-1">Total Conciliado Hoy ({activeCurrency})</span>
+            <div className="text-3xl font-black text-slate-900">{formatPrice(totalReconciled)}</div>
           </div>
           <div className="text-xs text-rose-600 font-bold mt-2">
-            Bs. {(totalReconciled * exchangeRate).toFixed(2)}
+            {formatBs(toBolivares(totalReconciled))}
           </div>
         </div>
 
@@ -866,14 +905,54 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
           <p className="text-xs text-slate-400 mt-2 font-medium">Bancos / Móvil / Zelle esperando confirmación.</p>
         </div>
 
-        <div className="bg-black text-white p-6 rounded-[28px] shadow-xl flex flex-col justify-between">
+        <div className="bg-slate-900 text-white p-6 rounded-[28px] shadow-xl flex flex-col justify-between">
           <div>
-            <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-1">Tasa de Cambio</span>
-            <div className="text-3xl font-black">Bs. {exchangeRate.toFixed(2)}</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block">
+                Tasa Activa ({activeCurrency})
+              </span>
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full">
+                {currentRate.source}
+              </span>
+            </div>
+            <div className="text-3xl font-black font-mono">
+              Bs. {currentRateBs.toFixed(2)}
+              <span className="text-xs text-slate-400 font-medium ml-1">/{currencySymbol}</span>
+            </div>
           </div>
-          <p className="text-xs text-slate-400 mt-2">Usado para la conversión de bolívares en cobros.</p>
+          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">1 {currencySymbol} = {currentRateBs.toFixed(2)} Bs.</span>
+            <CurrencySelector variant="compact" showSyncButton={false} />
+          </div>
         </div>
       </div>
+
+      {/* Mandatory Cash Shift Opening Banner */}
+      {!activeShift && (
+        <div className="mb-8 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-rose-500/10 border-2 border-amber-500/30 rounded-[28px] p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20">
+              <Lock size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-base font-black text-slate-950">CAJA CERRADA — Apertura de Turno Requerida</h4>
+                <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Facturación Bloqueada</span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                Por normativa de arqueo y trazabilidad contable, es <strong>obligatorio aperturar un turno de caja</strong> antes de validar pagos, liberar mesas o facturar consumos.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsOpeningShiftModalOpen(true)}
+            className="shrink-0 bg-black hover:bg-slate-800 text-white px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all hover:scale-105 cursor-pointer"
+          >
+            <Key size={16} className="text-amber-400" />
+            <span>Abrir Turno de Caja Ahora</span>
+          </button>
+        </div>
+      )}
 
       {/* Navigation tabs */}
       <div className="flex gap-6 border-b border-slate-100 mb-8 pb-4 overflow-x-auto whitespace-nowrap w-full scrollbar-none">
@@ -1639,12 +1718,12 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       {/* CONFIRMATION APPROVED/REJECTED MODALS */}
       <AnimatePresence>
         {confirmingSession && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/40 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-md shadow-2xl relative"
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-none sm:rounded-[40px] p-6 sm:p-8 w-full h-full sm:h-auto sm:max-w-md shadow-2xl relative flex flex-col justify-between overflow-y-auto"
             >
               <button 
                 onClick={() => setConfirmingSession(null)}
@@ -1937,12 +2016,12 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       {/* OPEN SHIFT MODAL */}
       <AnimatePresence>
         {isOpeningShiftModalOpen && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-slate-950/80 sm:backdrop-blur-md flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col"
+              className="bg-white rounded-none sm:rounded-[32px] max-w-lg w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden shadow-2xl border-0 sm:border border-slate-100 flex flex-col"
             >
               <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1959,7 +2038,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 flex-1 overflow-y-auto min-h-0">
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Nombre / Identificador del Turno</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
@@ -2039,7 +2118,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 </div>
               </div>
 
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                 <button
                   onClick={() => setIsOpeningShiftModalOpen(false)}
                   className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
@@ -2164,12 +2243,12 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       {/* CLOSE SHIFT & ARQUEO MODAL */}
       <AnimatePresence>
         {isClosingShiftModalOpen && activeShift && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-slate-950/80 sm:backdrop-blur-md flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-[32px] max-w-2xl w-full my-8 overflow-hidden shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]"
+              className="bg-white rounded-none sm:rounded-[32px] max-w-2xl w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden shadow-2xl border-0 sm:border border-slate-100 flex flex-col"
             >
               <div className="p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
@@ -2186,7 +2265,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 </button>
               </div>
 
-              <div className="p-6 space-y-6 overflow-y-auto scrollbar-thin">
+              <div className="p-6 space-y-6 overflow-y-auto scrollbar-thin flex-1 min-h-0">
                 {/* System calculated expected totals */}
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-3">
                   <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center justify-between">
@@ -2309,7 +2388,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 </div>
               </div>
 
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0">
+              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                 <button
                   onClick={() => setIsClosingShiftModalOpen(false)}
                   className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
@@ -2586,6 +2665,12 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
         <div className="flex flex-col justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
           <div>
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Monto a Validar</span>
+            {session.couponCode && (
+              <div className="flex items-center justify-between text-xs text-emerald-700 font-bold mb-1 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                <span>🏷️ Cupón ({session.couponCode}):</span>
+                <span>-${(session.couponDiscountUSD || 0).toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex items-baseline justify-between">
               <span className="text-2xl font-black text-black">${totalAmount.toFixed(2)}</span>
               <span className="text-xs font-bold text-slate-500">Bs. {(totalAmount * exchangeRate).toFixed(2)}</span>

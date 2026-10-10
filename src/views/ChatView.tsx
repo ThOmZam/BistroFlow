@@ -137,7 +137,7 @@ export default function ChatView({ currentUser }: { currentUser: any }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto w-full h-[calc(100dvh-170px)] md:h-[80vh] flex flex-col bg-white rounded-[24px] sm:rounded-[40px] border border-slate-100 shadow-xl overflow-hidden">
+    <div className="w-full flex-1 h-[calc(100dvh-170px)] md:h-[calc(100vh-140px)] flex flex-col bg-white rounded-[24px] sm:rounded-[32px] border border-slate-100 shadow-xl overflow-hidden">
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 sm:p-6 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2.5 sm:gap-3">

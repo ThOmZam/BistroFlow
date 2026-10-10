@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { useRestaurantData, DEFAULT_DELIVERY_ZONES } from '../hooks/useRestaurantData';
-import { MenuItem, Table, Promotion, ExtraOption, DeliveryZone } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit } from 'lucide-react';
+import { useRestaurantData, DEFAULT_DELIVERY_ZONES, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
+import { MenuItem, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 import { useBookmarks } from '../lib/bookmarks';
+import CurrencySelector from '../components/CurrencySelector';
 
 export default function MenuSettingsView({ currentUser }: { currentUser?: any }) {
   const { menu, tables, exchangeRate, settings, promotions, ingredients } = useRestaurantData();
@@ -84,6 +85,28 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   const [zelleEmailInput, setZelleEmailInput] = useState(settings?.zelleEmail || 'pagos@bistroflow.com');
   const [zelleNameInput, setZelleNameInput] = useState(settings?.zelleName || 'BistroFlow SL');
   const [whatsappPhoneInput, setWhatsappPhoneInput] = useState(settings?.whatsappPhone || '+584121234567');
+  const [creditEnabledInput, setCreditEnabledInput] = useState<boolean>(settings?.creditEnabled !== undefined ? settings.creditEnabled : false);
+  const [paymentMethodsListInput, setPaymentMethodsListInput] = useState<PaymentMethodItem[]>(
+    settings?.paymentMethodsList && Array.isArray(settings.paymentMethodsList) && settings.paymentMethodsList.length > 0
+      ? settings.paymentMethodsList
+      : DEFAULT_PAYMENT_METHODS
+  );
+  const [editingMethod, setEditingMethod] = useState<PaymentMethodItem | null>(null);
+  const [isCreatingMethod, setIsCreatingMethod] = useState(false);
+  const [methodForm, setMethodForm] = useState({
+    id: '',
+    name: '',
+    type: 'custom' as PaymentMethodItem['type'],
+    currency: 'USD' as PaymentMethodItem['currency'],
+    enabled: true,
+    requiresReference: true,
+    bank: '',
+    phone: '',
+    idNumber: '',
+    email: '',
+    accountHolder: '',
+    notes: ''
+  });
 
   // Restaurant General Info State
   const [restaurantNameInput, setRestaurantNameInput] = useState(settings?.restaurantName || 'BistroFlow');
@@ -185,6 +208,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setCoursePacingEnabledInput(settings?.coursePacingEnabled !== undefined ? settings?.coursePacingEnabled : true);
     setSeatOrderingEnabledInput(settings?.seatOrderingEnabled !== undefined ? settings?.seatOrderingEnabled : true);
     setFeedbackEnabledInput(settings?.feedbackEnabled !== undefined ? settings?.feedbackEnabled : true);
+    setCreditEnabledInput(settings?.creditEnabled !== undefined ? settings.creditEnabled : false);
+    if (settings?.paymentMethodsList && Array.isArray(settings.paymentMethodsList) && settings.paymentMethodsList.length > 0) {
+      setPaymentMethodsListInput(settings.paymentMethodsList);
+    }
   }, [exchangeRate, settings]);
 
   const handleSaveOperationsSettings = async () => {
@@ -424,10 +451,139 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     } catch(err) { alert('Error guardando configuración general'); }
   };
 
+  const handleToggleMethod = (id: string) => {
+    setPaymentMethodsListInput(prev => prev.map(m => {
+      if (m.id === id) {
+        const nextEnabled = !m.enabled;
+        if (id === 'credito') {
+          setCreditEnabledInput(nextEnabled);
+        }
+        return { ...m, enabled: nextEnabled };
+      }
+      return m;
+    }));
+  };
+
+  const handleToggleCreditMaster = () => {
+    const nextVal = !creditEnabledInput;
+    setCreditEnabledInput(nextVal);
+    setPaymentMethodsListInput(prev => prev.map(m => {
+      if (m.id === 'credito') {
+        return { ...m, enabled: nextVal };
+      }
+      return m;
+    }));
+  };
+
+  const handleOpenEditMethod = (m: PaymentMethodItem) => {
+    setEditingMethod(m);
+    setIsCreatingMethod(false);
+    setMethodForm({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      currency: m.currency,
+      enabled: m.enabled,
+      requiresReference: m.requiresReference,
+      bank: m.details?.bank || '',
+      phone: m.details?.phone || '',
+      idNumber: m.details?.idNumber || '',
+      email: m.details?.email || '',
+      accountHolder: m.details?.accountHolder || '',
+      notes: m.details?.notes || ''
+    });
+  };
+
+  const handleOpenCreateMethod = () => {
+    setEditingMethod(null);
+    setIsCreatingMethod(true);
+    setMethodForm({
+      id: `custom_${Date.now()}`,
+      name: '',
+      type: 'custom',
+      currency: 'USD',
+      enabled: true,
+      requiresReference: true,
+      bank: '',
+      phone: '',
+      idNumber: '',
+      email: '',
+      accountHolder: '',
+      notes: ''
+    });
+  };
+
+  const handleSaveMethodForm = () => {
+    if (!methodForm.name.trim()) {
+      alert('Por favor ingresa un nombre para el método de pago');
+      return;
+    }
+
+    const updatedItem: PaymentMethodItem = {
+      id: editingMethod ? editingMethod.id : (methodForm.id || `custom_${Date.now()}`),
+      name: methodForm.name.trim(),
+      type: methodForm.type,
+      currency: methodForm.currency,
+      enabled: methodForm.enabled,
+      requiresReference: methodForm.requiresReference,
+      details: {
+        bank: methodForm.bank.trim() || undefined,
+        phone: methodForm.phone.trim() || undefined,
+        idNumber: methodForm.idNumber.trim() || undefined,
+        email: methodForm.email.trim() || undefined,
+        accountHolder: methodForm.accountHolder.trim() || undefined,
+        notes: methodForm.notes.trim() || undefined
+      }
+    };
+
+    if (updatedItem.id === 'pago_movil') {
+      if (updatedItem.details?.bank) setPagoMovilBancoInput(updatedItem.details.bank);
+      if (updatedItem.details?.phone) setPagoMovilPhoneInput(updatedItem.details.phone);
+      if (updatedItem.details?.idNumber) setPagoMovilIdInput(updatedItem.details.idNumber);
+    } else if (updatedItem.id === 'zelle') {
+      if (updatedItem.details?.email) setZelleEmailInput(updatedItem.details.email);
+      if (updatedItem.details?.accountHolder) setZelleNameInput(updatedItem.details.accountHolder);
+    } else if (updatedItem.id === 'credito') {
+      setCreditEnabledInput(updatedItem.enabled);
+    }
+
+    setPaymentMethodsListInput(prev => {
+      const exists = prev.some(m => m.id === updatedItem.id);
+      if (exists) {
+        return prev.map(m => m.id === updatedItem.id ? updatedItem : m);
+      }
+      return [...prev, updatedItem];
+    });
+
+    setEditingMethod(null);
+    setIsCreatingMethod(false);
+    playSuccessSound();
+  };
+
+  const handleDeleteMethod = (id: string) => {
+    if (['pago_movil', 'punto', 'zelle', 'divisa', 'credito'].includes(id)) {
+      alert('Los métodos de pago base del sistema no pueden eliminarse, pero puedes desactivarlos con el botón de alternancia.');
+      return;
+    }
+    if (confirm('¿Estás seguro de eliminar este método de pago personalizado?')) {
+      setPaymentMethodsListInput(prev => prev.filter(m => m.id !== id));
+      playClickSound();
+    }
+  };
+
   const handleSavePaymentSettings = async () => {
     try {
+      const finalizedList = paymentMethodsListInput.map(m => {
+        if (m.id === 'credito') {
+          return { ...m, enabled: creditEnabledInput };
+        }
+        return m;
+      });
+
       await setDoc(doc(db, 'settings', 'general'), {
         exchangeRate: Number(rateInput),
+        creditEnabled: creditEnabledInput,
+        paymentMethodsList: finalizedList,
         pagoMovilBanco: pagoMovilBancoInput,
         pagoMovilPhone: pagoMovilPhoneInput,
         pagoMovilId: pagoMovilIdInput,
@@ -436,24 +592,23 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         whatsappPhone: whatsappPhoneInput
       }, { merge: true });
 
+      setPaymentMethodsListInput(finalizedList);
+
       const changes: string[] = [];
-      if (settings?.exchangeRate !== Number(rateInput)) changes.push(`Tasa: ${rateInput} Bs.`);
-      if (settings?.pagoMovilBanco !== pagoMovilBancoInput) changes.push(`PM Banco: ${pagoMovilBancoInput}`);
-      if (settings?.pagoMovilPhone !== pagoMovilPhoneInput) changes.push(`PM Teléfono: ${pagoMovilPhoneInput}`);
-      if (settings?.pagoMovilId !== pagoMovilIdInput) changes.push(`PM Cédula: ${pagoMovilIdInput}`);
-      if (settings?.zelleEmail !== zelleEmailInput) changes.push(`Zelle Email: ${zelleEmailInput}`);
-      if (settings?.zelleName !== zelleNameInput) changes.push(`Zelle Titular: ${zelleNameInput}`);
-      if (settings?.whatsappPhone !== whatsappPhoneInput) changes.push(`WhatsApp: ${whatsappPhoneInput}`);
+      changes.push(`Crédito: ${creditEnabledInput ? 'ACTIVADO' : 'DESACTIVADO'}`);
+      changes.push(`Métodos Activos: ${finalizedList.filter(m => m.enabled).map(m => m.name).join(', ')}`);
 
-      const detailsStr = changes.length > 0 ? changes.join(' | ') : `Tasa: ${rateInput} Bs. | Banco: ${pagoMovilBancoInput}`;
-
-      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó métodos de pago y tasa', detailsStr);
-      alert('Métodos de pago actualizados correctamente');
-    } catch(err) { alert('Error guardando métodos de pago'); }
+      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó métodos de pago y crédito', changes.join(' | '));
+      playSuccessSound();
+      alert('¡Configuración de métodos de pago y crédito guardada con éxito!');
+    } catch(err) { 
+      playErrorSound();
+      alert('Error guardando métodos de pago'); 
+    }
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full pb-16 px-4 sm:px-6">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">
@@ -1404,99 +1559,474 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       )}
 
       {activeTab === 'payments' && (
-        <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm max-w-2xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
-              <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><DollarSign /> Moneda y Cambio</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tasa de Cambio (Bolívares por $)</label>
-                  <input 
-                    type="number" 
-                    value={rateInput}
-                    onChange={e => setRateInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">WhatsApp del Local (Formato Internacional)</label>
-                  <input 
-                    type="text" 
-                    value={whatsappPhoneInput}
-                    onChange={e => setWhatsappPhoneInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="+584121234567"
-                  />
-                </div>
-              </div>
-
-              <h3 className="font-bold text-lg mt-8 mb-6 flex items-center gap-2">📧 Cuenta Zelle</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Correo Zelle</label>
-                  <input 
-                    type="text" 
-                    value={zelleEmailInput}
-                    onChange={e => setZelleEmailInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="pagos@bistroflow.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Titular</label>
-                  <input 
-                    type="text" 
-                    value={zelleNameInput}
-                    onChange={e => setZelleNameInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="BistroFlow SL"
-                  />
-                </div>
+        <div className="bg-white rounded-[32px] p-6 sm:p-8 border border-slate-100 shadow-sm max-w-5xl space-y-8">
+          {/* pyDolarVenezuela 3-Rates Selector & Live Rates Dashboard */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1">
+                  pyDolarVenezuela • Tasas Oficiales y de Mercado
+                </span>
+                <h3 className="text-xl font-black text-slate-900">Monitor y Selector de Moneda Activa</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  La moneda seleccionada aquí rige todos los precios, comandas, cuentas y cálculos del sistema.
+                </p>
               </div>
             </div>
+            <CurrencySelector variant="expanded" />
+          </div>
 
-            <div>
-              <h3 className="font-bold text-lg mb-6 flex items-center gap-2">📱 Pago Móvil</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Banco</label>
-                  <input 
-                    type="text" 
-                    value={pagoMovilBancoInput}
-                    onChange={e => setPagoMovilBancoInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="Banesco"
-                  />
+          {/* Master Control: Función de Crédito */}
+          <div className={`p-6 rounded-3xl border transition-all ${
+            creditEnabledInput 
+              ? 'bg-gradient-to-br from-emerald-50/80 to-teal-50/50 border-emerald-200 shadow-xs' 
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                  creditEnabledInput ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  <ShieldCheck size={24} />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Teléfono</label>
-                  <input 
-                    type="text" 
-                    value={pagoMovilPhoneInput}
-                    onChange={e => setPagoMovilPhoneInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="0412-1234567"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Cédula / RIF</label>
-                  <input 
-                    type="text" 
-                    value={pagoMovilIdInput}
-                    onChange={e => setPagoMovilIdInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors"
-                    placeholder="V-12345678"
-                  />
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-base font-black text-slate-900">
+                      Función de Crédito (Cuentas por Cobrar a Clientes)
+                    </h4>
+                    <span className={`text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full ${
+                      creditEnabledInput 
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                        : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {creditEnabledInput ? '● ACTIVADO' : '○ DESACTIVADO'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                    {creditEnabledInput ? (
+                      <>
+                        <strong className="text-emerald-900">La función de crédito está habilitada.</strong> El método de pago <strong>&quot;Crédito&quot;</strong> aparecerá como opción activa en comandas y cobros, permitiendo cargar consumos a la cuenta de clientes registrados en el CRM con autorización de PIN.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="text-slate-700">La función de crédito está completamente desactivada.</strong> El método de pago <strong>&quot;Crédito&quot;</strong> no aparecerá en ninguna pantalla de cobro ni comanda. Ningún empleado podrá enviar cuentas a crédito mientras esta opción esté inactiva.
+                      </>
+                    )}
+                  </p>
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={handleToggleCreditMaster}
+                className={`px-5 py-2.5 rounded-2xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer self-end sm:self-center shrink-0 ${
+                  creditEnabledInput
+                    ? 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-md shadow-emerald-700/20'
+                    : 'bg-slate-800 hover:bg-black text-white shadow-md'
+                }`}
+              >
+                {creditEnabledInput ? (
+                  <>
+                    <ToggleRight size={18} />
+                    Desactivar Crédito
+                  </>
+                ) : (
+                  <>
+                    <ToggleLeft size={18} />
+                    Activar Crédito
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
-          <div className="mt-8 pt-6 border-t border-slate-100">
-            <button onClick={handleSavePaymentSettings} className="w-full bg-black text-white p-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform">
-              <Save size={18} /> Guardar Métodos de Pago
+          {/* Métodos de Pago Activos, Editables y Agregables */}
+          <div className="border-t border-slate-100 pt-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <span className="text-[10px] uppercase font-black tracking-widest text-slate-400 bg-slate-100 px-3 py-1 rounded-full inline-block mb-1">
+                  Configuración Operativa
+                </span>
+                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                  <CreditCard size={20} className="text-indigo-600" />
+                  Métodos de Pago Disponibles
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Puedes activar, desactivar, editar datos bancarios o agregar nuevos métodos personalizados (Zinli, Binance Pay, Punto de Venta, etc.).
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenCreateMethod}
+                className="flex items-center gap-2 px-5 py-2.5 bg-black hover:bg-slate-800 text-white rounded-2xl font-black text-xs shadow-md shadow-black/10 hover:scale-105 transition-all cursor-pointer"
+              >
+                <Plus size={16} />
+                Agregar Nuevo Método
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {paymentMethodsListInput.map(method => {
+                const isSpecialCredit = method.id === 'credito';
+                const isCreditBlocked = isSpecialCredit && !creditEnabledInput;
+
+                return (
+                  <div 
+                    key={method.id} 
+                    className={`p-5 rounded-3xl border transition-all flex flex-col justify-between ${
+                      !method.enabled || isCreditBlocked
+                        ? 'bg-slate-50/60 border-slate-200/60 opacity-60' 
+                        : 'bg-white border-slate-200/90 shadow-xs hover:border-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm ${
+                            method.type === 'pago_movil' ? 'bg-emerald-50 text-emerald-700' :
+                            method.type === 'punto' ? 'bg-blue-50 text-blue-700' :
+                            method.type === 'zelle' ? 'bg-indigo-50 text-indigo-700' :
+                            method.type === 'credito' ? 'bg-amber-50 text-amber-700' :
+                            'bg-purple-50 text-purple-700'
+                          }`}>
+                            {method.type === 'pago_movil' ? <Smartphone size={18} /> :
+                             method.type === 'punto' ? <CreditCard size={18} /> :
+                             method.type === 'zelle' ? <DollarSign size={18} /> :
+                             method.type === 'credito' ? <ShieldCheck size={18} /> :
+                             <Globe size={18} />}
+                          </div>
+                          <div>
+                            <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                              {method.name}
+                              {isSpecialCredit && (
+                                <span className="text-[9px] bg-amber-100 text-amber-800 font-black px-2 py-0.5 rounded-full uppercase">
+                                  CRM / PIN
+                                </span>
+                              )}
+                            </h4>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase">
+                                Moneda: <strong className="text-slate-800">{method.currency}</strong>
+                              </span>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-[10px] font-medium text-slate-500">
+                                {method.requiresReference ? 'Exige Nro. Ref' : 'Sin Ref obligatoria'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Switch toggle */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleMethod(method.id)}
+                          className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                            method.enabled && (!isSpecialCredit || creditEnabledInput)
+                              ? 'bg-emerald-600'
+                              : 'bg-slate-300'
+                          }`}
+                          title={method.enabled ? 'Desactivar método' : 'Activar método'}
+                        >
+                          <span 
+                            className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                              method.enabled && (!isSpecialCredit || creditEnabledInput)
+                                ? 'transform translate-x-5'
+                                : ''
+                            }`} 
+                          />
+                        </button>
+                      </div>
+
+                      {/* Details preview */}
+                      <div className="py-3 text-xs space-y-1 text-slate-600">
+                        {method.details?.bank && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Banco:</span>
+                            <span className="font-bold text-slate-800">{method.details.bank}</span>
+                          </div>
+                        )}
+                        {method.details?.phone && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Teléfono:</span>
+                            <span className="font-mono font-bold text-slate-800">{method.details.phone}</span>
+                          </div>
+                        )}
+                        {method.details?.idNumber && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Cédula / RIF:</span>
+                            <span className="font-mono font-bold text-slate-800">{method.details.idNumber}</span>
+                          </div>
+                        )}
+                        {method.details?.email && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Correo:</span>
+                            <span className="font-mono font-bold text-slate-800">{method.details.email}</span>
+                          </div>
+                        )}
+                        {method.details?.accountHolder && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Titular:</span>
+                            <span className="font-bold text-slate-800">{method.details.accountHolder}</span>
+                          </div>
+                        )}
+                        {method.details?.notes && (
+                          <p className="text-[11px] text-slate-500 italic pt-1">
+                            {method.details.notes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditMethod(method)}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Edit3 size={13} />
+                        Editar Datos
+                      </button>
+                      {!['pago_movil', 'punto', 'zelle', 'divisa', 'credito'].includes(method.id) && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMethod(method.id)}
+                          className="px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Canal de Contacto WhatsApp */}
+          <div className="border-t border-slate-100 pt-6">
+            <h4 className="font-bold text-sm text-slate-900 mb-3 flex items-center gap-2">
+              <span>📱 Canal de Contacto y Enlace Directo</span>
+            </h4>
+            <div className="max-w-md">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                WhatsApp del Local (Formato Internacional con código de país)
+              </label>
+              <input 
+                type="text" 
+                value={whatsappPhoneInput}
+                onChange={e => setWhatsappPhoneInput(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-mono font-medium text-sm transition-colors"
+                placeholder="+584121234567"
+              />
+            </div>
+          </div>
+
+          {/* Action button */}
+          <div className="pt-6 border-t border-slate-100">
+            <button 
+              type="button"
+              onClick={handleSavePaymentSettings} 
+              className="w-full bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-black text-sm shadow-lg flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform cursor-pointer"
+            >
+              <Save size={18} /> Guardar Configuración de Métodos de Pago y Crédito
             </button>
           </div>
+
+          {/* Modal para Crear / Editar Método de Pago */}
+          <AnimatePresence>
+            {(isCreatingMethod || editingMethod) && (
+              <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white rounded-[32px] p-6 sm:p-8 max-w-xl w-full shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto space-y-6"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                        <CreditCard size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black text-slate-900">
+                          {isCreatingMethod ? 'Nuevo Método de Pago' : `Editar: ${editingMethod?.name}`}
+                        </h3>
+                        <p className="text-xs text-slate-400">Configura nombre, moneda y credenciales de recepción.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setIsCreatingMethod(false); setEditingMethod(null); }}
+                      className="p-2 text-slate-400 hover:text-slate-700 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                        Nombre del Método <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={methodForm.name}
+                        onChange={e => setMethodForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Ej. Banesco Panamá, Zinli, Binance Pay USDT..."
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-sm font-bold text-slate-900 outline-none focus:border-black"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          Moneda de Cobro
+                        </label>
+                        <select
+                          value={methodForm.currency}
+                          onChange={e => setMethodForm(prev => ({ ...prev, currency: e.target.value as any }))}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs font-bold text-slate-800 outline-none focus:border-black"
+                        >
+                          <option value="USD">USD ($ - Dólar)</option>
+                          <option value="Bs">Bs (VES - Bolívares)</option>
+                          <option value="EUR">EUR (€ - Euro)</option>
+                          <option value="USDT">USDT (₮ - Cripto Peg)</option>
+                          <option value="any">Cualquiera / Mixta</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          Tipo de Canal
+                        </label>
+                        <select
+                          value={methodForm.type}
+                          onChange={e => setMethodForm(prev => ({ ...prev, type: e.target.value as any }))}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs font-bold text-slate-800 outline-none focus:border-black"
+                        >
+                          <option value="punto">Punto de Venta POS (Tarjeta)</option>
+                          <option value="pago_movil">Pago Móvil</option>
+                          <option value="zelle">Zelle / Transferencia Internacional</option>
+                          <option value="divisa">Efectivo / Divisa</option>
+                          <option value="credito">Crédito a Clientes (CRM)</option>
+                          <option value="custom">Canal Personalizado / Cripto</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <input
+                        type="checkbox"
+                        id="chk_ref"
+                        checked={methodForm.requiresReference}
+                        onChange={e => setMethodForm(prev => ({ ...prev, requiresReference: e.target.checked }))}
+                        className="w-4 h-4 rounded text-black focus:ring-0 cursor-pointer"
+                      />
+                      <label htmlFor="chk_ref" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                        Exigir número de referencia bancaria al procesar cobro
+                      </label>
+                    </div>
+
+                    {/* Additional fields */}
+                    <div className="space-y-3 pt-2">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        Datos del Receptor (Opcionales)
+                      </h4>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Banco / Plataforma</label>
+                          <input
+                            type="text"
+                            value={methodForm.bank}
+                            onChange={e => setMethodForm(prev => ({ ...prev, bank: e.target.value }))}
+                            placeholder="Ej. Banesco, Mercantil, Binance"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:border-black"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Teléfono</label>
+                          <input
+                            type="text"
+                            value={methodForm.phone}
+                            onChange={e => setMethodForm(prev => ({ ...prev, phone: e.target.value }))}
+                            placeholder="Ej. 0412-1234567"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono font-medium outline-none focus:border-black"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Cédula / RIF / ID</label>
+                          <input
+                            type="text"
+                            value={methodForm.idNumber}
+                            onChange={e => setMethodForm(prev => ({ ...prev, idNumber: e.target.value }))}
+                            placeholder="Ej. V-12345678 / J-12345678"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono font-medium outline-none focus:border-black"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Correo Electrónico</label>
+                          <input
+                            type="text"
+                            value={methodForm.email}
+                            onChange={e => setMethodForm(prev => ({ ...prev, email: e.target.value }))}
+                            placeholder="Ej. pagos@midominio.com"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:border-black"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Nombre del Titular</label>
+                        <input
+                          type="text"
+                          value={methodForm.accountHolder}
+                          onChange={e => setMethodForm(prev => ({ ...prev, accountHolder: e.target.value }))}
+                          placeholder="Ej. Inversiones Bistro C.A."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:border-black"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Instrucciones / Notas para el Mesero o Cliente</label>
+                        <textarea
+                          value={methodForm.notes}
+                          onChange={e => setMethodForm(prev => ({ ...prev, notes: e.target.value }))}
+                          rows={2}
+                          placeholder="Ej. Solicitar comprobante digital y verificar titular antes de liberar la cuenta..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:border-black resize-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => { setIsCreatingMethod(false); setEditingMethod(null); }}
+                      className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveMethodForm}
+                      className="px-6 py-2.5 rounded-2xl text-xs font-black bg-black hover:bg-slate-800 text-white shadow-md transition-all cursor-pointer"
+                    >
+                      Guardar Método
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 

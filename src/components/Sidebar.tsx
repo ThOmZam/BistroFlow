@@ -18,7 +18,8 @@ import {
   Briefcase,
   Coins,
   Wallet,
-  Clock
+  Clock,
+  Flame
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, query, where, collectionGroup } from 'firebase/firestore';
@@ -122,6 +123,7 @@ export default function Sidebar({ role, onLogout, activeView, onViewChange, rest
     { id: 'chat', label: 'Chat Interno', icon: MessageSquare, roles: ['admin', 'waiter', 'cook', 'finance'], badge: chatMessagesCount > 0 ? '•' : 0, category: 'Operación' },
 
     // 2. GESTIÓN Y ADMINISTRACIÓN
+    { id: 'marketing', label: 'Marketing & Cupones', icon: Flame, roles: ['admin'], badge: 0, category: 'Gestión' },
     { id: 'finance', label: 'Finanzas', icon: DollarSign, roles: ['admin'], badge: 0, category: 'Gestión' },
     { id: 'menu_settings', label: 'Menú y Precios', icon: Settings, roles: ['admin'], badge: 0, category: 'Gestión' },
     { id: 'inventory', label: 'Inventario', icon: Package, roles: ['admin'], badge: 0, category: 'Gestión' },

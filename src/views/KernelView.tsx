@@ -210,7 +210,7 @@ export default function KernelView() {
   };
 
   return (
-    <div className="max-w-7xl w-full mx-auto pb-16 px-4 sm:px-6 flex-1 flex flex-col">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-emerald-400 shadow-sm shrink-0">

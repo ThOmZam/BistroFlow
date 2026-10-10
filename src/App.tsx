@@ -18,6 +18,7 @@ import ClientView from './views/ClientView';
 import CRMView from './views/CRMView';
 import PersonalView from './views/PersonalView';
 import MenuSettingsView from './views/MenuSettingsView';
+import MarketingView from './views/MarketingView';
 import KernelView from './views/KernelView';
 import FinanceView from './views/FinanceView';
 import CajaView from './views/CajaView';
@@ -27,6 +28,7 @@ import MyShiftView from './views/MyShiftView';
 import { useRestaurantData } from './hooks/useRestaurantData';
 import { logAction } from './lib/logger';
 import NotificationManager from './components/NotificationManager';
+import CurrencySelector from './components/CurrencySelector';
 import { Lock, Clock } from 'lucide-react';
 
 export default function App() {
@@ -185,6 +187,20 @@ export default function App() {
       <NotificationManager currentUser={currentUser} onViewChange={setActiveView} />
       
       <main className="flex-1 overflow-auto p-4 md:p-8 flex flex-col min-w-0 w-full">
+        {/* Global Currency & System Top Bar */}
+        <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200/50 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase font-black tracking-widest text-slate-400 hidden sm:inline">
+              Sistema Operativo • BistroFlow
+            </span>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {currentUser?.role === 'admin' && (activeView === 'menu_settings' || activeView === 'analytics' || activeView === 'finance') && (
+              <CurrencySelector variant="compact" />
+            )}
+          </div>
+        </div>
+
         {isBlockedByClockIn ? (
           <div className="flex-1 flex items-center justify-center p-4 md:p-8">
             <div className="bg-white rounded-[32px] p-8 max-w-md w-full border border-slate-200 shadow-xl text-center space-y-6">
@@ -247,6 +263,7 @@ export default function App() {
             {activeView === 'analytics' && currentUser.role === 'admin' && <AdminView currentUser={currentUser} />}
             {activeView === 'crm' && currentUser.role === 'admin' && <CRMView />}
             {activeView === 'personal' && currentUser.role === 'admin' && <PersonalView />}
+            {activeView === 'marketing' && currentUser.role === 'admin' && <MarketingView currentUser={currentUser} />}
             {activeView === 'kernel' && currentUser.role === 'admin' && <KernelView />}
             {activeView === 'menu_settings' && currentUser.role === 'admin' && <MenuSettingsView currentUser={currentUser} />}
           </>

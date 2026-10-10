@@ -467,7 +467,7 @@ export default function InventoryView() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto w-full pb-16 px-4 sm:px-6">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">

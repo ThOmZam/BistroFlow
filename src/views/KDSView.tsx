@@ -169,8 +169,19 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
     try {
       const promises = ticket.items.map(async (item: any) => {
         const orderRef = doc(db, item.path);
-        await updateDoc(orderRef, { status: 'ready', readyAt: new Date().toISOString() });
-        await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || [], item.extras || []);
+        if (!item.inventoryDeducted) {
+          await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || [], item.extras || []);
+          await updateDoc(orderRef, { 
+            status: 'ready', 
+            readyAt: new Date().toISOString(),
+            inventoryDeducted: true
+          });
+        } else {
+          await updateDoc(orderRef, { 
+            status: 'ready', 
+            readyAt: new Date().toISOString() 
+          });
+        }
       });
       await Promise.all(promises);
 
@@ -213,7 +224,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
   };
 
   return (
-    <div className="h-full flex flex-col max-w-7xl mx-auto w-full pb-16 px-4 sm:px-6">
+    <div className="h-full flex flex-col w-full flex-1 min-h-full pb-16">
       
       {/* SECTION HEADER */}
       <header className="mb-6 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">

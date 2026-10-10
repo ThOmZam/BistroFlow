@@ -82,6 +82,7 @@ import { collection, onSnapshot, collectionGroup, doc, updateDoc, setDoc, addDoc
 import { logAction } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { useRestaurantData } from '../hooks/useRestaurantData';
+import CurrencySelector from '../components/CurrencySelector';
 
 type AdminTab = 'intel' | 'payroll' | 'crm' | 'config' | 'payments';
 
@@ -472,15 +473,19 @@ export default function AdminView({ currentUser }: { currentUser?: any }) {
   }
 
   return (
-    <div className="max-w-7xl mx-auto pb-16 px-4 sm:px-6 w-full">
+    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       {/* Tab Navigation header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200/60 pb-5 mb-8 gap-4 sm:pr-40">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200/60 pb-5 mb-8 gap-4">
         <div>
-          <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">Módulo Analítico</span>
+          <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">Módulo Analítico • Administración</span>
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
             Inteligencia de Negocio
           </h2>
           <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Métricas de rendimiento, tiempos de ciclo de servicio y matriz de ingeniería de menú.</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <CurrencySelector variant="compact" />
         </div>
       </div>
 

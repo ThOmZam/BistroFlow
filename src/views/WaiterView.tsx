@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, 
@@ -23,19 +23,41 @@ import {
   Check,
   Star,
   Scissors,
-  UserCheck
+  UserCheck,
+  Lock,
+  AlertTriangle,
+  Ticket,
+  Flame,
+  Zap
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, onSnapshot, getDocs, collectionGroup, query, where, getDoc, deleteDoc } from 'firebase/firestore';
 import { logAction } from '../lib/logger';
 import { db } from '../lib/firebase';
-import { useRestaurantData } from '../hooks/useRestaurantData';
+import { useRestaurantData, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
 import { playClickSound, playSuccessSound, playErrorSound } from '../lib/audio';
-import { Table, MenuItem, Session, CourseType, CourseStatus, ExtraOption } from '../types';
+import { Table, MenuItem, Session, CourseType, CourseStatus, ExtraOption, PaymentMethodItem, Coupon } from '../types';
 import { useBookmarks } from '../lib/bookmarks';
 import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
+import { useCurrency } from '../context/CurrencyContext';
+import CurrencySelector from '../components/CurrencySelector';
 
 export default function WaiterView({ currentUser }: { currentUser?: any }) {
-  const { tables, menu, ingredients, activeSessions, exchangeRate, settings } = useRestaurantData();
+  const { tables, menu, ingredients, activeSessions, settings, coupons } = useRestaurantData();
+  const { 
+    activeCurrency, 
+    setActiveCurrency, 
+    rates, 
+    currentRate, 
+    currentRateBs, 
+    currencySymbol,
+    convert,
+    toBolivares,
+    formatPrice,
+    formatActive,
+    formatBs,
+    formatWithBs 
+  } = useCurrency();
+  const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [cart, setCart] = useState<{ 
     item: MenuItem; 
@@ -58,10 +80,19 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [activeOrders, setActiveOrders] = useState<any[]>([]);
   const [readyOrdersList, setReadyOrdersList] = useState<any[]>([]);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [activeShift, setActiveShift] = useState<any | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
   const [tableFilter, setTableFilter] = useState<'all' | 'free' | 'occupied' | 'ready'>('all');
   const [showReadyDetails, setShowReadyDetails] = useState(true);
   const { isBookmarked, toggleBookmark } = useBookmarks();
+
+  React.useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'cashShifts'), (snap) => {
+      const openShift = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })).find((s: any) => s.status === 'open');
+      setActiveShift(openShift || null);
+    });
+    return () => unsub();
+  }, []);
 
   React.useEffect(() => {
     const q = query(collectionGroup(db, 'orders'), where('status', '==', 'ready'));
@@ -432,11 +463,37 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [newAccountName, setNewAccountName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('pago_movil');
   const [paymentRef, setPaymentRef] = useState('');
+
+  const availablePaymentMethods = useMemo(() => {
+    const list: PaymentMethodItem[] = (settings?.paymentMethodsList && Array.isArray(settings.paymentMethodsList) && settings.paymentMethodsList.length > 0)
+      ? settings.paymentMethodsList
+      : DEFAULT_PAYMENT_METHODS;
+    
+    const isCreditActive = settings?.creditEnabled === true;
+
+    return list.filter(m => {
+      if (!m.enabled) return false;
+      if (m.id === 'credito' && !isCreditActive) return false;
+      return true;
+    });
+  }, [settings?.paymentMethodsList, settings?.creditEnabled]);
+
+  useEffect(() => {
+    if (paymentMethod === 'credito' && settings?.creditEnabled !== true) {
+      const fallback = availablePaymentMethods[0]?.id || 'pago_movil';
+      setPaymentMethod(fallback);
+    }
+  }, [settings?.creditEnabled, availablePaymentMethods, paymentMethod]);
   const [paymentCurrency, setPaymentCurrency] = useState('Bs');
   const [mixedPayments, setMixedPayments] = useState<{ id: string, method: string, amountUSD: number, currency: string, reference: string, receiptImage: string | null }[]>([]);
   const [currentMixtoCurrency, setCurrentMixtoCurrency] = useState('Bs');
   const [currentMixedAmount, setCurrentMixedAmount] = useState('');
   const [includeTip, setIncludeTip] = useState(true);
+
+  // Waiter Coupon / Marketing Discount State
+  const [appliedWaiterCoupon, setAppliedWaiterCoupon] = useState<Coupon | null>(null);
+  const [waiterCouponCode, setWaiterCouponCode] = useState('');
+  const [waiterCouponError, setWaiterCouponError] = useState<string | null>(null);
 
   const servicePercent = settings?.serviceChargePercent || 10;
 
@@ -742,6 +799,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     if (!session) return;
     if (isSubmittingPayment) return;
 
+    if (!activeShift) {
+      playErrorSound();
+      alert('Operación Bloqueada: No hay un turno de caja abierto en este momento. Es obligatorio que el Cajero o Administrador realice la Apertura de Caja antes de facturar o procesar pagos.');
+      return;
+    }
+
     try {
       const isDelivery = selectedTable.id.startsWith('delivery-');
 
@@ -785,20 +848,17 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       
       let isAdminPinValid = false;
       if (paymentMethod === 'credito' && adminPin.trim()) {
-        isAdminPinValid = adminPin.trim() === '1111';
-        if (!isAdminPinValid) {
-          try {
-            const q = query(collection(db, 'employees'), where('pin', '==', adminPin.trim()), where('role', '==', 'admin'));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              const adminEmp = snap.docs[0].data();
-              if (adminEmp.status !== 'inactive') {
-                isAdminPinValid = true;
-              }
+        try {
+          const q = query(collection(db, 'employees'), where('pin', '==', adminPin.trim()), where('role', '==', 'admin'));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const adminEmp = snap.docs[0].data();
+            if (adminEmp.status !== 'inactive') {
+              isAdminPinValid = true;
             }
-          } catch (err) {
-            console.error('Error validating admin PIN:', err);
           }
+        } catch (err) {
+          console.error('Error validating admin PIN:', err);
         }
       }
 
@@ -919,7 +979,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             await addDoc(collection(db, 'transactions'), {
               sessionId: session.id,
               accountId: activeAccountId,
+              shiftId: activeShift?.id || null,
+              shiftName: activeShift?.shiftName || null,
               amount: mp.amountUSD,
+              amountCents: Math.round(mp.amountUSD * 100),
               method: mp.method,
               reference: mp.reference,
               timestamp: new Date().toISOString(),
@@ -932,7 +995,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           await addDoc(collection(db, 'transactions'), {
             sessionId: session.id,
             accountId: activeAccountId,
+            shiftId: activeShift?.id || null,
+            shiftName: activeShift?.shiftName || null,
             amount: finalTotal,
+            amountCents: Math.round(finalTotal * 100),
             method: paymentMethod,
             reference: paymentRef || null,
             timestamp: new Date().toISOString(),
@@ -1182,10 +1248,26 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     const itemPrice = o.price !== undefined ? o.price : (menu.find(m => m.name === o.itemName)?.price || 0);
     return acc + (itemPrice * (o.quantity || 1));
   }, 0);
-  
+
+  const waiterCouponDiscount = useMemo(() => {
+    if (!appliedWaiterCoupon) return 0;
+    if (appliedWaiterCoupon.minSpend && activeOrdersTotal < appliedWaiterCoupon.minSpend) return 0;
+    let disc = 0;
+    if (appliedWaiterCoupon.discountType === 'percentage') {
+      disc = (activeOrdersTotal * appliedWaiterCoupon.discountValue) / 100;
+      if (appliedWaiterCoupon.maxDiscount && disc > appliedWaiterCoupon.maxDiscount) {
+        disc = appliedWaiterCoupon.maxDiscount;
+      }
+    } else {
+      disc = appliedWaiterCoupon.discountValue;
+    }
+    return Math.min(disc, activeOrdersTotal);
+  }, [appliedWaiterCoupon, activeOrdersTotal]);
+
+  const activeOrdersSubtotalAfterCoupon = Math.max(0, activeOrdersTotal - waiterCouponDiscount);
   const showServiceCharge = settings?.serviceChargeEnabled !== false && settings?.suggestedTipsEnabled !== false;
-  const tipAmount = includeTip && showServiceCharge ? activeOrdersTotal * (servicePercent / 100) : 0;
-  const finalTotal = activeOrdersTotal + tipAmount;
+  const tipAmount = includeTip && showServiceCharge ? activeOrdersSubtotalAfterCoupon * (servicePercent / 100) : 0;
+  const finalTotal = activeOrdersSubtotalAfterCoupon + tipAmount;
 
   return (
     <div className="h-full flex flex-col gap-4">
@@ -1255,33 +1337,35 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <div className="flex-1 flex gap-8 min-h-0">
         {/* Left: Table Map */}
-        <div className={`flex-1 bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm overflow-hidden flex flex-col ${selectedTable ? 'hidden lg:flex' : 'flex'}`}>
+        <div className={`flex-1 bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 ${selectedTable ? 'hidden lg:flex lg:mr-[540px] xl:mr-[600px]' : 'flex'}`}>
           {/* HEADER & TABLE STATUS FILTER */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-5 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 shrink-0">
           <div>
             <h2 className="text-base sm:text-lg font-black uppercase tracking-wider text-slate-800">Mapa de Mesas</h2>
             <p className="text-slate-400 text-[11px] sm:text-xs">
               Mesero activo: <strong className="text-indigo-600 font-extrabold">{currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'}</strong>
             </p>
           </div>
-          <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/50 self-start sm:self-auto">
-            {[
-              { id: 'all', label: 'Todas' },
-              { id: 'free', label: 'Libres', dot: 'bg-slate-300' },
-              { id: 'occupied', label: 'Ocupadas', dot: 'bg-rose-500' },
-              { id: 'ready', label: 'Con Platos', dot: 'bg-emerald-500 animate-pulse' },
-            ].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setTableFilter(f.id as any)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all ${
-                  tableFilter === f.id ? 'bg-black text-white shadow' : 'text-slate-500 hover:text-black hover:bg-white'
-                }`}
-              >
-                {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
-                {f.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/50 self-start sm:self-auto">
+              {[
+                { id: 'all', label: 'Todas' },
+                { id: 'free', label: 'Libres', dot: 'bg-slate-300' },
+                { id: 'occupied', label: 'Ocupadas', dot: 'bg-rose-500' },
+                { id: 'ready', label: 'Con Platos', dot: 'bg-emerald-500 animate-pulse' },
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setTableFilter(f.id as any)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all ${
+                    tableFilter === f.id ? 'bg-black text-white shadow' : 'text-slate-500 hover:text-black hover:bg-white'
+                  }`}
+                >
+                  {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1292,7 +1376,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             </div>
           )}
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-6 mb-8">
             {filteredTables.map((table) => {
               const session = getSessionForTable(table.id);
               const hasReadyOrders = session && readyOrdersList.some(o => o.docRefPath?.includes(`/sessions/${session.id}/`));
@@ -1390,37 +1474,56 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         </div>
       </div>
 
-      {/* Right: Management Panel (Visible when table selected or on wide screens) */}
+      {/* Right: Management Panel - From extreme top to extreme bottom */}
       <AnimatePresence>
         {selectedTable && (
-          <motion.div
-            initial={{ x: 100, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 100, opacity: 0 }}
-            className="fixed inset-0 z-40 lg:relative lg:inset-auto lg:z-auto w-full lg:w-[480px] h-full bg-white lg:rounded-[32px] border-0 lg:border border-slate-100 shadow-2xl lg:shadow-xl flex flex-col overflow-hidden min-h-0"
-          >
-            <div className="p-3.5 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-              <div className="flex items-center gap-2">
+          <>
+            {/* Backdrop for mobile / tablet screens */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedTable(null)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-xs z-[65] lg:hidden"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 w-full h-screen h-[100dvh] z-[70] bg-white shadow-2xl flex flex-col overflow-hidden"
+            >
+              <div className="p-3.5 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white/95 backdrop-blur-sm z-10">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setSelectedTable(null)}
+                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-black flex items-center gap-1 cursor-pointer"
+                    title="Cerrar comanda"
+                  >
+                    <X size={16} />
+                    <span className="sm:hidden text-[11px]">Volver</span>
+                  </button>
+                  <div>
+                    <h3 className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight flex items-center gap-2">
+                      <span>{selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                        selectedTable.status === 'free' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}>
+                        {selectedTable.status === 'free' ? 'Libre' : 'Ocupada'}
+                      </span>
+                    </h3>
+                    <p className="text-slate-400 text-[10px] sm:text-xs">Gestión de comanda y pedidos</p>
+                  </div>
+                </div>
                 <button 
                   onClick={() => setSelectedTable(null)}
-                  className="lg:hidden p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-black flex items-center gap-1 mr-1"
+                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-black rounded-xl transition-all text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  ← Volver
+                  <X size={14} />
+                  <span>Cerrar</span>
                 </button>
-                <div>
-                  <h3 className="font-bold text-base sm:text-lg text-slate-900 leading-tight">
-                    {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
-                  </h3>
-                  <p className="text-slate-400 text-[10px] sm:text-xs">Gestión de comanda</p>
-                </div>
               </div>
-              <button 
-                onClick={() => setSelectedTable(null)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors text-xs font-bold hidden sm:block"
-              >
-                Cerrar
-              </button>
-            </div>
 
             {selectedTable.id.startsWith('delivery-') && (
               (() => {
@@ -1686,7 +1789,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 gap-2.5 sm:gap-4 content-start pb-28 sm:pb-12">
+                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 content-start pb-28 sm:pb-12">
                       {filteredMenu.map(item => {
                         const stockAlert = getMenuItemStockAlert(item, ingredients);
                         const isOutOfStock = stockAlert.status === 'out_of_stock';
@@ -1757,8 +1860,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             
                             <h5 className="font-extrabold text-xs sm:text-sm text-slate-900 tracking-tight leading-tight line-clamp-2 w-full mb-1 min-h-[2rem] flex items-center">{item.name}</h5>
                             <div className="flex items-baseline justify-between gap-1 mt-auto w-full pt-1 border-t border-slate-50">
-                              <span className="text-xs sm:text-sm text-slate-950 font-black">${item.price.toFixed(2)}</span>
-                              <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">Bs. {(item.price * exchangeRate).toFixed(0)}</span>
+                              <span className="text-xs sm:text-sm text-slate-950 font-black">{formatPrice(item.price)}</span>
+                              <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(item.price))}</span>
                             </div>
                           </button>
                         );
@@ -1767,13 +1870,13 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Cart / Order Summary */}
                     {cart.length > 0 && (
-                      <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-100 shrink-0">
+                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1rem,env(safe-area-inset-bottom))]">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Nuevo Pedido</span>
-                          <span className="text-[10px] bg-slate-200 text-slate-600 font-black px-1.5 py-0.5 rounded-full">{cart.length} items</span>
+                          <span className="text-[10px] bg-slate-900 text-white font-black px-2 py-0.5 rounded-full">{cart.length} {cart.length === 1 ? 'ítem' : 'ítems'}</span>
                         </div>
                         
-                        <div className="space-y-2 max-h-24 overflow-auto mb-3 border-b border-slate-200 pb-2">
+                        <div className="space-y-2 max-h-28 overflow-y-auto mb-3 border-b border-slate-100 pb-2.5">
                           {cart.map((entry, index) => (
                             <div key={index} className="flex items-start justify-between text-xs group gap-2">
                               <span className="text-slate-500 block">
@@ -1808,45 +1911,65 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                 )}
                               </span>
                               <div className="flex items-center gap-2.5 flex-shrink-0">
-                                <span className="font-mono text-[11px]">${(getCartEntryPrice(entry) * entry.qty).toFixed(2)}</span>
+                                <span className="font-mono text-[11px] font-bold text-slate-900">${(getCartEntryPrice(entry) * entry.qty).toFixed(2)}</span>
                                 <button
                                   onClick={() => setCart(cart.filter((_, i) => i !== index))}
-                                  className="text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="text-rose-400 hover:text-rose-600 p-1 rounded-lg transition-colors cursor-pointer"
                                   title="Eliminar"
                                 >
-                                  <Trash2 size={12} />
+                                  <Trash2 size={13} />
                                 </button>
                               </div>
                             </div>
                           ))}
                         </div>
 
-                        <div className="flex items-center justify-between mb-2.5 pt-1">
-                          <span className="font-bold text-xs text-slate-700">Total Nuevo Pedido</span>
+                        <div className="flex items-center justify-between mb-3 pt-0.5">
+                          <span className="font-bold text-xs text-slate-700">Total a Enviar ({activeCurrency})</span>
                           <div className="text-right flex items-baseline gap-1.5">
-                            <span className="text-base font-black text-slate-950">${cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0).toFixed(2)}</span>
-                            <span className="text-xs text-slate-400 font-bold">Bs. {(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0) * exchangeRate).toFixed(0)}</span>
+                            <span className="text-lg font-black text-slate-950">{formatPrice(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0))}</span>
+                            <span className="text-xs text-slate-400 font-bold">{formatBs(toBolivares(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0)))}</span>
                           </div>
                         </div>
 
                         <button 
                           disabled={cart.length === 0 || isSendingOrder}
                           onClick={sendOrder}
-                          className={`w-full text-white py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                          className={`w-full text-white py-3.5 px-4 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 ${
                             cart.length > 0 && !isSendingOrder
-                              ? 'bg-black hover:bg-slate-800 shadow-lg shadow-black/10 hover:scale-[1.01] cursor-pointer' 
+                              ? 'bg-black hover:bg-slate-800 shadow-black/10' 
                               : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                           }`}
                         >
-                          <ShoppingBag size={14} />
+                          <ShoppingBag size={16} />
                           {isSendingOrder ? 'Enviando a Cocina...' : 'Enviar a Cocina'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Quick navigation to bill when cart is empty but table has active consumption */}
+                    {cart.length === 0 && activeOrders.length > 0 && (
+                      <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] pb-[max(0.75rem,env(safe-area-inset-bottom))] z-20">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                          <span className="text-xs font-bold text-slate-700 truncate">
+                            {activeOrders.length} {activeOrders.length === 1 ? 'ítem comandado' : 'ítems comandados'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('bill')}
+                          className="bg-black hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0 cursor-pointer"
+                        >
+                          <Receipt size={14} />
+                          Ver Cuenta y Cobrar →
                         </button>
                       </div>
                     )}
                   </>
                 ) : (
-                  <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden">
-                    <div className="flex-1 overflow-auto p-3.5 sm:p-4">
+                  <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden min-h-0">
+                    <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0">
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
                         <h4 className="font-bold text-xs sm:text-sm mb-3 flex justify-between uppercase tracking-wider text-slate-800">
                           <span>Items Registrados</span>
@@ -1956,7 +2079,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                 </div>
                               </div>
                               <div className="flex flex-col items-end shrink-0 pt-0.5">
-                                <span className="font-mono text-xs font-semibold text-slate-900">${(itemPrice * (order.quantity || 1)).toFixed(2)}</span>
+                                <span className="font-mono text-xs font-semibold text-slate-900">{formatPrice(itemPrice * (order.quantity || 1))}</span>
                               </div>
                             </div>
                             );
@@ -1970,7 +2093,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
                         <div className="flex items-center justify-between mb-3">
                           <span className="font-bold text-xs text-slate-500 uppercase tracking-wider">Subtotal</span>
-                          <span className="font-mono text-sm font-bold">${activeOrdersTotal.toFixed(2)}</span>
+                          <span className="font-mono text-sm font-bold">{formatPrice(activeOrdersTotal)}</span>
                         </div>
                         
                         {showServiceCharge && (
@@ -1981,24 +2104,24 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                 Incluir {servicePercent}% Servicio
                               </span>
                             </label>
-                            <span className="font-mono text-xs font-bold text-slate-600">${tipAmount.toFixed(2)}</span>
+                            <span className="font-mono text-xs font-bold text-slate-600">{formatPrice(tipAmount)}</span>
                           </div>
                         )}
 
                         <div className="flex items-end justify-between">
                           <div>
-                            <div className="font-black text-slate-400 text-[10px] uppercase tracking-widest mb-1">Total a Pagar</div>
-                            <div className="text-2xl font-black text-slate-950">${finalTotal.toFixed(2)}</div>
+                            <div className="font-black text-slate-400 text-[10px] uppercase tracking-widest mb-1">Total a Pagar ({activeCurrency})</div>
+                            <div className="text-2xl font-black text-slate-950">{formatPrice(finalTotal)}</div>
                           </div>
                           <div className="text-right flex flex-col items-end">
                             <div className="font-black text-slate-400 text-[9px] uppercase tracking-widest mb-1">En Bolívares</div>
-                            <div className="text-lg font-black text-slate-800">Bs. {(finalTotal * exchangeRate).toFixed(0)}</div>
+                            <div className="text-lg font-black text-slate-800">{formatBs(toBolivares(finalTotal))}</div>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="p-3.5 sm:p-4 bg-white border-t border-slate-100 flex flex-col gap-2 shrink-0">
+                    <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex flex-col gap-2 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1rem,env(safe-area-inset-bottom))]">
                       {selectedTable.id.startsWith('delivery-') ? (
                         <>
                           {activeOrders.length > 0 ? (
@@ -2078,14 +2201,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         </>
                       ) : (
                         activeOrders.length > 0 ? (
-                          <button 
-                            type="button"
-                            onClick={() => setIsPaying(true)}
-                            className="w-full bg-black text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-black/10"
-                          >
-                            <Receipt size={18} />
-                            Cerrar Mesa y Pagar
-                          </button>
+                          <>
+                            {!activeShift && (
+                              <div className="mb-2 p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl flex items-center gap-2 text-xs text-amber-800">
+                                <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                                <span><strong>Caja Cerrada:</strong> Facturación bloqueada hasta abrir turno.</span>
+                              </div>
+                            )}
+                            <button 
+                              type="button"
+                              onClick={() => setIsPaying(true)}
+                              className="w-full bg-black text-white p-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] shadow-lg shadow-black/10"
+                            >
+                              <Receipt size={18} />
+                              Cerrar Mesa y Pagar
+                            </button>
+                          </>
                         ) : (
                           <button 
                             type="button"
@@ -2127,19 +2258,20 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               </div>
             )}
           </motion.div>
-        )}
-      </AnimatePresence>
-      </div>
+        </>
+      )}
+    </AnimatePresence>
+    </div>
       {/* Payment Modal */}
       {/* Creating Delivery Modal */}
       <AnimatePresence>
         {isCreatingDelivery && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] flex flex-col"
+              className="bg-white rounded-none sm:rounded-3xl p-4 sm:p-6 w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-md shadow-2xl relative flex flex-col overflow-hidden"
             >
               <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
                 <div>
@@ -2399,12 +2531,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Editing Delivery Info Modal */}
       <AnimatePresence>
         {isEditingDeliveryInfo && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-4 sm:p-6 w-full max-w-md shadow-2xl relative max-h-[92vh] flex flex-col"
+              className="bg-white rounded-none sm:rounded-3xl p-4 sm:p-6 w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-md shadow-2xl relative flex flex-col overflow-hidden"
             >
               <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
                 <div>
@@ -2793,20 +2925,40 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isPaying && selectedTable && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/60 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="bg-white rounded-[28px] sm:rounded-[36px] w-full max-w-lg shadow-2xl relative flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden border border-slate-100"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none sm:rounded-[36px] w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-lg shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border border-slate-100"
             >
               {/* Header */}
-              <div className="p-5 sm:p-6 border-b border-slate-100 bg-white z-10 shrink-0 flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg sm:text-xl font-black text-slate-900">Procesar Pago</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number}
-                  </p>
+              <div className="p-4 sm:p-6 border-b border-slate-100 bg-white z-10 shrink-0 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      setIsPaying(false);
+                      setReceiptImage(null);
+                      setSelectedClientIdForCredit('');
+                      setCreditName('');
+                      setCreditPhone('');
+                      setCreditId('');
+                      setCreditAddress('');
+                      setCreditEmail('');
+                      setAdminPin('');
+                      setAdminPinError('');
+                      setNonCreditClientMode('none');
+                    }}
+                    className="sm:hidden p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-800 transition-colors text-xs font-black flex items-center gap-1 cursor-pointer"
+                  >
+                    ← Volver
+                  </button>
+                  <div>
+                    <h3 className="text-base sm:text-xl font-black text-slate-900 leading-tight">Procesar Pago</h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number}
+                    </p>
+                  </div>
                 </div>
                 <button 
                   onClick={() => {
@@ -2822,11 +2974,32 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     setAdminPinError('');
                     setNonCreditClientMode('none');
                   }}
-                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
+                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer hidden sm:block"
                 >
                   <X size={18} />
                 </button>
               </div>
+
+              {/* Cash Shift Status Notification */}
+              {!activeShift ? (
+                <div className="mx-5 sm:mx-6 mt-4 p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl flex items-start gap-3">
+                  <Lock className="text-amber-600 shrink-0 mt-0.5" size={20} />
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-amber-950">Apertura de Caja Requerida</h4>
+                    <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                      No se puede emitir el cobro porque <strong>no hay ningún turno de caja abierto</strong>. Por normativa fiscal y de arqueo, solicita al cajero o administrador realizar la <strong>Apertura de Turno</strong> en el módulo de Caja.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-5 sm:mx-6 mt-3 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-bold text-emerald-950">Caja Abierta: {activeShift.shiftName}</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-700 font-medium">Cajero: {activeShift.openedBy}</span>
+                </div>
+              )}
 
               {/* Scrollable Body */}
               <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5">
@@ -2857,17 +3030,152 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </div>
                 )}
 
+                {/* Cupones de descuento en Comanda */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mb-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Ticket size={14} className="text-indigo-600" />
+                      Cupón de Descuento Promocional
+                    </span>
+                    {appliedWaiterCoupon && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAppliedWaiterCoupon(null);
+                          setWaiterCouponError(null);
+                          setWaiterCouponCode('');
+                        }}
+                        className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer uppercase"
+                      >
+                        Quitar cupón
+                      </button>
+                    )}
+                  </div>
+
+                  {appliedWaiterCoupon ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-black text-xs">
+                          ✓
+                        </span>
+                        <div>
+                          <span className="font-mono font-black text-xs text-emerald-950 block">
+                            {appliedWaiterCoupon.code}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-bold block">
+                            {appliedWaiterCoupon.discountType === 'percentage' 
+                              ? `${appliedWaiterCoupon.discountValue}% OFF aplicado` 
+                              : `-$${appliedWaiterCoupon.discountValue} USD aplicado`}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-black text-xs text-emerald-700">
+                        -{formatPrice(waiterCouponDiscount)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Código de cupón (ej: BISTRO20)"
+                          value={waiterCouponCode}
+                          onChange={(e) => {
+                            setWaiterCouponCode(e.target.value.toUpperCase());
+                            setWaiterCouponError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const raw = waiterCouponCode.trim().toUpperCase();
+                              if (!raw) return;
+                              const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
+                              if (!found) {
+                                setWaiterCouponError('Cupón no encontrado');
+                                return;
+                              }
+                              if (found.status !== 'active') {
+                                setWaiterCouponError('Cupón temporalmente inactivo');
+                                return;
+                              }
+                              if (found.minSpend && activeOrdersTotal < found.minSpend) {
+                                setWaiterCouponError(`Consumo mínimo: $${found.minSpend}`);
+                                return;
+                              }
+                              setAppliedWaiterCoupon(found);
+                              setWaiterCouponError(null);
+                            }
+                          }}
+                          className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase outline-none focus:border-indigo-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const raw = waiterCouponCode.trim().toUpperCase();
+                            if (!raw) return;
+                            const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
+                            if (!found) {
+                              setWaiterCouponError('Cupón no encontrado');
+                              return;
+                            }
+                            if (found.status !== 'active') {
+                              setWaiterCouponError('Cupón temporalmente inactivo');
+                              return;
+                            }
+                            if (found.minSpend && activeOrdersTotal < found.minSpend) {
+                              setWaiterCouponError(`Consumo mínimo: $${found.minSpend}`);
+                              return;
+                            }
+                            setAppliedWaiterCoupon(found);
+                            setWaiterCouponError(null);
+                          }}
+                          className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl cursor-pointer"
+                        >
+                          Aplicar
+                        </button>
+                      </div>
+                      {waiterCouponError && (
+                        <p className="text-[10px] font-bold text-rose-600">{waiterCouponError}</p>
+                      )}
+
+                      {/* Quick Available Coupons Chips */}
+                      {coupons && coupons.filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now())).length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                          <span className="text-[9px] font-bold uppercase text-slate-400">Cupones:</span>
+                          {coupons
+                            .filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now()))
+                            .slice(0, 3)
+                            .map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setWaiterCouponCode(c.code);
+                                  setAppliedWaiterCoupon(c);
+                                  setWaiterCouponError(null);
+                                }}
+                                className="text-[10px] font-mono font-black bg-indigo-50 border border-indigo-200/70 text-indigo-700 px-2 py-0.5 rounded-lg hover:bg-indigo-100 transition-colors cursor-pointer"
+                              >
+                                🏷️ {c.code} (-{c.discountType === 'percentage' ? `${c.discountValue}%` : `$${c.discountValue}`})
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
               {/* Total Card */}
               <div className="bg-slate-50 p-6 rounded-3xl mb-6 border border-slate-100">
                 <div className="flex justify-between items-end">
                   <div>
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block mb-1">Total a cobrar</span>
-                    <div className="text-3xl font-light text-slate-900">${finalTotal.toFixed(2)}</div>
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block mb-1">Total a cobrar ({activeCurrency})</span>
+                    <div className="text-3xl font-light text-slate-900">{formatPrice(finalTotal)}</div>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block mb-1">En Bolívares</span>
-                    <div className="text-xl font-bold text-rose-600">Bs. {(finalTotal * exchangeRate).toFixed(2)}</div>
-                    <div className="text-[9px] text-slate-400 font-medium">Tasa: {exchangeRate} Bs/$</div>
+                    <div className="text-xl font-bold text-rose-600">{formatBs(toBolivares(finalTotal))}</div>
+                    <div className="text-[9px] text-slate-400 font-medium">Tasa ({activeCurrency}): {currentRateBs.toFixed(2)} Bs/{currencySymbol}</div>
                   </div>
                 </div>
               </div>
@@ -2878,19 +3186,17 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
-                      { id: 'pago_movil', label: 'Pago Móvil' },
-                      { id: 'zelle', label: 'Zelle' },
-                      { id: 'divisa', label: 'Divisa ($)' },
-                      { id: 'punto', label: 'Punto (Bs)' },
-                      { id: 'credito', label: 'Crédito' },
-                      { id: 'mixto', label: 'Mixto' }
+                      ...availablePaymentMethods.map(m => ({ id: m.id, label: m.name, currency: m.currency, methodObj: m })),
+                      { id: 'mixto', label: 'Mixto', currency: 'any', methodObj: null }
                     ].map(method => (
                       <button 
                         key={method.id}
                         type="button"
                         onClick={() => {
                           setPaymentMethod(method.id);
-                          if (method.id === 'zelle') setPaymentCurrency('USD');
+                          if (method.methodObj?.currency === 'Bs') setPaymentCurrency('Bs');
+                          else if (method.methodObj?.currency === 'EUR') setPaymentCurrency('EUR');
+                          else if (method.methodObj?.currency === 'USDT') setPaymentCurrency('USDT');
                           else if (method.id === 'pago_movil' || method.id === 'punto') setPaymentCurrency('Bs');
                           else setPaymentCurrency('USD');
                         }}
@@ -2901,6 +3207,58 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     ))}
                   </div>
                 </div>
+
+                {/* Punto de Venta info card */}
+                {paymentMethod === 'punto' && (
+                  <div className="bg-blue-50/50 border border-blue-100 rounded-3xl p-5 space-y-3">
+                    <div className="flex justify-between items-center pb-2 border-b border-blue-100/50">
+                      <span className="font-bold text-xs text-blue-900">Punto de Venta (Tarjeta POS)</span>
+                      <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">VES / Bolívares</span>
+                    </div>
+                    <div className="text-xs text-slate-700 space-y-2">
+                      <p className="text-slate-600 font-medium">
+                        {availablePaymentMethods.find(m => m.id === 'punto')?.details?.notes || 'Procesar tarjeta de débito o crédito nacional en el punto físico del local.'}
+                      </p>
+                      <div className="flex items-center justify-between pt-1 border-t border-blue-100/40">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Total en Bolívares:</span>
+                        <span className="font-extrabold text-blue-900 text-base">{formatBs(toBolivares(finalTotal))}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom method info card */}
+                {(() => {
+                  const customObj = availablePaymentMethods.find(m => m.id === paymentMethod && !['pago_movil', 'zelle', 'divisa', 'punto', 'credito', 'mixto'].includes(m.id));
+                  if (!customObj) return null;
+                  return (
+                    <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 space-y-3">
+                      <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                        <span className="font-bold text-xs text-slate-900">{customObj.name}</span>
+                        <span className="text-[10px] bg-slate-200 text-slate-800 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                          Moneda: {customObj.currency}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
+                        {customObj.details?.bank && (
+                          <div><span className="text-[9px] uppercase font-bold text-slate-400 block">Banco/Plataforma</span><span className="font-bold">{customObj.details.bank}</span></div>
+                        )}
+                        {customObj.details?.phone && (
+                          <div><span className="text-[9px] uppercase font-bold text-slate-400 block">Teléfono</span><span className="font-mono font-bold">{customObj.details.phone}</span></div>
+                        )}
+                        {customObj.details?.email && (
+                          <div className="col-span-2"><span className="text-[9px] uppercase font-bold text-slate-400 block">Correo / ID</span><span className="font-mono font-bold break-all">{customObj.details.email}</span></div>
+                        )}
+                        {customObj.details?.accountHolder && (
+                          <div className="col-span-2"><span className="text-[9px] uppercase font-bold text-slate-400 block">Titular</span><span className="font-bold">{customObj.details.accountHolder}</span></div>
+                        )}
+                        {customObj.details?.notes && (
+                          <div className="col-span-2 pt-1"><p className="text-[11px] text-slate-600 italic">{customObj.details.notes}</p></div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Pago Móvil info & share card */}
                 {paymentMethod === 'pago_movil' && (
@@ -3391,7 +3749,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         {adminPinError && (
                           <span className="text-[10px] text-rose-500 font-bold block mt-1">{adminPinError}</span>
                         )}
-                        <span className="text-[9px] text-slate-400 block mt-1 italic">PIN Admin Demo es: 1111. Si no lo ingresa, se enviará la solicitud de crédito a la cola de aprobación de Caja.</span>
+                        <span className="text-[9px] text-slate-400 block mt-1 italic">Requiere autorización de Administrador. Si no dispone de autorización, se enviará la solicitud de crédito a la cola de Caja.</span>
                       </div>
                     </div>
                   </div>
@@ -3400,16 +3758,25 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             </div>
 
               {/* Sticky Footer Confirm Action Button */}
-              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 shrink-0 z-10">
+              <div className="p-4 sm:p-5 border-t border-slate-200 bg-white sm:bg-slate-50 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                 <button 
                   onClick={handlePayment}
-                  disabled={isUploadingReceipt || isSubmittingPayment}
-                  className="w-full bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-bold shadow-lg flex justify-center items-center gap-2 transition-all cursor-pointer text-sm"
+                  disabled={isUploadingReceipt || isSubmittingPayment || !activeShift}
+                  className={`w-full p-4 rounded-2xl font-bold shadow-lg flex justify-center items-center gap-2 transition-all cursor-pointer text-sm ${
+                    !activeShift
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                      : 'bg-black hover:bg-slate-800 text-white'
+                  }`}
                 >
                   {isSubmittingPayment ? (
                     <>
                       <span className="animate-spin">⏳</span>
                       Procesando...
+                    </>
+                  ) : !activeShift ? (
+                    <>
+                      <Lock size={18} />
+                      Caja Cerrada (Apertura Requerida para Facturar)
                     </>
                   ) : (
                     <>
@@ -3592,14 +3959,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* WAITER: ITEM DETAIL/CUSTOMIZATION MODAL */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
-            <div className="absolute inset-0 cursor-pointer" onClick={() => setSelectedItem(null)} />
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/40 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
+            <div className="hidden sm:block absolute inset-0 cursor-pointer" onClick={() => setSelectedItem(null)} />
             
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[24px] sm:rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-4 flex flex-col max-h-[92vh] sm:max-h-[90vh]"
+              className="bg-white rounded-none sm:rounded-[32px] w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-lg shadow-2xl relative border-0 sm:border border-slate-100 overflow-hidden z-10 flex flex-col"
             >
               {/* Header */}
               <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
@@ -3620,8 +3987,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 <div className="mb-4">
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{selectedItem.name}</h3>
                   <div className="flex items-baseline gap-3 mt-2">
-                    <span className="font-black text-2xl text-black">${selectedItem.price.toFixed(2)}</span>
-                    <span className="text-sm text-slate-400 font-semibold">Bs. {(selectedItem.price * exchangeRate).toFixed(2)}</span>
+                    <span className="font-black text-2xl text-black">{formatPrice(selectedItem.price)}</span>
+                    <span className="text-sm text-slate-400 font-semibold">{formatBs(toBolivares(selectedItem.price))}</span>
                   </div>
                 </div>
 
@@ -3842,7 +4209,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               </div>
 
               {/* Action buttons */}
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 flex-shrink-0">
+              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 z-20 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_-8px_25px_rgba(0,0,0,0.06)]">
                 {/* Quantity Controls */}
                 <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:setModalQty">
                   <button 
@@ -3883,7 +4250,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 >
                   <span>Agregar al Pedido</span>
                   <span className="opacity-40 font-normal">|</span>
-                  <span>${(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty).toFixed(2)}</span>
+                  <span>{formatPrice(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty)}</span>
                 </button>
               </div>
             </motion.div>
@@ -3894,12 +4261,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Modal for Itemized Split & Partial Payment by Consumption */}
       <AnimatePresence>
         {isPartialModalOpen && selectedTable && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4 sm:p-6 overflow-y-auto">
+          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[32px] p-6 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col my-auto"
+              className="bg-white rounded-none sm:rounded-[32px] p-4 sm:p-8 w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-xl shadow-2xl relative flex flex-col overflow-hidden"
             >
               <button
                 onClick={() => setIsPartialModalOpen(false)}
@@ -4045,16 +4412,16 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         + Servicio de Mesa ({servicePercent}%)
                       </span>
                     </label>
-                    <span className="font-mono font-bold text-purple-700">${partialTip.toFixed(2)} USD</span>
+                    <span className="font-mono font-bold text-purple-700">{formatPrice(partialTip)}</span>
                   </div>
 
                   <div className="flex justify-between items-end pt-2 border-t border-slate-200">
                     <div>
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
-                        Total Comensal
+                        Total Comensal ({activeCurrency})
                       </span>
                       <div className="text-2xl font-black text-slate-900">
-                        ${partialTotal.toFixed(2)} USD
+                        {formatPrice(partialTotal)}
                       </div>
                     </div>
                     <div className="text-right">
@@ -4062,7 +4429,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                         En Bolívares
                       </span>
                       <div className="text-lg font-extrabold text-purple-800 font-mono">
-                        Bs. {(partialTotal * exchangeRate).toFixed(2)}
+                        {formatBs(toBolivares(partialTotal))}
                       </div>
                     </div>
                   </div>
@@ -4104,21 +4471,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     {/* Payment Method Selector */}
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { id: 'pago_movil', label: 'Pago Móvil' },
-                          { id: 'zelle', label: 'Zelle' },
-                          { id: 'divisa', label: 'Divisa ($)' },
-                          { id: 'punto', label: 'Punto (Bs)' },
-                          { id: 'credito', label: 'Crédito' }
-                        ].map(m => (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {availablePaymentMethods.map(m => (
                           <button
                             key={m.id}
                             type="button"
-                            onClick={() => setPaymentMethod(m.id)}
+                            onClick={() => {
+                              setPaymentMethod(m.id);
+                              if (m.currency === 'Bs') setPaymentCurrency('Bs');
+                              else if (m.currency === 'EUR') setPaymentCurrency('EUR');
+                              else if (m.currency === 'USDT') setPaymentCurrency('USDT');
+                              else if (m.id === 'pago_movil' || m.id === 'punto') setPaymentCurrency('Bs');
+                              else setPaymentCurrency('USD');
+                            }}
                             className={`py-2 px-3 rounded-xl border text-[11px] font-bold transition-all ${paymentMethod === m.id ? 'bg-purple-900 text-white border-purple-900 shadow-xs' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}
                           >
-                            {m.label}
+                            {m.name}
                           </button>
                         ))}
                       </div>

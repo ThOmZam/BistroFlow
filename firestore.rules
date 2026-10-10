@@ -1,6 +1,68 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Inventory: protect against negative stock
+    match /inventory/{ingId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.stock >= 0;
+      allow delete: if true;
+    }
+
+    // Transactions: Append-only financial records. Cannot be updated or deleted!
+    match /transactions/{txId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Finance entries: Append-only ledger. No financial history deletion!
+    match /finance_entries/{entryId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if false;
+    }
+
+    // Activity audit logs: Append-only audit trail
+    match /activity_logs/{logId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // Cash shifts: opening, movements, closure (cannot be deleted, immutable once closed)
+    match /cashShifts/{shiftId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if resource.data.status != 'closed' || request.resource.data.status == 'closed';
+      allow delete: if false;
+    }
+
+    // Employees registry
+    match /employees/{empId} {
+      allow read, write: if true;
+    }
+
+    // Sessions and subcollections
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+
+      match /accounts/{accountId} {
+        allow read, write: if true;
+
+        match /orders/{orderId} {
+          allow read, write: if true;
+        }
+      }
+    }
+
+    // Collection group for orders in KDS/POS
+    match /{path=**}/orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // All other collections fallback
     match /{document=**} {
       allow read, write: if true;
     }

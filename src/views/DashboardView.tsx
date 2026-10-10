@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, query, where, getDocs, doc, updateDoc, collectionGroup } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useRestaurantData } from '../hooks/useRestaurantData';
+import { useCurrency } from '../context/CurrencyContext';
 import { 
   DollarSign, 
   Users, 
@@ -64,7 +65,9 @@ function SortableItem({ id, isEditingLayout, children, className }: any) {
 }
 
 export default function DashboardView({ currentUser, onViewChange }: { currentUser: any; onViewChange: (view: string) => void }) {
-  const { tables, exchangeRate, settings } = useRestaurantData();
+  const { tables, settings } = useRestaurantData();
+  const { activeCurrency, currentRateBs, formatPrice, toBolivares, formatBs } = useCurrency();
+  const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
   const [sessions, setSessions] = useState<any[]>([]);
   const [kitchenOrders, setKitchenOrders] = useState<any[]>([]);
   const [chatsCount, setChatsCount] = useState(0);
@@ -377,7 +380,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
 
   if (currentUser.role === 'waiter') {
     return (
-      <div className="max-w-4xl w-full mx-auto pb-20 px-4">
+      <div className="w-full flex-1 flex flex-col pb-16 min-h-full">
         {/* Header */}
         <header className="mb-8">
           <div className="flex items-center gap-2 mb-2">
@@ -525,7 +528,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
   // 2. Kitchen / Cook (Cocina) Dashboard
   if (currentUser.role === 'cook') {
     return (
-      <div className="max-w-4xl w-full mx-auto pb-20 px-4">
+      <div className="w-full flex-1 flex flex-col pb-16 min-h-full">
         {/* Header */}
         <header className="mb-8">
           <div className="flex items-center gap-2 mb-2">
@@ -654,7 +657,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
   // 3. Caja (Caja y Facturación) Dashboard
   if (currentUser.role === 'finance') {
     return (
-      <div className="max-w-4xl w-full mx-auto pb-20 px-4">
+      <div className="w-full flex-1 flex flex-col pb-16 min-h-full">
         {/* Header */}
         <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
@@ -813,7 +816,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
 
   // 4. Default: Admin Dashboard
   return (
-    <div className="max-w-7xl w-full mx-auto pb-16 px-4 sm:px-6">
+    <div className="w-full flex-1 flex flex-col pb-16 min-h-full">
       {/* Dynamic Header */}
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
@@ -916,11 +919,11 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                             <span className="text-xs font-black tracking-widest uppercase text-emerald-500">Ventas</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Venta Acumulada</span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Venta Acumulada ({activeCurrency})</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${dashboardMetrics.totalSales.toFixed(2)}</span>
+                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(dashboardMetrics.totalSales)}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">Bs. ${(dashboardMetrics.totalSales * exchangeRate).toFixed(2)}</span>
+                            <span className="text-xs font-bold text-slate-400 mt-2 block">{formatBs(toBolivares(dashboardMetrics.totalSales))}</span>
                           </div>
                         </div>
                       )}
@@ -999,7 +1002,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                           <div className="relative z-10 mt-auto">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Salón</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${salesByChannel.salon.toFixed(2)}</span>
+                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.salon)}</span>
                             </div>
                             <span className="text-xs font-bold text-slate-400 mt-2 block">
                               ${dashboardMetrics.salonCount} pedidos
@@ -1020,7 +1023,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                           <div className="relative z-10 mt-auto">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Retiro</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${salesByChannel.pickup.toFixed(2)}</span>
+                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.pickup)}</span>
                             </div>
                             <span className="text-xs font-bold text-slate-400 mt-2 block">
                               ${dashboardMetrics.pickupCount} pedidos
@@ -1041,7 +1044,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                           <div className="relative z-10 mt-auto">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Delivery</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${salesByChannel.delivery.toFixed(2)}</span>
+                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.delivery)}</span>
                             </div>
                             <span className="text-xs font-bold text-slate-400 mt-2 block">
                               ${dashboardMetrics.deliveryCount} pedidos

@@ -56,6 +56,7 @@ export default function PersonalView() {
   const [empSchedule, setEmpSchedule] = useState('08:00 - 16:00');
   const [empSalary, setEmpSalary] = useState(250);
   const [empPin, setEmpPin] = useState('');
+  const [empPassword, setEmpPassword] = useState('');
   const [empPhone, setEmpPhone] = useState('');
   const [empEmail, setEmpEmail] = useState('');
   const [empNotes, setEmpNotes] = useState('');
@@ -68,6 +69,7 @@ export default function PersonalView() {
   const [editSchedule, setEditSchedule] = useState('');
   const [editSalary, setEditSalary] = useState(0);
   const [editPin, setEditPin] = useState('');
+  const [editPassword, setEditPassword] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editNotes, setEditNotes] = useState('');
@@ -423,6 +425,7 @@ export default function PersonalView() {
       setEditSchedule(selectedEmployee.schedule || '08:00 - 16:00');
       setEditSalary(selectedEmployee.salary || 250);
       setEditPin(selectedEmployee.pin || '');
+      setEditPassword(selectedEmployee.password || '');
       setEditPhone(selectedEmployee.phone || '');
       setEditEmail(selectedEmployee.email || '');
       setEditNotes(selectedEmployee.notes || '');
@@ -434,13 +437,23 @@ export default function PersonalView() {
     e.preventDefault();
     setEmpError('');
     
-    if (!empName.trim() || !empPin.trim() || empPin.length !== 4) {
-      setEmpError('Completa todos los campos. El PIN debe constar de 4 dígitos.');
+    if (!empName.trim() || !empPin.trim() || empPin.length < 4 || empPin.length > 6) {
+      setEmpError('Completa todos los campos requeridos. El PIN debe constar de 4 a 6 dígitos.');
+      return;
+    }
+
+    if (empRole === 'admin' && (!empEmail.trim() || !empPassword.trim())) {
+      setEmpError('El rol de Administrador requiere obligatoriamente correo y contraseña.');
+      return;
+    }
+
+    if (empPassword.trim() && empPassword.trim().length < 6) {
+      setEmpError('La contraseña debe tener un mínimo de 6 caracteres.');
       return;
     }
 
     const pinExists = employees.some(emp => emp.pin === empPin);
-    if (pinExists || ['1111', '2222', '3333', '4444', '0000', '1234'].includes(empPin)) {
+    if (pinExists || ['1111', '2222', '3333', '4444', '0000', '1234', '123456', '000000'].includes(empPin)) {
       setEmpError('Este PIN ya está registrado o es considerado de riesgo.');
       return;
     }
@@ -452,6 +465,7 @@ export default function PersonalView() {
         schedule: empSchedule.trim(),
         salary: Number(empSalary),
         pin: empPin,
+        password: empPassword.trim(),
         phone: empPhone.trim(),
         email: empEmail.trim(),
         notes: empNotes.trim(),
@@ -465,6 +479,7 @@ export default function PersonalView() {
       // Reset & close
       setEmpName('');
       setEmpPin('');
+      setEmpPassword('');
       setEmpSchedule('08:00 - 16:00');
       setEmpSalary(250);
       setEmpPhone('');
@@ -482,8 +497,8 @@ export default function PersonalView() {
     e.preventDefault();
     if (!selectedEmployeeId) return;
 
-    if (!editName.trim() || !editPin.trim() || editPin.length !== 4) {
-      alert('Completa los campos obligatorios. El PIN debe ser de 4 dígitos.');
+    if (!editName.trim() || !editPin.trim() || editPin.length < 4 || editPin.length > 6) {
+      alert('Completa los campos obligatorios. El PIN debe ser de 4 a 6 dígitos.');
       return;
     }
 
@@ -501,6 +516,7 @@ export default function PersonalView() {
         schedule: editSchedule.trim(),
         salary: Number(editSalary),
         pin: editPin,
+        password: editPassword.trim() || selectedEmployee.password || '',
         phone: editPhone.trim(),
         email: editEmail.trim(),
         notes: editNotes.trim()
@@ -644,7 +660,7 @@ export default function PersonalView() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16 px-4 sm:px-6" id="personal-dashboard-view">
+    <div className="w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16" id="personal-dashboard-view">
       
       {/* SECTION HEADER */}
       <div className="border-b border-slate-200/60 pb-5 shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
@@ -1703,22 +1719,22 @@ export default function PersonalView() {
       {/* REGISTRATION MODAL OVERLAY */}
       <AnimatePresence>
         {isAddingEmployee && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsAddingEmployee(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm hidden md:block"
             />
 
             {/* Modal Box */}
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] border border-slate-100 shadow-2xl max-w-lg w-full overflow-hidden z-10 flex flex-col max-h-[90vh]"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-[100dvh] md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -1770,15 +1786,44 @@ export default function PersonalView() {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">PIN de Acceso (4 Dígitos) *</label>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">PIN de Turno (4-6 Dígitos) *</label>
                     <input 
                       type="password" 
-                      maxLength={4}
+                      maxLength={6}
                       required
                       value={empPin}
                       onChange={e => setEmpPin(e.target.value.replace(/[^0-9]/g, ''))}
-                      placeholder="Ej. 1358"
+                      placeholder="Ej. 8492"
                       className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-bold text-center tracking-widest font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">
+                      Correo Electrónico {empRole === 'admin' ? '*' : '(Opcional)'}
+                    </label>
+                    <input 
+                      type="email" 
+                      required={empRole === 'admin'}
+                      value={empEmail}
+                      onChange={e => setEmpEmail(e.target.value)}
+                      placeholder="Ej. juan@bistroflow.com"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">
+                      Contraseña / Clave {empRole === 'admin' ? '*' : '(Para Portal Web)'}
+                    </label>
+                    <input 
+                      type="password"
+                      required={empRole === 'admin'}
+                      value={empPassword}
+                      onChange={e => setEmpPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
                     />
                   </div>
                 </div>
@@ -1795,14 +1840,18 @@ export default function PersonalView() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Correo Electrónico</label>
-                    <input 
-                      type="email" 
-                      value={empEmail}
-                      onChange={e => setEmpEmail(e.target.value)}
-                      placeholder="Ej. juan@restaurante.com"
-                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
-                    />
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Sueldo Base Mensual ($ USD) *</label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">$</span>
+                      <input 
+                        type="number" 
+                        min="0"
+                        required
+                        value={empSalary}
+                        onChange={e => setEmpSalary(Number(e.target.value))}
+                        className="w-full pl-8 pr-4 p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-bold"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1886,22 +1935,22 @@ export default function PersonalView() {
       {/* EDITING MODAL OVERLAY */}
       <AnimatePresence>
         {isEditing && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsEditing(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm hidden md:block"
             />
 
             {/* Modal Box */}
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] border border-slate-100 shadow-2xl max-w-lg w-full overflow-hidden z-10 flex flex-col max-h-[90vh]"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-[100dvh] md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -1953,15 +2002,38 @@ export default function PersonalView() {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">PIN de Acceso (4 Dígitos) *</label>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">PIN de Turno (4-6 Dígitos) *</label>
                     <input 
                       type="text" 
-                      maxLength={4}
+                      maxLength={6}
                       required
                       value={editPin}
                       onChange={e => setEditPin(e.target.value.replace(/[^0-9]/g, ''))}
-                      placeholder="Ej. 1358"
+                      placeholder="Ej. 8492"
                       className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-bold text-center tracking-widest font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Correo Electrónico</label>
+                    <input 
+                      type="email" 
+                      value={editEmail}
+                      onChange={e => setEditEmail(e.target.value)}
+                      placeholder="Ej. juan@bistroflow.com"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Contraseña de Portal Web</label>
+                    <input 
+                      type="password" 
+                      value={editPassword}
+                      onChange={e => setEditPassword(e.target.value)}
+                      placeholder="•••••••• (dejar en blanco para no cambiar)"
+                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
                     />
                   </div>
                 </div>
@@ -1978,14 +2050,18 @@ export default function PersonalView() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Correo Electrónico</label>
-                    <input 
-                      type="email" 
-                      value={editEmail}
-                      onChange={e => setEditEmail(e.target.value)}
-                      placeholder="Ej. juan@restaurante.com"
-                      className="w-full p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-semibold"
-                    />
+                    <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Sueldo Base Mensual ($ USD) *</label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">$</span>
+                      <input 
+                        type="number" 
+                        min="0"
+                        required
+                        value={editSalary}
+                        onChange={e => setEditSalary(Number(e.target.value))}
+                        className="w-full pl-8 pr-4 p-3 bg-slate-50 border border-slate-100 focus:border-black outline-none rounded-xl text-xs font-bold"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -2062,22 +2138,22 @@ export default function PersonalView() {
       {/* EXTRA BONUS REGISTRATION MODAL */}
       <AnimatePresence>
         {isAddingBonus && selectedEmployee && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsAddingBonus(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm hidden md:block"
             />
 
             {/* Modal Box */}
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] border border-slate-100 shadow-2xl max-w-md w-full overflow-hidden z-10 flex flex-col"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -2147,20 +2223,20 @@ export default function PersonalView() {
       {/* ADD SCHEDULE MODAL OVERLAY */}
       <AnimatePresence>
         {isAddingSchedule && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsAddingSchedule(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm hidden md:block"
             />
 
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] border border-slate-100 shadow-2xl max-w-md w-full overflow-hidden z-10 flex flex-col"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
             >
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-3">
@@ -2256,20 +2332,20 @@ export default function PersonalView() {
       {/* EDIT SCHEDULE MODAL OVERLAY */}
       <AnimatePresence>
         {isEditingSchedule && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center p-0 md:p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsEditingSchedule(null)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm hidden md:block"
             />
 
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[32px] border border-slate-100 shadow-2xl max-w-md w-full overflow-hidden z-10 flex flex-col"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
             >
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-3">

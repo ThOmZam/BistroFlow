@@ -25,20 +25,46 @@ import {
   MessageCircle,
   ExternalLink,
   Upload,
-  Truck
+  Truck,
+  Ticket,
+  Tag,
+  Zap,
+  Flame,
+  Percent,
+  ShieldCheck,
+  Lock,
+  Eye,
+  EyeOff,
+  Mail
 } from 'lucide-react';
 import { collection, addDoc, doc, updateDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES } from '../hooks/useRestaurantData';
 import { logAction } from '../lib/logger';
-import { MenuItem, ExtraOption } from '../types';
+import { MenuItem, ExtraOption, Coupon, FlashDeal } from '../types';
 import PromotionsBanner from '../components/PromotionsBanner';
+import FlashDealsBanner from '../components/FlashDealsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
+import { useCurrency } from '../context/CurrencyContext';
+import CurrencySelector from '../components/CurrencySelector';
 
 export default function ClientView({ onLogout }: { onLogout: () => void }) {
-  const { menu, settings, promotions, ingredients, tables, activeSessions } = useRestaurantData();
-  const exchangeRate = settings?.exchangeRate || 40;
+  const { menu, settings, promotions, ingredients, tables, activeSessions, coupons, flashDeals } = useRestaurantData();
+  const { 
+    activeCurrency, 
+    rates, 
+    currentRate, 
+    currentRateBs, 
+    currencySymbol, 
+    convert, 
+    toBolivares, 
+    formatPrice, 
+    formatActive, 
+    formatBs, 
+    formatWithBs 
+  } = useCurrency();
+  const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
 
   // Retrieve table parameter from URL to support QR self-service
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -93,6 +119,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentReceiptImage, setPaymentReceiptImage] = useState<string | null>(null);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+
+  // Coupon & Marketing State
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
 
   const handleClientReceiptImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -162,10 +194,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const [trackedSession, setTrackedSession] = useState<any | null>(null);
   const [trackedOrders, setTrackedOrders] = useState<any[]>([]);
 
-  // Staff Login Modal State
+  // Staff Login Modal State (Secure Enterprise Portal)
   const [isStaffLoginOpen, setIsStaffLoginOpen] = useState(false);
+  const [staffAuthMode, setStaffAuthMode] = useState<'credentials' | 'pin'>('credentials');
+  const [staffEmail, setStaffEmail] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [pin, setPin] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
+  const [lockoutInfo, setLockoutInfo] = useState<{ isLocked: boolean; remainingMinutes?: number; remainingSeconds?: number } | null>(null);
 
   // Submitting state to prevent double clicks/submissions
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -448,7 +487,91 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   }, [deliveryZones, selectedZoneId]);
 
   const deliveryFeeUSD = (deliveryType === 'delivery' && activeDeliveryZone) ? activeDeliveryZone.priceUSD : 0;
-  const grandTotalUSD = cartTotal + deliveryFeeUSD;
+  
+  // Dynamic coupon discount calculation
+  const couponDiscountUSD = useMemo(() => {
+    if (!appliedCoupon) return 0;
+    if (appliedCoupon.minSpend && cartTotal < appliedCoupon.minSpend) return 0;
+    
+    let discount = 0;
+    if (appliedCoupon.discountType === 'percentage') {
+      discount = (cartTotal * appliedCoupon.discountValue) / 100;
+      if (appliedCoupon.maxDiscount && discount > appliedCoupon.maxDiscount) {
+        discount = appliedCoupon.maxDiscount;
+      }
+    } else {
+      discount = appliedCoupon.discountValue;
+    }
+    return Math.min(discount, cartTotal);
+  }, [appliedCoupon, cartTotal]);
+
+  const subtotalAfterDiscountUSD = Math.max(0, cartTotal - couponDiscountUSD);
+  const grandTotalUSD = qrTable ? subtotalAfterDiscountUSD : (subtotalAfterDiscountUSD + deliveryFeeUSD);
+
+  const handleApplyCoupon = (inputCode?: string) => {
+    const raw = (inputCode !== undefined ? inputCode : couponCodeInput).trim().toUpperCase();
+    if (!raw) {
+      setCouponError('Ingresa un código de cupón');
+      setCouponSuccess(null);
+      return;
+    }
+
+    const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
+    if (!found) {
+      setCouponError(`El cupón "${raw}" no es válido o no existe`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    if (found.status !== 'active') {
+      setCouponError(`El cupón "${raw}" está temporalmente inactivo`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    const now = Date.now();
+    if (found.expiresAt && new Date(found.expiresAt).getTime() < now) {
+      setCouponError(`El cupón "${raw}" ha expirado`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    if (found.startsAt && new Date(found.startsAt).getTime() > now) {
+      setCouponError(`El cupón "${raw}" aún no ha comenzado`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    if (found.usageLimit && (found.usedCount || 0) >= found.usageLimit) {
+      setCouponError(`El cupón "${raw}" ha alcanzado el límite máximo de usos`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    const channel = qrTable ? 'dine-in' : 'delivery';
+    if (found.applicableChannel && found.applicableChannel !== 'all' && found.applicableChannel !== channel) {
+      setCouponError(`Este cupón solo es aplicable en pedidos de ${found.applicableChannel === 'delivery' ? 'Delivery' : 'Salón / Mesa'}`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    if (found.minSpend && cartTotal < found.minSpend) {
+      setCouponError(`Requiere un consumo mínimo de $${found.minSpend.toFixed(2)} (tienes $${cartTotal.toFixed(2)})`);
+      setCouponSuccess(null);
+      return;
+    }
+
+    setAppliedCoupon(found);
+    setCouponError(null);
+    setCouponSuccess(`¡Cupón "${found.code}" aplicado con éxito!`);
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setCouponSuccess(null);
+    setCouponCodeInput('');
+  };
 
   // Submit delivery or QR self-service order
   const submitOrder = async () => {
@@ -481,10 +604,22 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             tableId: qrTable.id,
             startTime: new Date().toISOString(),
             status: 'active',
-            totalAmount: cartTotal,
+            subtotalAmount: cartTotal,
+            totalAmount: grandTotalUSD,
+            couponCode: appliedCoupon ? appliedCoupon.code : null,
+            couponDiscountUSD: appliedCoupon ? couponDiscountUSD : 0,
             customerName: customerName.trim(),
             accounts: [{ id: 'default', name: customerName.trim(), status: 'active' }]
           });
+          if (appliedCoupon) {
+            try {
+              await updateDoc(doc(db, 'coupons', appliedCoupon.id), {
+                usedCount: (appliedCoupon.usedCount || 0) + 1
+              });
+            } catch (err) {
+              console.error('Error updating coupon usage in QR:', err);
+            }
+          }
           await updateDoc(doc(db, 'tables', qrTable.id), { status: 'occupied' });
           sessionToUseId = sessionDocRef.id;
 
@@ -599,8 +734,21 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
           totalUSD: grandTotalUSD,
           currency: 'USD'
         },
+        couponCode: appliedCoupon ? appliedCoupon.code : null,
+        couponDiscountUSD: appliedCoupon ? couponDiscountUSD : 0,
+        subtotalAmount: cartTotal,
         totalAmount: grandTotalUSD
       });
+
+      if (appliedCoupon) {
+        try {
+          await updateDoc(doc(db, 'coupons', appliedCoupon.id), {
+            usedCount: (appliedCoupon.usedCount || 0) + 1
+          });
+        } catch (couponErr) {
+          console.error('Error updating coupon usage:', couponErr);
+        }
+      }
 
       // 2. Create order items with status = 'pending_payment_validation'
       const accountId = 'default';
@@ -667,9 +815,9 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  // Staff Login handler
+  // Staff Login handlers (Authoritative Server Auth with Anti-Brute-Force Shield)
   const handlePinClick = (num: string) => {
-    if (pin.length < 4) {
+    if (pin.length < 6) {
       setPin(prev => prev + num);
       setLoginError('');
     }
@@ -680,98 +828,99 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     setLoginError('');
   };
 
-  const handleStaffLogin = async () => {
-    setLoginError('');
-    let role: string | null = null;
-    let name: string | null = null;
-    let employeeId: string | null = null;
-
-    // Check custom employees from Firestore first
+  const checkLockoutStatus = async () => {
     try {
-      const q = query(collection(db, 'employees'), where('pin', '==', pin));
-      const snap = await getDocs(q);
-      
-      if (!snap.empty) {
-        const employeeDoc = snap.docs[0];
-        const employee = employeeDoc.data();
-        if (employee.status === 'inactive') {
-          setLoginError('Usuario inactivo en nómina.');
-          setPin('');
+      const res = await fetch('/api/auth/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.isLocked) {
+          setLockoutInfo({
+            isLocked: true,
+            remainingMinutes: data.remainingMinutes,
+            remainingSeconds: data.remainingSeconds
+          });
+        } else {
+          setLockoutInfo(null);
+          setAttemptsRemaining(data.attemptsRemaining);
+        }
+      }
+    } catch {}
+  };
+
+  const handleStaffLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+    setIsLoggingIn(true);
+
+    try {
+      const payload: any = { type: staffAuthMode };
+      if (staffAuthMode === 'credentials') {
+        if (!staffEmail.trim() || !staffPassword) {
+          setLoginError('Por favor ingresa tu correo y contraseña.');
+          setIsLoggingIn(false);
           return;
         }
-        role = employee.role;
-        name = employee.name;
-        employeeId = employeeDoc.id;
+        payload.email = staffEmail.trim();
+        payload.password = staffPassword;
+      } else {
+        if (!pin || pin.length < 4) {
+          setLoginError('Ingresa un PIN de al menos 4 dígitos.');
+          setIsLoggingIn(false);
+          return;
+        }
+        payload.pin = pin;
       }
-    } catch (err) {
-      console.error('Error checking employees collection in ClientView:', err);
-    }
 
-    // Default hardcoded pins fallback if not found in Firestore
-    if (!role) {
-      if (pin === '1111') {
-        role = 'admin';
-        name = 'Admin';
-        employeeId = 'fallback-admin';
-      } else if (pin === '2222') {
-        role = 'waiter';
-        name = 'Mesero';
-        employeeId = 'fallback-waiter';
-      } else if (pin === '3333') {
-        role = 'cook';
-        name = 'Cocina';
-        employeeId = 'fallback-cook';
-      } else if (pin === '4444') {
-        role = 'finance';
-        name = 'Caja';
-        employeeId = 'fallback-finance';
+      const res = await fetch('/api/auth/staff-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+
+      if (res.status === 429 || data.isLocked) {
+        setLockoutInfo({
+          isLocked: true,
+          remainingMinutes: data.remainingMinutes || 15,
+          remainingSeconds: data.remainingSeconds || 900
+        });
+        setLoginError(data.error || 'Acceso bloqueado por seguridad tras múltiples intentos.');
+        setIsLoggingIn(false);
+        return;
       }
-    }
 
-    if (role) {
+      if (!res.ok || !data.success) {
+        setLoginError(data.error || 'Credenciales inválidas.');
+        if (typeof data.attemptsRemaining === 'number') {
+          setAttemptsRemaining(data.attemptsRemaining);
+        }
+        if (staffAuthMode === 'pin') {
+          setPin('');
+        }
+        setIsLoggingIn(false);
+        return;
+      }
+
+      // Login Succeeded!
+      const user = data.user;
+      localStorage.setItem('demo_role', user.role);
+      localStorage.setItem('demo_employee_id', user.employeeId || user.id);
+      localStorage.setItem('demo_user_name', user.name);
+
       try {
-        localStorage.setItem('demo_role', role);
-        if (employeeId) {
-          localStorage.setItem('demo_employee_id', employeeId);
-        }
-        if (name) {
-          localStorage.setItem('demo_user_name', name);
-        } else {
-          localStorage.removeItem('demo_user_name');
-        }
         await signInAnonymously(auth);
-        
-        // Log staff login to System Kernel
-        await logAction('auth', name || 'Cliente', 'Inició sesión', `Rol: ${role.toUpperCase()}`);
-        
-        setIsStaffLoginOpen(false);
-        // Refresh page or trigger callback to let App.tsx pick up the role
-        window.location.reload();
-      } catch (err) {
-        // Fallback for offline environments
-        localStorage.setItem('demo_fallback_role', role);
-        if (employeeId) {
-          localStorage.setItem('demo_employee_id', employeeId);
-        }
-        if (name) {
-          localStorage.setItem('demo_user_name', name);
-        } else {
-          localStorage.removeItem('demo_user_name');
-        }
-        
-        // Log staff login to System Kernel (Offline fallback)
-        try {
-          await logAction('auth', name || 'Cliente', 'Inició sesión (Offline)', `Rol: ${role.toUpperCase()}`);
-        } catch (logErr) {
-          console.error('Error logging offline staff login:', logErr);
-        }
-
-        setIsStaffLoginOpen(false);
-        window.location.reload();
+      } catch (authErr) {
+        localStorage.setItem('demo_fallback_role', user.role);
       }
-    } else {
-      setLoginError('PIN incorrecto. Intente nuevamente.');
-      setPin('');
+
+      setIsStaffLoginOpen(false);
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Error during staff login:', err);
+      setLoginError('Error al conectar con el servidor de autenticación.');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -820,6 +969,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         </div>
 
         <div className="flex items-center gap-3">
+          <CurrencySelector variant="compact" />
+
           {trackedSessionId && (
             <button 
               onClick={() => {
@@ -835,14 +986,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
           <button 
             onClick={() => {
               setPin('');
+              setStaffEmail('');
+              setStaffPassword('');
               setLoginError('');
+              checkLockoutStatus();
               setIsStaffLoginOpen(true);
             }} 
-            className="p-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-600 transition-colors flex items-center gap-2 text-xs font-bold border border-slate-100"
-            title="Acceso Personal"
+            className="p-2 sm:px-3 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-black rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold border border-slate-200/80 cursor-pointer shadow-xs"
+            title="Portal de Colaboradores"
           >
-            <KeyRound size={16} />
-            <span className="hidden sm:inline">Acceso Personal</span>
+            <ShieldCheck size={16} className="text-indigo-600" />
+            <span className="hidden sm:inline">Portal Colaboradores</span>
           </button>
         </div>
       </header>
@@ -981,6 +1135,13 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
         )}
+
+        {/* FLASH DEALS (DESCUENTOS POR TIEMPO LIMITADO) */}
+        <FlashDealsBanner 
+          flashDeals={flashDeals} 
+          onSelectCategory={(cat) => setCategory(cat)} 
+          onSearchItem={(q) => setSearchQuery(q)} 
+        />
 
         {/* PROMOTIONS BANNER SECTION */}
         <PromotionsBanner onPromoClick={handlePromoClick} categories={categories} promotions={promotions} />
@@ -1141,10 +1302,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     <div className="mt-5 flex items-center justify-between pt-4 border-t border-slate-50">
                       <div>
                         <span className="block font-black text-lg text-black leading-tight">
-                          ${item.price.toFixed(2)}
+                          {formatPrice(item.price)}
                         </span>
                         <span className="block text-[10px] text-slate-400 font-medium">
-                          Bs. {(item.price * exchangeRate).toFixed(2)}
+                          {formatBs(toBolivares(item.price))}
                         </span>
                       </div>
 
@@ -1196,8 +1357,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </div>
             </div>
             <div className="text-right">
-              <span className="block font-bold text-sm">${(!qrTable ? grandTotalUSD : cartTotal).toFixed(2)}</span>
-              <span className="block text-[10px] text-slate-400 font-bold">Bs. {((!qrTable ? grandTotalUSD : cartTotal) * exchangeRate).toFixed(2)}</span>
+              <span className="block font-bold text-sm">{formatPrice(!qrTable ? grandTotalUSD : cartTotal)}</span>
+              <span className="block text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(!qrTable ? grandTotalUSD : cartTotal))}</span>
             </div>
           </button>
         </div>
@@ -1206,12 +1367,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* CART SLIDE-OVER MODAL */}
       <AnimatePresence>
         {isCartOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-stretch md:items-end justify-center z-50 p-0 md:p-4">
             <motion.div 
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col"
+              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] bg-white rounded-none md:rounded-t-[36px] p-5 sm:p-8 overflow-y-auto shadow-2xl flex flex-col"
             >
               <div className="flex justify-between items-center mb-6">
                 <div>
@@ -1364,12 +1525,119 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 ))}
               </div>
 
+              {/* Cupón de Descuento Section */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mb-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+                    <Ticket size={14} className="text-indigo-600" />
+                    Cupón de Descuento
+                  </span>
+                  {appliedCoupon && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      className="text-[10px] font-black text-rose-600 hover:underline uppercase cursor-pointer"
+                    >
+                      Quitar Cupón
+                    </button>
+                  )}
+                </div>
+
+                {appliedCoupon ? (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-black text-xs">
+                        ✓
+                      </span>
+                      <div>
+                        <span className="font-mono font-black text-xs text-emerald-900 block">
+                          {appliedCoupon.code}
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-bold block">
+                          {appliedCoupon.discountType === 'percentage' 
+                            ? `${appliedCoupon.discountValue}% OFF aplicado` 
+                            : `-$${appliedCoupon.discountValue.toFixed(2)} USD aplicado`}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="font-black text-xs text-emerald-700">
+                      -${couponDiscountUSD.toFixed(2)} USD
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Código (ej. BISTRO20)"
+                        value={couponCodeInput}
+                        onChange={(e) => {
+                          setCouponCodeInput(e.target.value.toUpperCase());
+                          setCouponError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleApplyCoupon();
+                          }
+                        }}
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase placeholder:normal-case placeholder:font-sans outline-none focus:border-indigo-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleApplyCoupon()}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer shadow-xs"
+                      >
+                        Aplicar
+                      </button>
+                    </div>
+
+                    {couponError && (
+                      <p className="text-[10px] font-bold text-rose-600">
+                        {couponError}
+                      </p>
+                    )}
+
+                    {/* Quick Available Coupon Chips */}
+                    {coupons && coupons.filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now())).length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[9px] font-bold uppercase text-slate-400">Disponibles:</span>
+                        {coupons
+                          .filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now()))
+                          .slice(0, 3)
+                          .map(c => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setCouponCodeInput(c.code);
+                                handleApplyCoupon(c.code);
+                              }}
+                              className="text-[10px] font-mono font-black bg-indigo-50 border border-indigo-200/70 text-indigo-700 px-2 py-0.5 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>🏷️ {c.code}</span>
+                              <span className="text-[9px] text-indigo-500 font-sans">(-{c.discountType === 'percentage' ? `${c.discountValue}%` : `$${c.discountValue}`})</span>
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Totals Breakdown inside Cart Drawer */}
               <div className="border-t border-slate-200/80 pt-4 mb-6 space-y-2 bg-slate-50 p-4 rounded-2xl">
                 <div className="flex justify-between items-center text-xs text-slate-500 font-medium">
                   <span>Subtotal Productos:</span>
                   <span className="font-bold text-slate-800">${cartTotal.toFixed(2)} USD</span>
                 </div>
+
+                {appliedCoupon && couponDiscountUSD > 0 && (
+                  <div className="flex justify-between items-center text-xs text-emerald-700 font-bold">
+                    <span>Descuento ({appliedCoupon.code}):</span>
+                    <span>-${couponDiscountUSD.toFixed(2)} USD</span>
+                  </div>
+                )}
 
                 {!qrTable && deliveryType === 'delivery' && (
                   <div className="flex justify-between items-center text-xs text-amber-900 font-semibold">
@@ -1381,8 +1649,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 <div className="flex justify-between items-baseline border-t border-slate-200/80 pt-2">
                   <span className="text-sm font-black text-slate-900 uppercase tracking-wider">Total a Pagar:</span>
                   <div className="text-right">
-                    <span className="block text-2xl font-black text-slate-950">${(!qrTable ? grandTotalUSD : cartTotal).toFixed(2)}</span>
-                    <span className="block text-xs text-slate-500 font-bold">Bs. {((!qrTable ? grandTotalUSD : cartTotal) * exchangeRate).toFixed(2)}</span>
+                    <span className="block text-2xl font-black text-slate-950">${grandTotalUSD.toFixed(2)}</span>
+                    <span className="block text-xs text-slate-500 font-bold">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -1407,12 +1675,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* CHECKOUT FLOW WIZARD MODAL */}
       <AnimatePresence>
         {isOrdering && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-stretch md:items-center justify-center z-50 p-0 md:p-4">
             <motion.div 
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-white rounded-t-[32px] sm:rounded-3xl p-4 sm:p-6 max-h-[92vh] flex flex-col shadow-2xl relative"
+              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[92vh] bg-white rounded-none md:rounded-3xl p-4 sm:p-6 flex flex-col shadow-2xl relative overflow-hidden"
             >
               <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3 shrink-0">
                 <div>
@@ -1729,7 +1997,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                             <span>Banco: <strong className="text-indigo-700">{settings?.pagoMovilBanco || 'Banesco'}</strong></span><br />
                             <span>Teléfono: <strong className="text-indigo-700">{settings?.pagoMovilPhone || '0412-1234567'}</strong></span><br />
                             <span>Cédula/RIF: <strong className="text-indigo-700">{settings?.pagoMovilId || 'V-12345678'}</strong></span><br />
-                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</strong></span>
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">{formatBs(toBolivares(grandTotalUSD))}</strong></span>
                           </div>
                         )}
                         {paymentMethod === 'zelle' && (
@@ -1737,14 +2005,14 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                             <span className="font-bold block">Datos de Zelle:</span>
                             <span>Correo: <strong className="text-indigo-700">{settings?.zelleEmail || 'pagos@bistroflow.com'}</strong></span><br />
                             <span>Beneficiario: <strong className="text-indigo-700">{settings?.zelleName || 'BistroFlow SL'}</strong></span><br />
-                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">${grandTotalUSD.toFixed(2)}</strong></span>
+                            <span className="text-slate-400 block mt-1 font-mono">Monto a Transferir: <strong className="text-black">{formatPrice(grandTotalUSD)}</strong></span>
                           </div>
                         )}
                         {paymentMethod === 'cash' && (
                           <div className="space-y-1">
                             <span className="font-bold block">{deliveryType === 'delivery' ? 'Pago Contra Entrega (Efectivo):' : 'Pago al Retirar (Efectivo):'}</span>
                             <span>Prepara el monto exacto para dárselo al {deliveryType === 'delivery' ? 'repartidor' : 'cajero'} cuando {deliveryType === 'delivery' ? 'llegue tu pedido' : 'vengas a retirar'}.</span><br />
-                            <span className="font-semibold block mt-1">Total: ${grandTotalUSD.toFixed(2)} (Bs. {(grandTotalUSD * exchangeRate).toFixed(2)})</span>
+                            <span className="font-semibold block mt-1">Total: {formatPrice(grandTotalUSD)} ({formatBs(toBolivares(grandTotalUSD))})</span>
                           </div>
                         )}
                       </div>
@@ -1823,6 +2091,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       <span>Subtotal de productos:</span>
                       <span className="font-bold text-slate-800">${cartTotal.toFixed(2)}</span>
                     </div>
+                    {appliedCoupon && couponDiscountUSD > 0 && (
+                      <div className="flex justify-between items-center text-xs text-emerald-700 font-bold">
+                        <span>Descuento Cupón ({appliedCoupon.code}):</span>
+                        <span>-${couponDiscountUSD.toFixed(2)} USD</span>
+                      </div>
+                    )}
                     {deliveryType === 'delivery' && (
                       <div className="flex justify-between items-center text-xs text-amber-900 font-medium">
                         <span>Envío ({activeDeliveryZone?.name || 'Delivery'}):</span>
@@ -1830,10 +2104,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       </div>
                     )}
                     <div className="flex justify-between items-baseline border-t border-slate-200/80 pt-2 text-slate-900">
-                      <span className="font-black text-sm">TOTAL A PAGAR:</span>
+                      <span className="font-black text-sm">TOTAL A PAGAR ({activeCurrency}):</span>
                       <div className="text-right">
-                        <span className="block font-black text-lg text-slate-950">${grandTotalUSD.toFixed(2)} USD</span>
-                        <span className="block text-xs font-bold text-slate-500">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</span>
+                        <span className="block font-black text-lg text-slate-950">{formatPrice(grandTotalUSD)}</span>
+                        <span className="block text-xs font-bold text-slate-500">{formatBs(toBolivares(grandTotalUSD))}</span>
                       </div>
                     </div>
                   </div>
@@ -1874,88 +2148,237 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         )}
       </AnimatePresence>
 
-      {/* STAFF PIN PAD LOGIN MODAL */}
+      {/* SECURE ENTERPRISE STAFF PORTAL MODAL */}
       <AnimatePresence>
         {isStaffLoginOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="fixed inset-0 bg-white md:bg-black/60 md:backdrop-blur-md flex flex-col md:items-center md:justify-center z-50 p-0 md:p-6 overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl relative border border-slate-100"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[40px] p-6 sm:p-8 w-full min-h-[100dvh] md:min-h-0 md:h-auto md:max-w-md shadow-none md:shadow-2xl relative border-0 md:border md:border-slate-100 overflow-y-auto flex flex-col justify-between"
             >
+              {/* Header Close */}
               <button 
-                onClick={() => setIsStaffLoginOpen(false)}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                onClick={() => {
+                  setIsStaffLoginOpen(false);
+                  setLoginError('');
+                }}
+                className="absolute top-5 right-5 sm:top-6 sm:right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 hover:text-black transition-colors cursor-pointer"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
 
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-black text-white rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-lg shadow-black/10">
-                  <KeyRound size={28} />
+              <div className="text-center mb-6">
+                <div className="w-14 h-14 bg-slate-900 text-white rounded-2xl mx-auto flex items-center justify-center mb-3 shadow-md">
+                  <ShieldCheck size={28} className="text-emerald-400" />
                 </div>
-                <h3 className="text-xl font-bold">Ingreso de Personal</h3>
-                <p className="text-xs text-slate-400 mt-1">Ingresa tu PIN de 4 dígitos para acceder.</p>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 px-3 py-1 rounded-full border border-slate-100 inline-block mb-1">
+                  Control de Acceso Interno
+                </span>
+                <h3 className="text-xl font-black text-slate-900">Portal de Colaboradores</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Acceso autorizado para personal y administración</p>
               </div>
 
-              {/* Pin Indicator Bullets */}
-              <div className="flex justify-center gap-4 mb-8">
-                {[0, 1, 2, 3].map((i) => (
-                  <div 
-                    key={i}
-                    className={`w-3.5 h-3.5 rounded-full border-2 border-black transition-all ${
-                      pin.length > i ? 'bg-black scale-110' : 'bg-transparent'
-                    }`}
-                  />
-                ))}
+              {/* Security Shield Banner */}
+              <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-2.5 mb-5 flex items-center justify-between text-[11px] text-slate-600">
+                <div className="flex items-center gap-2">
+                  <Lock size={13} className="text-emerald-600 shrink-0" />
+                  <span className="font-semibold">Shield Anti-Fuerza Bruta Activo</span>
+                </div>
+                {attemptsRemaining !== null && !lockoutInfo?.isLocked && (
+                  <span className={`font-mono font-bold text-[10px] px-2 py-0.5 rounded-full ${
+                    attemptsRemaining <= 2 ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {attemptsRemaining} {attemptsRemaining === 1 ? 'intento' : 'intentos'}
+                  </span>
+                )}
               </div>
 
-              {loginError && (
-                <div className="bg-rose-50 text-rose-500 text-[11px] p-3 rounded-xl text-center mb-6 font-bold border border-rose-100">
+              {/* Lockout Warning Banner */}
+              {lockoutInfo?.isLocked && (
+                <div className="bg-rose-50 text-rose-700 text-xs p-4 rounded-2xl text-center mb-5 font-bold border border-rose-200 space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 text-rose-800">
+                    <Lock size={15} />
+                    <span>Acceso Temporalmente Bloqueado</span>
+                  </div>
+                  <p className="text-[11px] font-medium text-rose-600">
+                    Se detectaron 5 intentos fallidos consecutivos. Por protocolo de seguridad, el sistema permanecerá bloqueado durante {lockoutInfo.remainingMinutes || 15} minuto(s).
+                  </p>
+                </div>
+              )}
+
+              {/* Mode Switcher Tabs */}
+              <div className="flex bg-slate-100 p-1 rounded-2xl mb-5 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStaffAuthMode('credentials');
+                    setLoginError('');
+                  }}
+                  className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    staffAuthMode === 'credentials'
+                      ? 'bg-white text-black shadow-xs font-black'
+                      : 'text-slate-500 hover:text-black'
+                  }`}
+                >
+                  <Mail size={13} />
+                  <span>Correo y Clave</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStaffAuthMode('pin');
+                    setLoginError('');
+                  }}
+                  className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    staffAuthMode === 'pin'
+                      ? 'bg-white text-black shadow-xs font-black'
+                      : 'text-slate-500 hover:text-black'
+                  }`}
+                >
+                  <KeyRound size={13} />
+                  <span>PIN de Turno</span>
+                </button>
+              </div>
+
+              {loginError && !lockoutInfo?.isLocked && (
+                <div className="bg-rose-50 text-rose-600 text-xs p-3 rounded-xl text-center mb-4 font-bold border border-rose-100 animate-shake">
                   {loginError}
                 </div>
               )}
 
-              {/* Number pad */}
-              <div className="grid grid-cols-3 gap-3 mb-6">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
-                  <button
-                    key={num}
-                    onClick={() => handlePinClick(num)}
-                    className="h-12 w-full text-xl font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors"
-                  >
-                    {num}
-                  </button>
-                ))}
-                <button 
-                  onClick={handlePinDelete}
-                  className="h-12 w-full text-[10px] font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors text-slate-400 uppercase tracking-widest"
-                >
-                  Borrar
-                </button>
-                <button
-                  onClick={() => handlePinClick('0')}
-                  className="h-12 w-full text-xl font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-colors"
-                >
-                  0
-                </button>
-                <button
-                  onClick={handleStaffLogin}
-                  disabled={pin.length < 4}
-                  className={`h-12 w-full text-[11px] uppercase tracking-widest font-black rounded-2xl flex items-center justify-center transition-all ${
-                    pin.length === 4 
-                      ? 'bg-black text-white shadow-lg shadow-black/15' 
-                      : 'bg-slate-50 text-slate-300 cursor-not-allowed'
-                  }`}
-                >
-                  OK
-                </button>
-              </div>
+              {/* TAB 1: FORM CORREO Y CLAVE */}
+              {staffAuthMode === 'credentials' ? (
+                <form onSubmit={handleStaffLogin} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Correo Electrónico
+                    </label>
+                    <div className="relative">
+                      <Mail size={15} className="absolute left-3.5 top-3 text-slate-400" />
+                      <input 
+                        type="email"
+                        required
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        value={staffEmail}
+                        onChange={(e) => setStaffEmail(e.target.value)}
+                        placeholder="ejemplo@bistroflow.com"
+                        className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
 
-              <div className="text-center text-[10px] text-slate-400 font-mono space-y-1 border-t border-slate-50 pt-4">
-                <span className="block">Admin: 1111 | Mesero: 2222</span>
-                <span className="block">Cocina: 3333 | Caja / Finanzas: 4444</span>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Contraseña / Clave
+                    </label>
+                    <div className="relative">
+                      <Lock size={15} className="absolute left-3.5 top-3 text-slate-400" />
+                      <input 
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        value={staffPassword}
+                        onChange={(e) => setStaffPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-black cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn || lockoutInfo?.isLocked || !staffEmail || !staffPassword}
+                    className="w-full mt-2 py-3 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isLoggingIn ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Verificando Credenciales...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck size={16} />
+                        <span>Iniciar Sesión de Personal</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                /* TAB 2: PIN DE TURNO CON TECLADO NUMÉRICO */
+                <div>
+                  {/* Pin Indicator Bullets */}
+                  <div className="flex justify-center gap-3 mb-6">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div 
+                        key={i}
+                        className={`w-4 h-4 rounded-full border-2 border-black transition-all ${
+                          pin.length > i ? 'bg-black scale-110 shadow-sm' : 'bg-transparent'
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Number pad */}
+                  <div className="grid grid-cols-3 gap-2.5 mb-4">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        onClick={() => handlePinClick(num)}
+                        className="h-11 w-full text-lg font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-95 flex items-center justify-center transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {num}
+                      </button>
+                    ))}
+                    <button 
+                      type="button"
+                      disabled={isLoggingIn || lockoutInfo?.isLocked}
+                      onClick={handlePinDelete}
+                      className="h-11 w-full text-[10px] font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-widest cursor-pointer disabled:opacity-40"
+                    >
+                      Borrar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoggingIn || lockoutInfo?.isLocked}
+                      onClick={() => handlePinClick('0')}
+                      className="h-11 w-full text-lg font-bold rounded-2xl bg-slate-50 hover:bg-slate-100 active:scale-95 flex items-center justify-center transition-all cursor-pointer disabled:opacity-40"
+                    >
+                      0
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pin.length < 4 || isLoggingIn || lockoutInfo?.isLocked}
+                      onClick={() => handleStaffLogin()}
+                      className={`h-11 w-full text-[11px] uppercase tracking-widest font-black rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
+                        pin.length >= 4 && !isLoggingIn && !lockoutInfo?.isLocked
+                          ? 'bg-black text-white shadow-md active:scale-95' 
+                          : 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                      }`}
+                    >
+                      {isLoggingIn ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        'Entrar'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="text-center text-[10px] text-slate-400 mt-4 pt-3 border-t border-slate-100 flex items-center justify-center gap-1.5">
+                <Lock size={11} className="text-slate-400" />
+                <span>Validado y auditado por RestoFlow Security Kernel</span>
               </div>
             </motion.div>
           </div>
@@ -1965,19 +2388,19 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* PLATILLO DETAIL MODAL */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 md:backdrop-blur-sm flex items-stretch md:items-center justify-center z-50 p-0 md:p-4 overflow-y-auto">
             {/* Clickable backdrop overlay to close */}
             <div 
-              className="absolute inset-0 cursor-pointer" 
+              className="absolute inset-0 cursor-pointer hidden md:block" 
               onClick={() => setSelectedItem(null)} 
             />
 
             <motion.div 
-              initial={{ scale: 0.95, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.95, y: 15, opacity: 0 }}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="bg-white rounded-[24px] sm:rounded-[32px] w-full max-w-lg shadow-2xl relative border border-slate-100 overflow-hidden z-10 my-4 flex flex-col max-h-[92vh] sm:max-h-[90vh]"
+              className="bg-white rounded-none md:rounded-[32px] w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] shadow-2xl relative border-0 md:border md:border-slate-100 overflow-hidden z-10 my-0 md:my-4 flex flex-col"
             >
               {/* Image & Header Section */}
               <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
@@ -2281,9 +2704,9 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* TRACKING DRAWER BOTTOM SHEET */}
       <AnimatePresence>
         {isTrackerDrawerOpen && trackedSession && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-stretch md:items-end justify-center z-50 p-0 md:p-4">
             {/* Backdrop click to close */}
-            <div className="absolute inset-0" onClick={() => {
+            <div className="absolute inset-0 hidden md:block" onClick={() => {
               if (trackedSession && (trackedSession.status === 'completed' || trackedSession.status === 'closed')) {
                 localStorage.removeItem('tracked_delivery_session_id');
                 setTrackedSessionId(null);
@@ -2296,7 +2719,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-white rounded-t-[36px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl z-10 relative"
+              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] bg-white rounded-none md:rounded-t-[36px] p-5 sm:p-8 overflow-y-auto shadow-2xl z-10 relative flex flex-col"
             >
               {/* Drag indicator bar */}
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
@@ -2475,12 +2898,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* COMPROBANTE / VOUCHER SUCCESS MODAL */}
       <AnimatePresence>
         {submittedVoucher && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/70 md:backdrop-blur-sm flex items-stretch md:items-center justify-center z-50 p-0 md:p-4 overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-[32px] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 my-8 flex flex-col relative z-50"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 15 }}
+              className="bg-white rounded-none md:rounded-[32px] w-full h-[100dvh] md:h-auto md:max-w-md shadow-2xl overflow-y-auto border-0 md:border md:border-slate-100 my-0 md:my-8 flex flex-col relative z-50"
             >
               <div className="p-6 md:p-8 flex-1">
                 {/* Header with success badge */}
@@ -2618,8 +3041,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       `------------------------------------\n` +
                       (submittedVoucher.deliveryType === 'delivery' ? `*Subtotal:* $${submittedVoucher.subtotalAmount.toFixed(2)} USD\n` : '') +
                       (submittedVoucher.deliveryType === 'delivery' ? `*Costo Envío:* $${(submittedVoucher.deliveryFee || 0).toFixed(2)} USD\n` : '') +
-                      `*TOTAL A PAGAR:* $${submittedVoucher.totalAmount.toFixed(2)} USD\n` +
-                      `*TOTAL BS:* Bs. ${(submittedVoucher.totalAmount * exchangeRate).toFixed(2)} _(Tasa: ${exchangeRate})_\n` +
+                      `*TOTAL ${activeCurrency}:* ${formatPrice(submittedVoucher.totalAmount)}\n` +
+                      `*TOTAL BS:* ${formatBs(toBolivares(submittedVoucher.totalAmount))} _(Tasa: ${currentRateBs.toFixed(2)} Bs/${currencySymbol})_\n` +
                       `*Método de Pago:* _${submittedVoucher.paymentMethod === 'pagomovil' ? 'Pago Móvil 📱' : submittedVoucher.paymentMethod === 'zelle' ? 'Zelle 📧' : 'Efectivo 💵'}_\n` +
                       (submittedVoucher.paymentMethod !== 'cash' ? `*Referencia/Pago:* _${submittedVoucher.paymentReference}_\n` : '') +
                       `------------------------------------\n` +
@@ -2658,8 +3081,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       `DETALLE DEL PEDIDO:\r\n` +
                       `${itemsText}\r\n` +
                       `----------------------------------------\r\n` +
-                      `TOTAL USD : $${submittedVoucher.totalAmount.toFixed(2)}\r\n` +
-                      `TOTAL BS  : Bs. ${(submittedVoucher.totalAmount * exchangeRate).toFixed(2)}\r\n` +
+                      `TOTAL ${activeCurrency.padEnd(4, ' ')}: ${formatPrice(submittedVoucher.totalAmount)}\r\n` +
+                      `TOTAL BS  : ${formatBs(toBolivares(submittedVoucher.totalAmount))}\r\n` +
                       `----------------------------------------\r\n` +
                       `Metodo    : ${submittedVoucher.paymentMethod.toUpperCase()}\r\n` +
                       (submittedVoucher.paymentMethod !== 'cash' ? `Referencia: ${submittedVoucher.paymentReference}\r\n` : '') +
