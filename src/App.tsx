@@ -174,7 +174,7 @@ export default function App() {
   const isBlockedByClockIn = currentUser.role !== 'admin' && !hasActiveClockIn && isOperationalView;
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-[#F8F9FA] overflow-hidden text-[#000000] font-sans pb-20 md:pb-0">
+    <div className="flex flex-col md:flex-row h-screen h-[100dvh] bg-[#F8F9FA] overflow-hidden text-[#000000] font-sans">
       <Sidebar 
         role={currentUser.role} 
         onLogout={handleLogout} 
@@ -186,7 +186,7 @@ export default function App() {
       
       <NotificationManager currentUser={currentUser} onViewChange={setActiveView} />
       
-      <main className="flex-1 overflow-auto p-4 md:p-8 flex flex-col min-w-0 w-full">
+      <main className="flex-1 overflow-auto p-4 pb-28 md:p-8 md:pb-8 flex flex-col min-w-0 w-full">
         {/* Global Currency & System Top Bar */}
         <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200/50 shrink-0">
           <div className="flex items-center gap-2">

@@ -268,7 +268,7 @@ export default function Sidebar({ role, onLogout, activeView, onViewChange, rest
       </motion.aside>
 
       {/* Mobile Bottom Nav with Alert Badges */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 pb-[env(safe-area-inset-bottom)]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1.5 px-3 w-full justify-start select-none touch-pan-x -webkit-overflow-scrolling-touch">
           {filteredItems.map((item) => {
             const isSelected = activeView === item.id;

@@ -1734,7 +1734,7 @@ export default function PersonalView() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-[100dvh] md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-full md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -1756,7 +1756,7 @@ export default function PersonalView() {
               </div>
 
               {/* Form Body */}
-              <form onSubmit={handleAddEmployee} className="p-6 overflow-y-auto space-y-4 flex-1">
+              <form onSubmit={handleAddEmployee} className="p-6 overflow-y-auto space-y-4 flex-1 pb-16">
                 
                 <div>
                   <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Nombre Completo *</label>
@@ -1950,7 +1950,7 @@ export default function PersonalView() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-[100dvh] md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl w-full h-full md:h-auto md:max-w-lg overflow-hidden z-10 flex flex-col md:max-h-[90vh]"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -1972,7 +1972,7 @@ export default function PersonalView() {
               </div>
 
               {/* Form Body */}
-              <form onSubmit={handleUpdateEmployee} className="p-6 overflow-y-auto space-y-4 flex-1">
+              <form onSubmit={handleUpdateEmployee} className="p-6 overflow-y-auto space-y-4 flex-1 pb-16">
                 
                 <div>
                   <label className="block text-[10px] uppercase font-black text-slate-400 mb-1.5">Nombre Completo *</label>
@@ -2153,7 +2153,7 @@ export default function PersonalView() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-full md:h-auto overflow-y-auto z-10 flex flex-col justify-between pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               {/* Header */}
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
@@ -2236,7 +2236,7 @@ export default function PersonalView() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-full md:h-auto overflow-y-auto z-10 flex flex-col justify-between pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-3">
@@ -2345,7 +2345,7 @@ export default function PersonalView() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-[100dvh] md:h-auto overflow-hidden z-10 flex flex-col justify-between"
+              className="bg-white rounded-none md:rounded-[32px] border-0 md:border md:border-slate-100 shadow-2xl max-w-md w-full h-full md:h-auto overflow-y-auto z-10 flex flex-col justify-between pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               <div className="bg-slate-900 text-white p-6 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-3">

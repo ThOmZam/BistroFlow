@@ -47,7 +47,6 @@ import PromotionsBanner from '../components/PromotionsBanner';
 import FlashDealsBanner from '../components/FlashDealsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
-import CurrencySelector from '../components/CurrencySelector';
 
 export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const { menu, settings, promotions, ingredients, tables, activeSessions, coupons, flashDeals } = useRestaurantData();
@@ -953,7 +952,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-black font-sans pb-32">
+    <div className="min-h-screen bg-[#F8F9FA] text-black font-sans pb-44 md:pb-36">
       {/* HEADER */}
       <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 px-6 py-4 flex justify-between items-center max-w-7xl mx-auto rounded-b-[24px] shadow-sm">
         <div className="flex items-center gap-3">
@@ -969,8 +968,6 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         </div>
 
         <div className="flex items-center gap-3">
-          <CurrencySelector variant="compact" />
-
           {trackedSessionId && (
             <button 
               onClick={() => {
@@ -1340,7 +1337,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
       {/* FLOAT BOTTOM BAR CART PREVIEW */}
       {cart.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30">
+        <div className="fixed bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))] left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30">
           <button 
             onClick={() => setIsCartOpen(true)}
             className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl flex justify-between items-center shadow-xl shadow-black/25 hover:scale-[1.02] transition-all"
@@ -1372,20 +1369,23 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] bg-white rounded-none md:rounded-t-[36px] p-5 sm:p-8 overflow-y-auto shadow-2xl flex flex-col"
+              className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-lg bg-white rounded-none md:rounded-t-[36px] shadow-2xl flex flex-col overflow-hidden"
             >
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex justify-between items-center p-5 sm:p-6 pb-4 border-b border-slate-100 shrink-0">
                 <div>
-                  <h3 className="text-2xl font-black tracking-tight">Tu Carrito</h3>
-                  <p className="text-xs text-slate-400 mt-1">Revisa tus artículos y opciones de entrega.</p>
+                  <h3 className="text-xl sm:text-2xl font-black tracking-tight">Tu Carrito</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Revisa tus artículos y opciones de entrega.</p>
                 </div>
                 <button 
                   onClick={() => setIsCartOpen(false)}
-                  className="text-xs font-bold text-slate-400 hover:text-black uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100"
+                  className="text-xs font-bold text-slate-400 hover:text-black uppercase tracking-wider bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100 cursor-pointer"
                 >
                   Cerrar
                 </button>
               </div>
+
+              {/* Scrollable Cart Content */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-4">
 
               {/* Delivery / Pick Up selector inside Cart Drawer (for non-QR orders) */}
               {!qrTable && ((settings?.deliveryEnabled !== false) || (settings?.pickupEnabled !== false)) && (
@@ -1646,27 +1646,31 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   </div>
                 )}
 
-                <div className="flex justify-between items-baseline border-t border-slate-200/80 pt-2">
-                  <span className="text-sm font-black text-slate-900 uppercase tracking-wider">Total a Pagar:</span>
-                  <div className="text-right">
-                    <span className="block text-2xl font-black text-slate-950">${grandTotalUSD.toFixed(2)}</span>
-                    <span className="block text-xs text-slate-500 font-bold">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</span>
-                  </div>
-                </div>
+              </div>
               </div>
 
-              {/* Checkout flow activator */}
-              <button 
-                disabled={qrTable !== null && settings?.qrOrderingEnabled === false}
-                onClick={() => {
-                  setIsOrdering(true);
-                }}
-                className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {qrTable 
-                  ? (settings?.qrOrderingEnabled === false ? 'Pedidos QR Desactivados' : `Confirmar Orden en Mesa ${qrTable.number}`) 
-                  : 'Proceder al Pago'} <ArrowRight size={18} />
-              </button>
+              {/* Sticky Bottom Action Footer */}
+              <div className="p-4 sm:p-6 bg-slate-50 border-t border-slate-200 shrink-0 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-3">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Total a Pagar:</span>
+                  <div className="text-right">
+                    <span className="text-xl font-black text-slate-950">${grandTotalUSD.toFixed(2)}</span>
+                    <span className="text-xs text-slate-500 font-bold ml-2">Bs. {(grandTotalUSD * exchangeRate).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <button 
+                  disabled={qrTable !== null && settings?.qrOrderingEnabled === false}
+                  onClick={() => {
+                    setIsOrdering(true);
+                  }}
+                  className="w-full bg-black hover:bg-slate-900 text-white p-4 sm:p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-lg shadow-black/10"
+                >
+                  {qrTable 
+                    ? (settings?.qrOrderingEnabled === false ? 'Pedidos QR Desactivados' : `Confirmar Orden en Mesa ${qrTable.number}`) 
+                    : 'Proceder al Pago'} <ArrowRight size={18} />
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1680,7 +1684,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[92vh] bg-white rounded-none md:rounded-3xl p-4 sm:p-6 flex flex-col shadow-2xl relative overflow-hidden"
+              className="w-full h-full md:h-auto md:max-h-[92vh] md:max-w-lg bg-white rounded-none md:rounded-3xl p-4 sm:p-6 flex flex-col shadow-2xl relative overflow-hidden"
             >
               <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3 shrink-0">
                 <div>
@@ -1699,7 +1703,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 </button>
               </div>
 
-              <div className="overflow-y-auto pr-1 scrollbar-thin my-1 flex-1 space-y-4">
+              <div className="overflow-y-auto pr-1 scrollbar-thin my-1 flex-1 min-h-0 space-y-4 pb-24">
 
               {qrTable ? (
                 /* Streamlined Dine-in QR Checkout */
@@ -2156,7 +2160,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[40px] p-6 sm:p-8 w-full min-h-[100dvh] md:min-h-0 md:h-auto md:max-w-md shadow-none md:shadow-2xl relative border-0 md:border md:border-slate-100 overflow-y-auto flex flex-col justify-between"
+              className="bg-white rounded-none md:rounded-[40px] p-6 sm:p-8 w-full h-full md:h-auto md:max-w-md shadow-none md:shadow-2xl relative border-0 md:border md:border-slate-100 overflow-y-auto flex flex-col justify-between pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               {/* Header Close */}
               <button 
@@ -2400,10 +2404,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="bg-white rounded-none md:rounded-[32px] w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] shadow-2xl relative border-0 md:border md:border-slate-100 overflow-hidden z-10 my-0 md:my-4 flex flex-col"
+              className="bg-white rounded-none md:rounded-[32px] w-full h-full md:h-auto md:max-h-[90vh] md:max-w-lg shadow-2xl relative border-0 md:border md:border-slate-100 overflow-hidden z-10 my-0 flex flex-col"
             >
               {/* Image & Header Section */}
-              <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
+              <div className="relative h-[150px] sm:h-[220px] w-full bg-slate-100 shrink-0">
                 <img 
                   src={selectedItem.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500'} 
                   alt={selectedItem.name} 
@@ -2413,7 +2417,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 {/* Close Button on top of image */}
                 <button 
                   onClick={() => setSelectedItem(null)}
-                  className="absolute top-4 right-4 p-2 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full text-white transition-all shadow-md hover:scale-105"
+                  className="absolute top-4 right-4 p-2 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full text-white transition-all shadow-md hover:scale-105 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -2425,7 +2429,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </div>
 
               {/* Content Body */}
-              <div className="p-5 sm:p-6 md:p-8 overflow-y-auto flex-1">
+              <div className="p-5 sm:p-6 md:p-8 overflow-y-auto flex-1 min-h-0">
                 <div className="mb-4">
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">
                     {selectedItem.name}
@@ -2609,25 +2613,25 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </div>
 
               {/* Quantity selector and checkout action (Sticky Footer) */}
-              <div className="p-5 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 flex-shrink-0">
+              <div className="p-3.5 sm:p-5 bg-white border-t border-slate-200 flex flex-row items-center justify-between gap-3 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
                   {/* Quantity controls */}
-                  <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:self-auto">
+                  <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-100 rounded-2xl p-1 shrink-0">
                     <button 
                       disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen}
                       onClick={() => setModalQty(prev => Math.max(1, prev - 1))}
-                      className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-700 shadow-xs border border-slate-200/60 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      <Minus size={16} />
+                      <Minus size={15} />
                     </button>
-                    <span className="font-black text-base w-8 text-center select-none">
+                    <span className="font-black text-sm sm:text-base w-7 sm:w-8 text-center select-none">
                       {modalQty}
                     </span>
                     <button 
                       disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen}
                       onClick={() => setModalQty(prev => prev + 1)}
-                      className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-700 shadow-xs border border-slate-200/60 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      <Plus size={16} />
+                      <Plus size={15} />
                     </button>
                   </div>
 
@@ -2642,20 +2646,20 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       addToCart(selectedItem, modalQty, finalNote, excludedIds, selectedExtras);
                       setSelectedItem(null);
                     }}
-                    className={`flex-1 rounded-2xl p-4 font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg ${
+                    className={`flex-1 rounded-2xl py-3.5 px-4 font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-transform hover:scale-[1.01] shadow-lg cursor-pointer ${
                       (!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false))
                         ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                         : 'bg-black hover:bg-slate-800 text-white shadow-black/10'
                     }`}
                   >
-                    <ShoppingBag size={18} />
-                    <span>
+                    <ShoppingBag size={16} />
+                    <span className="truncate">
                       {!isRestaurantOpen 
                         ? 'Tienda Cerrada' 
                         : !getMenuItemAvailability(selectedItem).isAvailable 
                           ? 'Inactivo por Horario' 
                           : (qrTable !== null && settings?.qrOrderingEnabled === false)
-                            ? 'Pedidos QR Inhabilitados'
+                            ? 'Pedidos Inhabilitados'
                             : 'Agregar al Pedido'}
                     </span>
                     {getMenuItemAvailability(selectedItem).isAvailable && isRestaurantOpen && (qrTable === null || settings?.qrOrderingEnabled !== false) && (
@@ -2665,7 +2669,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       </>
                     )}
                   </button>
-                </div>
+              </div>
             </motion.div>
           </div>
         )}
@@ -2673,7 +2677,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
       {/* FLOATING BOTTOM BAR FOR LIVE ORDER TRACKING */}
       {trackedSession && (
-        <div className={`fixed left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30 transition-all duration-300 ${cart.length > 0 ? 'bottom-24' : 'bottom-6'}`}>
+        <div className={`fixed left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30 transition-all duration-300 ${cart.length > 0 ? 'bottom-28' : 'bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))]'}`}>
           <button 
             onClick={() => setIsTrackerDrawerOpen(true)}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl flex justify-between items-center shadow-xl shadow-indigo-600/20 hover:scale-[1.02] transition-all"
@@ -2719,7 +2723,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              className="w-full h-[100dvh] max-h-[100dvh] md:max-w-lg md:h-auto md:max-h-[90vh] bg-white rounded-none md:rounded-t-[36px] p-5 sm:p-8 overflow-y-auto shadow-2xl z-10 relative flex flex-col"
+              className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-lg bg-white rounded-none md:rounded-t-[36px] p-5 sm:p-8 overflow-y-auto shadow-2xl z-10 relative flex flex-col justify-between pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               {/* Drag indicator bar */}
               <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
@@ -2903,7 +2907,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] w-full h-[100dvh] md:h-auto md:max-w-md shadow-2xl overflow-y-auto border-0 md:border md:border-slate-100 my-0 md:my-8 flex flex-col relative z-50"
+              className="bg-white rounded-none md:rounded-[32px] w-full h-full md:h-auto md:max-h-[90vh] md:max-w-md shadow-2xl overflow-y-auto border-0 md:border md:border-slate-100 my-0 md:my-8 flex flex-col relative z-50 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             >
               <div className="p-6 md:p-8 flex-1">
                 {/* Header with success badge */}

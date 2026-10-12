@@ -1386,7 +1386,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   key={table.id}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setSelectedTable(table)}
+                  onClick={() => {
+                    setFirstAccountName('');
+                    setSelectedTable(table);
+                  }}
                   className={`aspect-square rounded-[24px] flex flex-col items-center justify-center transition-all relative group/card ${
                     table.status === 'free' 
                       ? 'bg-slate-50 border-2 border-dashed border-slate-200 hover:border-black' 
@@ -1447,7 +1450,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pb-32 md:pb-8">
             {activeSessions.filter(s => s.type === 'delivery').map(session => (
               <motion.button
                 key={session.id}
@@ -1492,12 +1495,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 w-full h-screen h-[100dvh] z-[70] bg-white shadow-2xl flex flex-col overflow-hidden"
+              className="fixed inset-0 w-full h-full z-[70] bg-white shadow-2xl flex flex-col overflow-hidden"
             >
               <div className="p-3.5 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white/95 backdrop-blur-sm z-10">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 sm:gap-3">
                   <button 
-                    onClick={() => setSelectedTable(null)}
+                    onClick={() => {
+                      setSelectedTable(null);
+                      setFirstAccountName('');
+                    }}
                     className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-black flex items-center gap-1 cursor-pointer"
                     title="Cerrar comanda"
                   >
@@ -1507,22 +1513,54 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <div>
                     <h3 className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight flex items-center gap-2">
                       <span>{selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                        selectedTable.status === 'free' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                        !getSessionForTable(selectedTable.id)
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : selectedTable.status === 'free' 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
-                        {selectedTable.status === 'free' ? 'Libre' : 'Ocupada'}
+                        {!getSessionForTable(selectedTable.id) ? 'Fase 1: Apertura' : 'Fase 2: Comanda Activa'}
                       </span>
                     </h3>
-                    <p className="text-slate-400 text-[10px] sm:text-xs">Gestión de comanda y pedidos</p>
+                    <p className="text-slate-400 text-[10px] sm:text-xs">
+                      {!getSessionForTable(selectedTable.id)
+                        ? 'Paso 1 de 2: Registro del titular de la mesa'
+                        : `Comanda de ${getSessionForTable(selectedTable.id)?.customerName || 'Mesa'} • Carga de pedidos`}
+                    </p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setSelectedTable(null)}
-                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-black rounded-xl transition-all text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <X size={14} />
-                  <span>Cerrar</span>
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <div className="hidden sm:flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-2xl border border-slate-200/60 text-xs font-bold">
+                    <span className={`px-2.5 py-0.5 rounded-xl transition-all ${
+                      !getSessionForTable(selectedTable.id) 
+                        ? 'bg-black text-white shadow-xs' 
+                        : 'text-slate-400'
+                    }`}>
+                      1. Apertura
+                    </span>
+                    <ChevronRight size={12} className="text-slate-400" />
+                    <span className={`px-2.5 py-0.5 rounded-xl transition-all ${
+                      getSessionForTable(selectedTable.id) 
+                        ? 'bg-emerald-600 text-white shadow-xs' 
+                        : 'text-slate-400'
+                    }`}>
+                      2. Comanda
+                    </span>
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      setSelectedTable(null);
+                      setFirstAccountName('');
+                    }}
+                    className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-black rounded-xl transition-all text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <X size={14} />
+                    <span>Cerrar</span>
+                  </button>
+                </div>
               </div>
 
             {selectedTable.id.startsWith('delivery-') && (
@@ -1661,18 +1699,139 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             )}
 
             {!getSessionForTable(selectedTable.id) ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
-                  <Users className="text-slate-300" size={32} />
-                </div>
-                <h4 className="font-bold text-slate-900 mb-2">Mesa Disponible</h4>
-                <p className="text-slate-400 text-sm mb-8">No hay una sesión activa para esta mesa.</p>
-                <button 
-                  onClick={() => setIsOpeningTable(selectedTable)}
-                  className="w-full bg-black text-white p-5 rounded-xl text-sm font-medium shadow-lg hover:shadow-xl transition-shadow"
+              <div className="flex-1 overflow-y-auto bg-gradient-to-b from-slate-50/70 to-white flex flex-col items-center justify-center p-4 sm:p-8">
+                <motion.div 
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="w-full max-w-lg bg-white rounded-3xl sm:rounded-[36px] border border-slate-200/80 shadow-2xl p-6 sm:p-10 space-y-6"
                 >
-                  Abrir Mesa
-                </button>
+                  {/* Stepper Header Pill */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-8 h-8 rounded-xl bg-black text-white text-xs font-black flex items-center justify-center shadow-sm">1</span>
+                      <div>
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">Fase 1 de 2: Apertura</h4>
+                        <p className="text-[11px] text-slate-400">Titular y apertura de comanda</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-black bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full uppercase tracking-wider">
+                        Mesa {selectedTable.number} Libre
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Header / Intro */}
+                  <div className="text-center sm:text-left space-y-1.5">
+                    <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">
+                      ¿A nombre de quién abrimos la mesa?
+                    </h2>
+                    <p className="text-slate-500 text-xs sm:text-sm font-medium leading-relaxed">
+                      Ingresa el nombre del cliente o titular para registrar la apertura de la <strong>Mesa {selectedTable.number}</strong> y pasar a cargar platos y bebidas.
+                    </p>
+                  </div>
+
+                  {/* Customer Input */}
+                  <div className="space-y-3">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500">
+                      Nombre del Cliente / Titular de la Mesa <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={firstAccountName}
+                        onChange={e => setFirstAccountName(e.target.value)}
+                        placeholder="Ej. Juan Pérez / Familia Gómez / Salón"
+                        autoFocus
+                        className="w-full bg-slate-50 border-2 border-slate-200 focus:border-black rounded-2xl p-4 sm:p-5 outline-none font-bold text-base sm:text-lg text-slate-900 placeholder:text-slate-400 transition-all shadow-inner focus:bg-white pr-12"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && firstAccountName.trim() && !isSubmittingStartSession) {
+                            startSession(selectedTable);
+                          }
+                        }}
+                      />
+                      {firstAccountName && (
+                        <button
+                          type="button"
+                          onClick={() => setFirstAccountName('')}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-black rounded-full hover:bg-slate-200 transition-all cursor-pointer"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick Suggestion Chips */}
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Sugerencias rápidas de 1 toque:
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          'Cliente en Salón',
+                          `Mesa ${selectedTable.number}`,
+                          'Invitados Especiales',
+                          'Familia',
+                          'Barra'
+                        ].map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            onClick={() => setFirstAccountName(suggestion)}
+                            className="text-xs bg-slate-100 hover:bg-black hover:text-white text-slate-700 px-3 py-1.5 rounded-xl font-bold transition-all border border-slate-200/60 active:scale-95 cursor-pointer"
+                          >
+                            ⚡ {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Server / Waiter info banner */}
+                  <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-3.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-slate-600 font-medium">
+                      <span className="text-base">👤</span>
+                      <span>Atendido por: <strong className="text-slate-900">{currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'}</strong></span>
+                    </div>
+                    <span className="text-[10px] bg-slate-200 text-slate-700 font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider">
+                      Turno Activo
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="space-y-3 pt-2">
+                    <button 
+                      onClick={() => startSession(selectedTable)}
+                      disabled={!firstAccountName.trim() || isSubmittingStartSession}
+                      className={`w-full p-4 sm:p-5 rounded-2xl font-black text-sm sm:text-base transition-all flex justify-center items-center gap-2 shadow-xl ${
+                        firstAccountName.trim() && !isSubmittingStartSession
+                          ? 'bg-black text-white hover:bg-slate-800 hover:scale-[1.01] active:scale-[0.99] cursor-pointer shadow-black/20' 
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                      }`}
+                    >
+                      {isSubmittingStartSession ? (
+                        <span>Abriendo Mesa...</span>
+                      ) : (
+                        <>
+                          <span>Continuar a Fase 2: Cargar Comanda</span>
+                          <ChevronRight size={18} />
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTable(null);
+                        setFirstAccountName('');
+                      }}
+                      className="w-full text-slate-500 hover:text-slate-900 p-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-1.5 cursor-pointer"
+                    >
+                      ← Cancelar y Volver al Salón
+                    </button>
+                  </div>
+                </motion.div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
@@ -1789,7 +1948,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 content-start pb-28 sm:pb-12">
+                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 content-start pb-44 sm:pb-16">
                       {filteredMenu.map(item => {
                         const stockAlert = getMenuItemStockAlert(item, ingredients);
                         const isOutOfStock = stockAlert.status === 'out_of_stock';
@@ -1870,7 +2029,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Cart / Order Summary */}
                     {cart.length > 0 && (
-                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1rem,env(safe-area-inset-bottom))]">
+                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.75rem))] sm:pb-4">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Nuevo Pedido</span>
                           <span className="text-[10px] bg-slate-900 text-white font-black px-2 py-0.5 rounded-full">{cart.length} {cart.length === 1 ? 'ítem' : 'ítems'}</span>
@@ -1949,7 +2108,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Quick navigation to bill when cart is empty but table has active consumption */}
                     {cart.length === 0 && activeOrders.length > 0 && (
-                      <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] pb-[max(0.75rem,env(safe-area-inset-bottom))] z-20">
+                      <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] pb-[max(2.25rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-3 z-20">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                           <span className="text-xs font-bold text-slate-700 truncate">
@@ -1969,7 +2128,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </>
                 ) : (
                   <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden min-h-0">
-                    <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0">
+                    <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0 pb-28 sm:pb-6">
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
                         <h4 className="font-bold text-xs sm:text-sm mb-3 flex justify-between uppercase tracking-wider text-slate-800">
                           <span>Items Registrados</span>
@@ -2121,7 +2280,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex flex-col gap-2 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex flex-col gap-2 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.75rem))] sm:pb-4">
                       {selectedTable.id.startsWith('delivery-') ? (
                         <>
                           {activeOrders.length > 0 ? (
@@ -2514,7 +2673,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 )}
               </div>
 
-              <div className="pt-3 border-t border-slate-100 shrink-0">
+              <div className="pt-3 border-t border-slate-100 shrink-0 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1.25rem))] sm:pb-3">
                 <button 
                   onClick={createDelivery}
                   disabled={!deliveryName.trim()}
@@ -2766,7 +2925,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                 )}
               </div>
 
-              <div className="flex gap-2 pt-3 border-t border-slate-100 shrink-0">
+              <div className="flex gap-2 pt-3 border-t border-slate-100 shrink-0 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1.25rem))] sm:pb-3">
                 <button 
                   type="button"
                   onClick={() => setIsEditingDeliveryInfo(null)}
@@ -2816,62 +2975,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         )}
       </AnimatePresence>
 
-      {/* Opening Table Modal */}
-      <AnimatePresence>
-        {isOpeningTable && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl relative"
-            >
-              <button 
-                onClick={() => {
-                  setIsOpeningTable(null);
-                  setFirstAccountName('');
-                }}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                title="Cerrar"
-              >
-                <X size={20} />
-              </button>
-              
-              <h3 className="text-xl font-bold mb-4">Abrir Mesa</h3>
-              <p className="text-sm text-slate-500 mb-6">Mesa {isOpeningTable.number}</p>
-
-              <div className="space-y-4 mb-8">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del cliente (Titular)</label>
-                  <input 
-                    type="text" 
-                    value={firstAccountName}
-                    onChange={e => setFirstAccountName(e.target.value)}
-                    placeholder="Ej. Juan Pérez"
-                    autoFocus
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') startSession(isOpeningTable);
-                    }}
-                  />
-                </div>
-              </div>
-
-              <button 
-                onClick={() => startSession(isOpeningTable)}
-                disabled={!firstAccountName.trim()}
-                className={`w-full text-white p-4 rounded-xl font-bold transition-all flex justify-center items-center gap-2 ${firstAccountName.trim() ? 'bg-black shadow-lg hover:scale-[1.02]' : 'bg-slate-300 cursor-not-allowed'}`}
-              >
-                Abrir Mesa
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       <AnimatePresence>
         {isAddingAccount && selectedTable && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[80] p-6">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -2925,7 +3031,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isPaying && selectedTable && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/60 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="fixed inset-0 z-[80] bg-white sm:bg-black/60 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
             <motion.div 
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
@@ -3758,7 +3864,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             </div>
 
               {/* Sticky Footer Confirm Action Button */}
-              <div className="p-4 sm:p-5 border-t border-slate-200 bg-white sm:bg-slate-50 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+              <div className="p-4 sm:p-5 border-t border-slate-200 bg-white sm:bg-slate-50 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-5">
                 <button 
                   onClick={handlePayment}
                   disabled={isUploadingReceipt || isSubmittingPayment || !activeShift}
@@ -4209,7 +4315,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               </div>
 
               {/* Action buttons */}
-              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 z-20 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_-8px_25px_rgba(0,0,0,0.06)]">
+              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 z-20 pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-6 shadow-[0_-8px_25px_rgba(0,0,0,0.06)]">
                 {/* Quantity Controls */}
                 <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:setModalQty">
                   <button 

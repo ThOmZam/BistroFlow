@@ -115,7 +115,7 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full sm:max-w-md p-6 sm:p-8 bg-white rounded-none sm:rounded-[36px] shadow-none sm:shadow-2xl shadow-black/5 border-0 sm:border sm:border-slate-100 min-h-[100dvh] sm:min-h-0 flex flex-col justify-between sm:justify-start"
+        className="w-full sm:max-w-md p-6 sm:p-8 bg-white rounded-none sm:rounded-[36px] shadow-none sm:shadow-2xl shadow-black/5 border-0 sm:border sm:border-slate-100 min-h-screen sm:min-h-0 flex flex-col justify-between sm:justify-start pb-8 sm:pb-8"
       >
         <div>
           <div className="text-center mb-6">
