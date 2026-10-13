@@ -426,8 +426,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
       await logAction('order', waiterName, 'Envió un pedido a cocina', `Mesa ${selectedTable.number}: ${itemNames}`);
 
+      let addedAmount = 0;
       for (const entry of cart) {
         const itemPrice = getCartEntryPrice(entry);
+        addedAmount += itemPrice * entry.qty;
         await addDoc(ordersRef, {
           menuItemId: entry.item.id,
           itemName: entry.item.name,
@@ -446,6 +448,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'
         });
       }
+
+      // Keep session totalAmount synced in Firestore
+      await updateDoc(doc(db, 'sessions', session.id), {
+        totalAmount: (session.totalAmount || 0) + addedAmount
+      }).catch(console.error);
 
       setCart([]);
       setSelectedTable(null);
@@ -589,6 +596,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     const session = getSessionForTable(selectedTable.id);
     if (!session) return;
 
+    if (!activeShift) {
+      playErrorSound();
+      alert('Operación Bloqueada: No hay un turno de caja abierto en este momento. Es obligatorio que el Cajero o Administrador realice la Apertura de Caja antes de facturar o procesar pagos.');
+      return;
+    }
+
     const payerName = partialPayerName.trim() || 'Comensal';
 
     if (paymentMethod !== 'divisa' && paymentMethod !== 'punto' && paymentMethod !== 'credito') {
@@ -619,11 +632,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         }
       }
 
-      // 2. Add transaction record
+      // 2. Add transaction record with cash shift linkage
       await addDoc(collection(db, 'transactions'), {
         sessionId: session.id,
         accountId: activeAccountId,
+        shiftId: activeShift?.id || null,
+        shiftName: activeShift?.shiftName || null,
         amount: partialTotal,
+        amountCents: Math.round(partialTotal * 100),
         method: paymentMethod,
         reference: paymentRef || null,
         timestamp: new Date().toISOString(),

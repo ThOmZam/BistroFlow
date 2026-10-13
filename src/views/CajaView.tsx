@@ -134,42 +134,58 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
     return ts && new Date(ts).getTime() >= activeShiftStartTime;
   }) : [];
 
+  // Set of session IDs that already have transaction records to prevent double counting
+  const recordedSessionIds = new Set(shiftTransactions.map(tx => tx.sessionId).filter(Boolean));
+
+  // Legacy completed sessions that don't have separate transaction documents
+  const unrecordedSessions = shiftCompletedSessions.filter(s => !recordedSessionIds.has(s.id));
+
+  // Helper payment matchers supporting all variants and aliases
+  const isCashMethod = (m: string) => ['efectivo', 'cash', 'efectivo_usd', 'divisa'].includes((m || '').toLowerCase());
+  const isPagoMovilMethod = (m: string) => ['pago_movil', 'pagomovil'].includes((m || '').toLowerCase());
+  const isZelleMethod = (m: string) => (m || '').toLowerCase() === 'zelle';
+  const isTarjetaMethod = (m: string) => ['punto_de_venta', 'tarjeta', 'punto', 'tarjeta_debito', 'tarjeta_credito'].includes((m || '').toLowerCase());
+  const isCreditoMethod = (m: string) => (m || '').toLowerCase() === 'credito';
+
   // Breakdowns by payment method during active shift
   const shiftCashUSD = shiftTransactions
-    .filter(tx => tx.method === 'efectivo' || tx.method === 'cash' || tx.method === 'efectivo_usd')
+    .filter(tx => isCashMethod(tx.method))
     .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
-    shiftCompletedSessions
-      .filter(s => (s.payment?.method === 'efectivo' || s.paymentMethod === 'efectivo'))
+    unrecordedSessions
+      .filter(s => isCashMethod(s.payment?.method || s.paymentMethod))
       .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
 
   const shiftCashBs = shiftTransactions
-    .filter(tx => tx.method === 'efectivo_bs')
+    .filter(tx => (tx.method || '').toLowerCase() === 'efectivo_bs')
     .reduce((sum, tx) => sum + (tx.amountBs || 0), 0);
 
   const shiftPagoMovilUSD = shiftTransactions
-    .filter(tx => tx.method === 'pago_movil')
+    .filter(tx => isPagoMovilMethod(tx.method))
     .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
-    shiftCompletedSessions
-      .filter(s => (s.payment?.method === 'pago_movil' || s.paymentMethod === 'pago_movil'))
+    unrecordedSessions
+      .filter(s => isPagoMovilMethod(s.payment?.method || s.paymentMethod))
       .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
 
   const shiftZelleUSD = shiftTransactions
-    .filter(tx => tx.method === 'zelle')
+    .filter(tx => isZelleMethod(tx.method))
     .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
-    shiftCompletedSessions
-      .filter(s => (s.payment?.method === 'zelle' || s.paymentMethod === 'zelle'))
+    unrecordedSessions
+      .filter(s => isZelleMethod(s.payment?.method || s.paymentMethod))
       .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
 
   const shiftTarjetaUSD = shiftTransactions
-    .filter(tx => tx.method === 'punto_de_venta' || tx.method === 'tarjeta')
+    .filter(tx => isTarjetaMethod(tx.method))
     .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
-    shiftCompletedSessions
-      .filter(s => (s.payment?.method === 'punto_de_venta' || s.paymentMethod === 'punto_de_venta' || s.paymentMethod === 'tarjeta'))
+    unrecordedSessions
+      .filter(s => isTarjetaMethod(s.payment?.method || s.paymentMethod))
       .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
 
-  const shiftCreditoUSD = shiftCompletedSessions
-    .filter(s => (s.payment?.method === 'credito' || s.paymentMethod === 'credito'))
-    .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
+  const shiftCreditoUSD = shiftTransactions
+    .filter(tx => isCreditoMethod(tx.method))
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0) +
+    unrecordedSessions
+      .filter(s => isCreditoMethod(s.payment?.method || s.paymentMethod))
+      .reduce((sum, s) => sum + (s.totalAmount || s.pendingPayment?.totalUSD || 0), 0);
 
   // Cash In / Cash Out movements during active shift
   const shiftCashMovements = activeShift?.cashMovements || [];

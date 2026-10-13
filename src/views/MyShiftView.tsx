@@ -88,7 +88,7 @@ export default function MyShiftView({ currentUser }: MyShiftViewProps) {
     const empId = currentUser.employeeId;
     
     // Check if matching custom employee from Firestore
-    const matched = employees.find(emp => emp.id === empId);
+    const matched = employees.find(emp => emp.id === empId || (empId?.startsWith('fallback-') && emp.role === currentUser.role));
     if (matched) return matched;
 
     // Fallback profiles (only if ID starts with fallback-)
@@ -103,16 +103,16 @@ export default function MyShiftView({ currentUser }: MyShiftViewProps) {
         id: empId,
         name,
         role,
-        pin: ''
+        pin: '0000'
       };
     }
 
-    // Default to current user details but NO fallback PIN (rely on Firestore)
+    // Default to current user details with fallback pin
     return {
       id: empId,
       name: currentUser.name,
       role: currentUser.role,
-      pin: '' // Don't guess PIN if not found in matched employees
+      pin: currentUser.pin || '0000'
     };
   }, [employees, currentUser]);
 
