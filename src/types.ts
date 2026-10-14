@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'waiter' | 'cook' | 'client' | 'finance';
 export type TableStatus = 'free' | 'occupied' | 'waiting_bill';
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered';
+export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'enviado';
 export type SessionStatus = 'active' | 'closed';
 
 export interface User {
@@ -8,6 +8,8 @@ export interface User {
   name: string;
   role: Role;
   pin: string;
+  email?: string;
+  employeeId?: string;
 }
 
 export interface Table {

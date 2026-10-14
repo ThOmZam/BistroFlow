@@ -52,6 +52,17 @@ export default function CRMView() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [activeProfileTab, setActiveProfileTab] = useState<'history' | 'details'>('history');
+
+  // Listen for global search selection
+  useEffect(() => {
+    const handleSelectCustomer = (e: any) => {
+      if (e.detail?.clientId) {
+        setSelectedClientId(e.detail.clientId);
+      }
+    };
+    window.addEventListener('select_customer', handleSelectCustomer);
+    return () => window.removeEventListener('select_customer', handleSelectCustomer);
+  }, []);
   
   // Registration Modal State
   const [isAddingClient, setIsAddingClient] = useState(false);

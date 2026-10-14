@@ -7,12 +7,14 @@ interface CurrencySelectorProps {
   variant?: 'compact' | 'bar' | 'expanded';
   className?: string;
   showSyncButton?: boolean;
+  editable?: boolean;
 }
 
 export default function CurrencySelector({ 
   variant = 'compact', 
   className = '',
-  showSyncButton = true 
+  showSyncButton = true,
+  editable = false
 }: CurrencySelectorProps) {
   const { 
     activeCurrency, 
@@ -40,6 +42,7 @@ export default function CurrencySelector({
   };
 
   const handleOpenEdit = (code: CurrencyCode) => {
+    if (!editable) return;
     setEditCurrency(code);
     setManualRateInput(rates[code].rate.toString());
     setIsEditModalOpen(true);
@@ -47,6 +50,7 @@ export default function CurrencySelector({
 
   const handleSaveManualRate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editable) return;
     const val = parseFloat(manualRateInput);
     if (!isNaN(val) && val > 0) {
       await updateManualRate(editCurrency, val);
@@ -67,16 +71,29 @@ export default function CurrencySelector({
               <button
                 key={code}
                 type="button"
-                onClick={() => setActiveCurrency(code)}
-                title={`${rateInfo.name}: Bs. ${rateInfo.rate.toFixed(2)} (${rateInfo.source})`}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer select-none ${
+                onClick={() => {
+                  if (editable) {
+                    setActiveCurrency(code);
+                  }
+                }}
+                disabled={!editable && !isSelected}
+                title={
+                  editable
+                    ? `${rateInfo.name}: Bs. ${rateInfo.rate.toFixed(2)} (${rateInfo.source}) - Clic para activar`
+                    : isSelected
+                    ? `Moneda Activa: ${code} (Bs. ${rateInfo.rate.toFixed(2)}) • Solo modificable por el Administrador en Ajustes`
+                    : `Moneda bloqueada: Solo el Administrador puede cambiarla en Ajustes`
+                }
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition-all select-none ${
                   isSelected
                     ? code === 'EUR'
                       ? 'bg-blue-600 text-white shadow-sm scale-[1.02]'
                       : code === 'USDT'
                       ? 'bg-emerald-600 text-white shadow-sm scale-[1.02]'
                       : 'bg-black text-white shadow-sm scale-[1.02]'
-                    : 'text-slate-600 hover:text-black hover:bg-slate-200/60'
+                    : editable
+                    ? 'text-slate-600 hover:text-black hover:bg-slate-200/60 cursor-pointer'
+                    : 'text-slate-300 opacity-60 cursor-not-allowed hidden sm:flex'
                 }`}
               >
                 <span className="shrink-0">{getCurrencyIcon(code)}</span>
@@ -89,10 +106,10 @@ export default function CurrencySelector({
           })}
         </div>
 
-        {showSyncButton && (
+        {editable && showSyncButton && (
           <button
             type="button"
-            onClick={() => refreshRates()}
+            onClick={() => refreshRates(true)}
             disabled={isSyncing}
             title={lastSynced ? `pyDolarVenezuela sincronizado: ${lastSynced}` : 'Sincronizar tasas con pyDolarVenezuela / BCV'}
             className="p-1.5 hover:bg-white text-slate-500 hover:text-black rounded-xl transition-all cursor-pointer disabled:opacity-50"
@@ -104,7 +121,7 @@ export default function CurrencySelector({
     );
   }
 
-  // 2. Full Bar Variant (Used as top banner or prominently in Caja / WaiterView)
+  // 2. Full Bar Variant (Used as top banner in Caja / WaiterView)
   if (variant === 'bar') {
     return (
       <div className={`bg-white rounded-2xl border border-slate-200 p-2 sm:p-2.5 shadow-xs flex flex-wrap items-center justify-between gap-2.5 ${className}`}>
@@ -115,10 +132,10 @@ export default function CurrencySelector({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] uppercase font-black tracking-widest text-slate-500">
-                Moneda Activa y Tasa
+                Moneda Activa del Sistema
               </span>
-              <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">
-                pyDolarVenezuela
+              <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded font-black flex items-center gap-1">
+                <ShieldCheck size={10} /> Fijada en Ajustes
               </span>
             </div>
             <div className="text-xs font-black text-slate-900 flex items-center gap-1">
@@ -138,15 +155,29 @@ export default function CurrencySelector({
               <button
                 key={code}
                 type="button"
-                onClick={() => setActiveCurrency(code)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                onClick={() => {
+                  if (editable) {
+                    setActiveCurrency(code);
+                  }
+                }}
+                disabled={!editable && !isSelected}
+                title={
+                  editable
+                    ? `${code}: Bs. ${r.rate.toFixed(2)} - Clic para activar`
+                    : isSelected
+                    ? `Moneda activa actual: ${code} (Bs. ${r.rate.toFixed(2)})`
+                    : `Solo el Administrador puede cambiar la moneda en Ajustes`
+                }
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
                   isSelected
                     ? code === 'EUR'
                       ? 'bg-blue-600 text-white shadow-xs'
                       : code === 'USDT'
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'bg-black text-white shadow-xs'
-                    : 'text-slate-600 hover:text-black hover:bg-white/60'
+                    : editable
+                    ? 'text-slate-600 hover:text-black hover:bg-white/60 cursor-pointer'
+                    : 'text-slate-400 opacity-60 cursor-not-allowed hidden sm:flex'
                 }`}
               >
                 {getCurrencyIcon(code)}
@@ -158,15 +189,17 @@ export default function CurrencySelector({
             );
           })}
 
-          <button
-            type="button"
-            onClick={() => refreshRates()}
-            disabled={isSyncing}
-            title="Actualizar tasas en vivo"
-            className="p-1.5 hover:bg-white text-slate-500 hover:text-black rounded-lg transition-all cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={isSyncing ? 'animate-spin text-blue-600' : ''} />
-          </button>
+          {editable && (
+            <button
+              type="button"
+              onClick={() => refreshRates(true)}
+              disabled={isSyncing}
+              title="Actualizar tasas en vivo y guardar"
+              className="p-1.5 hover:bg-white text-slate-500 hover:text-black rounded-lg transition-all cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isSyncing ? 'animate-spin text-blue-600' : ''} />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -200,15 +233,17 @@ export default function CurrencySelector({
               Sinc: {lastSynced}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => refreshRates()}
-            disabled={isSyncing}
-            className="px-3 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-400' : ''} />
-            <span>{isSyncing ? 'Actualizando...' : 'Actualizar Tasas'}</span>
-          </button>
+          {editable && (
+            <button
+              type="button"
+              onClick={() => refreshRates(true)}
+              disabled={isSyncing}
+              className="px-3 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-400' : ''} />
+              <span>{isSyncing ? 'Actualizando...' : 'Actualizar Tasas (BCV/Oficial)'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -221,8 +256,14 @@ export default function CurrencySelector({
           return (
             <div
               key={code}
-              onClick={() => setActiveCurrency(code)}
-              className={`relative p-4 rounded-2xl border-2 transition-all cursor-pointer select-none flex flex-col justify-between ${
+              onClick={() => {
+                if (editable) {
+                  setActiveCurrency(code);
+                }
+              }}
+              className={`relative p-4 rounded-2xl border-2 transition-all select-none flex flex-col justify-between ${
+                editable ? 'cursor-pointer' : 'cursor-default'
+              } ${
                 isSelected
                   ? code === 'EUR'
                     ? 'border-blue-600 bg-blue-50/40 shadow-md ring-2 ring-blue-600/20'
@@ -253,17 +294,19 @@ export default function CurrencySelector({
                 </div>
 
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOpenEdit(code);
-                    }}
-                    title="Ajustar tasa manualmente"
-                    className="p-1 text-slate-400 hover:text-black hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Edit3 size={12} />
-                  </button>
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEdit(code);
+                      }}
+                      title="Ajustar tasa manualmente"
+                      className="p-1 text-slate-400 hover:text-black hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Edit3 size={12} />
+                    </button>
+                  )}
                   {isSelected && (
                     <span className={`w-5 h-5 rounded-full flex items-center justify-center text-white ${
                       code === 'EUR' ? 'bg-blue-600' : code === 'USDT' ? 'bg-emerald-600' : 'bg-black'
@@ -292,7 +335,7 @@ export default function CurrencySelector({
                     ? code === 'EUR' ? 'text-blue-700' : code === 'USDT' ? 'text-emerald-700' : 'text-slate-900' 
                     : 'text-slate-400'
                 }`}>
-                  {isSelected ? '● ACTIVA EN TODO EL SISTEMA' : 'Clic para Activar'}
+                  {isSelected ? '● ACTIVA EN TODO EL SISTEMA' : editable ? 'Clic para Activar' : 'Inactiva'}
                 </span>
                 <span className="text-slate-400 font-mono text-[9px]">
                   Ref: 1 {info.symbol}

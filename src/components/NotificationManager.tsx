@@ -30,6 +30,7 @@ interface NotificationManagerProps {
     role: string;
   };
   onViewChange: (view: string) => void;
+  hideFloatingPill?: boolean;
 }
 
 interface InAppAlert {
@@ -43,7 +44,7 @@ interface InAppAlert {
   read: boolean;
 }
 
-export default function NotificationManager({ currentUser, onViewChange }: NotificationManagerProps) {
+export default function NotificationManager({ currentUser, onViewChange, hideFloatingPill = false }: NotificationManagerProps) {
   const isAdmin = currentUser?.role === 'admin';
   const { tables, menu, activeSessions } = useRestaurantData();
   const [isOpen, setIsOpen] = useState(false);
@@ -60,6 +61,24 @@ export default function NotificationManager({ currentUser, onViewChange }: Notif
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [readyOrders, setReadyOrders] = useState<any[]>([]);
   const appLoadTime = useRef(Date.now() - 5000); // 5 seconds grace period to avoid load spam
+
+  // Listen to open requests from TopBar or keyboard shortcuts
+  useEffect(() => {
+    const handleOpenAlerts = () => {
+      setIsOpen(true);
+      setActiveTab('alerts');
+    };
+    const handleOpenBookmarks = () => {
+      setIsOpen(true);
+      setActiveTab('bookmarks');
+    };
+    window.addEventListener('open_notifications_drawer', handleOpenAlerts);
+    window.addEventListener('open_cases_drawer', handleOpenBookmarks);
+    return () => {
+      window.removeEventListener('open_notifications_drawer', handleOpenAlerts);
+      window.removeEventListener('open_cases_drawer', handleOpenBookmarks);
+    };
+  }, []);
 
   // Sync Ready Orders for Waiters/Staff Alerts
   useEffect(() => {
@@ -241,17 +260,28 @@ export default function NotificationManager({ currentUser, onViewChange }: Notif
 
   const unreadCount = alerts.filter(a => !a.read).length + readyOrders.length;
 
+  // Broadcast counts so TopBar or other components can reflect live numbers
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('notification_counts_updated', {
+      detail: {
+        unreadCount,
+        bookmarksCount: bookmarks.length
+      }
+    }));
+  }, [unreadCount, bookmarks.length]);
+
   return (
     <>
       {/* Floating Control Pill */}
-      <div className="fixed top-4 right-4 md:top-6 md:right-8 z-50 flex items-center gap-2">
-        <motion.div 
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-lg hover:shadow-xl transition-all rounded-full p-1.5 px-3.5 flex items-center gap-2.5"
-        >
-          {/* Star bookmarks stats (ADMIN ONLY) */}
-          {isAdmin && (
+      {!hideFloatingPill && (
+        <div className="fixed top-4 right-4 md:top-6 md:right-8 z-50 flex items-center gap-2">
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-lg hover:shadow-xl transition-all rounded-full p-1.5 px-3.5 flex items-center gap-2.5"
+          >
+            {/* Star bookmarks stats (ADMIN ONLY) */}
+            {isAdmin && (
             <>
               <button 
                 onClick={() => { setIsOpen(true); setActiveTab('bookmarks'); }}
@@ -291,6 +321,7 @@ export default function NotificationManager({ currentUser, onViewChange }: Notif
           </button>
         </motion.div>
       </div>
+      )}
 
       {/* Floating Toast Notification Stack (Fades in, auto-fades out) */}
       <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
@@ -347,7 +378,7 @@ export default function NotificationManager({ currentUser, onViewChange }: Notif
               animate={{ opacity: 0.4 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsOpen(false)}
-              className="fixed inset-0 bg-black z-50 cursor-pointer"
+              className="fixed inset-0 bg-black z-[9998] cursor-pointer"
             />
 
             {/* Sliding Panel Container */}
@@ -356,7 +387,7 @@ export default function NotificationManager({ currentUser, onViewChange }: Notif
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-              className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-slate-50 border-l border-slate-200 shadow-2xl z-50 flex flex-col h-full"
+              className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-slate-50 border-l border-slate-200 shadow-2xl z-[9999] flex flex-col h-full"
             >
               {/* Header */}
               <div className="p-6 bg-white border-b border-slate-100 flex items-center justify-between">

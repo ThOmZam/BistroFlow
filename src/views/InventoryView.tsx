@@ -510,36 +510,64 @@ export default function InventoryView() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex bg-slate-100 p-1 rounded-2xl mb-8 overflow-x-auto max-w-full scrollbar-none w-fit">
-        <button 
-          onClick={() => { playClickSound(); setActiveTab('stock'); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shrink-0 ${activeTab === 'stock' ? 'bg-white text-black shadow-sm' : 'text-slate-400 hover:text-black'}`}
-        >
-          <ClipboardList size={14} />
-          Insumos (Stock)
-        </button>
-        <button 
-          onClick={() => { playClickSound(); setActiveTab('recipes'); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shrink-0 ${activeTab === 'recipes' ? 'bg-white text-black shadow-sm' : 'text-slate-400 hover:text-black'}`}
-        >
-          <TrendingUp size={14} />
-          Costos de Recetas
-        </button>
-        <button 
-          onClick={() => { playClickSound(); setActiveTab('purchases'); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shrink-0 ${activeTab === 'purchases' ? 'bg-white text-black shadow-sm' : 'text-slate-400 hover:text-black'}`}
-        >
-          <ShoppingBag size={14} />
-          Registrar Compra
-        </button>
-        <button 
-          onClick={() => { playClickSound(); setActiveTab('waste'); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shrink-0 ${activeTab === 'waste' ? 'bg-white text-black shadow-sm' : 'text-slate-400 hover:text-black'}`}
-        >
-          <Trash2 size={14} />
-          Mermas
-        </button>
+      {/* SUB-MENU TABS DE NAVEGACIÓN DE INVENTARIO */}
+      <div className="bg-white rounded-2xl p-2 border border-slate-200/90 shadow-sm flex items-center gap-2 overflow-x-auto scrollbar-none w-full sm:w-fit mb-6 shrink-0">
+        {[
+          { 
+            id: 'stock', 
+            label: 'Insumos (Stock)', 
+            icon: ClipboardList, 
+            badge: ingredients.length > 0 ? ingredients.length : null,
+            badgeColor: 'bg-slate-100 text-slate-800 font-extrabold'
+          },
+          { 
+            id: 'recipes', 
+            label: 'Costos de Recetas', 
+            icon: TrendingUp, 
+            badge: menu.length > 0 ? menu.length : null,
+            badgeColor: 'bg-indigo-50 text-indigo-700 font-extrabold'
+          },
+          { 
+            id: 'purchases', 
+            label: 'Registrar Compra', 
+            icon: ShoppingBag, 
+            badge: null
+          },
+          { 
+            id: 'waste', 
+            label: 'Mermas y Bajas', 
+            icon: Trash2, 
+            badge: wastes.length > 0 ? wastes.length : null,
+            badgeColor: 'bg-rose-50 text-rose-700 font-extrabold'
+          },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => {
+                playClickSound();
+                setActiveTab(tab.id as any);
+              }}
+              className={`flex items-center gap-2.5 px-4 sm:px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                isActive
+                  ? 'bg-black text-white shadow-md scale-[1.01]'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100'
+              }`}
+            >
+              <Icon size={16} className={isActive ? 'text-amber-400' : 'text-slate-500'} />
+              <span>{tab.label}</span>
+              {tab.badge !== null && tab.badge !== undefined && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                  isActive ? 'bg-white/20 text-white font-black' : tab.badgeColor
+                }`}>
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab Contents */}

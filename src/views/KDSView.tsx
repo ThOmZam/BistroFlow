@@ -288,6 +288,28 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
         </div>
       </header>
 
+      {/* Direct Thermal Print Banner Notification */}
+      {(settings as any)?.kitchenMode === 'direct_print' && (
+        <div className="p-4 bg-gradient-to-r from-slate-900 via-amber-950 to-slate-900 border-2 border-amber-500/80 rounded-3xl text-white shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+              🖨️
+            </div>
+            <div>
+              <h4 className="font-extrabold text-sm sm:text-base text-amber-400">
+                Modo Impresión Térmica Directa Activo (Sin Pantalla en Cocina)
+              </h4>
+              <p className="text-slate-300 text-xs mt-0.5">
+                Las comandas de cocina se envían e imprimen directamente desde Caja/Mesero a la impresora térmica de 80mm/58mm.
+              </p>
+            </div>
+          </div>
+          <span className="text-xs bg-amber-400/20 text-amber-300 font-extrabold px-3 py-1.5 rounded-xl border border-amber-400/30 whitespace-nowrap shrink-0">
+            Modo Térmico Activo
+          </span>
+        </div>
+      )}
+
       {/* PENDING ORDERS TAB */}
       {activeTab === 'pending' && (
         <div className="flex-1 overflow-auto pb-6">

@@ -306,6 +306,17 @@ Referencia:  ${reference}
 
   // View state
   const [activeTab, setActiveTab] = useState<FinanceTab>('overview');
+
+  // Listen for global search tab switching
+  useEffect(() => {
+    const handleSetFinanceTab = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail as FinanceTab);
+      }
+    };
+    window.addEventListener('set_finance_tab', handleSetFinanceTab);
+    return () => window.removeEventListener('set_finance_tab', handleSetFinanceTab);
+  }, []);
   
   // Modals state
   const [isAddingEntry, setIsAddingEntry] = useState(false);

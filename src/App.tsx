@@ -26,9 +26,13 @@ import DashboardView from './views/DashboardView';
 import ChatView from './views/ChatView';
 import MyShiftView from './views/MyShiftView';
 import { useRestaurantData } from './hooks/useRestaurantData';
+import { useCurrency } from './context/CurrencyContext';
 import { logAction } from './lib/logger';
 import NotificationManager from './components/NotificationManager';
-import CurrencySelector from './components/CurrencySelector';
+import TopBar from './components/TopBar';
+import GlobalSearchModal from './components/GlobalSearchModal';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { Lock, Clock } from 'lucide-react';
 
 export default function App() {
@@ -36,8 +40,11 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeView, setActiveView] = useState('dashboard');
   const [fallbackRole, setFallbackRole] = useState<string | null>(localStorage.getItem('demo_fallback_role'));
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
 
   const { tables, exchangeRate, settings } = useRestaurantData();
+  const { activeCurrency, currentRateBs, currencySymbol } = useCurrency();
   const [allSessions, setAllSessions] = useState<any[]>([]);
 
   useEffect(() => {
@@ -113,15 +120,19 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser || fallbackRole) {
-        const storedRole = fallbackRole || localStorage.getItem('demo_role') || 'admin';
+        const storedRole = fallbackRole || localStorage.getItem('demo_role') || 'client';
         const storedName = localStorage.getItem('demo_user_name');
+        const storedEmail = localStorage.getItem('demo_user_email') || '';
+        const storedPin = localStorage.getItem('demo_user_pin') || '';
         
-        let userName = storedName || 'Admin User';
+        let userName = storedName;
         if (!storedName) {
-          if (storedRole === 'waiter') userName = 'Mesero';
+          if (storedRole === 'admin') userName = 'Administrador';
+          else if (storedRole === 'waiter') userName = 'Mesero';
           else if (storedRole === 'cook') userName = 'Cocina';
-          else if (storedRole === 'client') userName = 'Cliente (Delivery)';
+          else if (storedRole === 'client') userName = 'Cliente';
           else if (storedRole === 'finance') userName = 'Caja / Finanzas';
+          else userName = 'Colaborador';
         }
 
         const storedEmpId = localStorage.getItem('demo_employee_id') || ('fallback-' + storedRole);
@@ -132,7 +143,8 @@ export default function App() {
           employeeId: storedEmpId,
           name: userName,
           role: storedRole as Role,
-          pin: '0000'
+          email: storedEmail,
+          pin: storedPin
         } as User & { uid: string; employeeId: string });
       } else {
         setCurrentUser(null);
@@ -150,12 +162,21 @@ export default function App() {
     localStorage.removeItem('demo_role');
     localStorage.removeItem('demo_fallback_role');
     localStorage.removeItem('demo_user_name');
+    localStorage.removeItem('demo_user_email');
+    localStorage.removeItem('demo_user_pin');
     localStorage.removeItem('demo_employee_id');
     localStorage.removeItem('tracked_delivery_session_id');
     setFallbackRole(null);
     signOut(auth);
     setCurrentUser(null);
   };
+
+  useKeyboardShortcuts({
+    onOpenSearch: () => setIsSearchOpen(true),
+    onOpenShortcuts: () => setIsShortcutsOpen(true),
+    onViewChange: setActiveView,
+    currentUserRole: currentUser?.role
+  });
 
   if (isLoading) {
     return (
@@ -181,25 +202,23 @@ export default function App() {
         activeView={activeView}
         onViewChange={setActiveView}
         restaurantName={settings?.restaurantName || 'BistroFlow'}
+        logoUrl={(settings as any)?.logoUrl || ''}
+        slogan={(settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS'}
         hasActiveClockIn={hasActiveClockIn}
       />
       
-      <NotificationManager currentUser={currentUser} onViewChange={setActiveView} />
-      
-      <main className="flex-1 overflow-auto p-4 pb-28 md:p-8 md:pb-8 flex flex-col min-w-0 w-full">
-        {/* Global Currency & System Top Bar */}
-        <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200/50 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-black tracking-widest text-slate-400 hidden sm:inline">
-              Sistema Operativo • BistroFlow
-            </span>
-          </div>
-          <div className="flex items-center gap-2 ml-auto">
-            {currentUser?.role === 'admin' && (activeView === 'menu_settings' || activeView === 'analytics' || activeView === 'finance') && (
-              <CurrencySelector variant="compact" />
-            )}
-          </div>
-        </div>
+      {/* Right Content Column: Fixed Top Header + Main Content View */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#F8F9FA]">
+        {/* Global Superior Top Bar - Flush Edge to Edge */}
+        <TopBar 
+          onOpenSearch={() => setIsSearchOpen(true)} 
+          onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          currentUser={currentUser}
+        />
+
+        <NotificationManager currentUser={currentUser} onViewChange={setActiveView} hideFloatingPill={true} />
+        
+        <main className="flex-1 overflow-auto p-4 sm:p-6 md:p-8 pb-28 md:pb-8 flex flex-col min-w-0 w-full relative">
 
         {isBlockedByClockIn ? (
           <div className="flex-1 flex items-center justify-center p-4 md:p-8">
@@ -269,6 +288,20 @@ export default function App() {
           </>
         )}
       </main>
+      </div>
+
+      {/* Global Modals for Search and Shortcuts */}
+      <GlobalSearchModal 
+        isOpen={isSearchOpen} 
+        onClose={() => setIsSearchOpen(false)} 
+        onViewChange={setActiveView} 
+      />
+      
+      <KeyboardShortcutsModal 
+        isOpen={isShortcutsOpen} 
+        onClose={() => setIsShortcutsOpen(false)} 
+        onViewChange={setActiveView} 
+      />
     </div>
   );
 }

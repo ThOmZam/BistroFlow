@@ -39,7 +39,7 @@ interface CurrencyContextValue {
   currencySymbol: string;
   isSyncing: boolean;
   lastSynced: string | null;
-  refreshRates: () => Promise<boolean>;
+  refreshRates: (saveToFirestore?: boolean) => Promise<boolean>;
   updateManualRate: (code: CurrencyCode, rate: number) => Promise<void>;
   convert: (amountUSD: number) => number;
   toBolivares: (amountUSD: number) => number;
@@ -92,7 +92,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // 2. Fetch live rates from server API on mount and populate
-  const refreshRates = async (): Promise<boolean> => {
+  const refreshRates = async (saveToFirestore = false): Promise<boolean> => {
     setIsSyncing(true);
     try {
       const res = await fetch('/api/exchange-rates?force=true');
@@ -106,14 +106,16 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         setRates(newRates);
         setLastSynced(new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-        // Update Firestore settings so all devices benefit immediately
-        const activeRate = newRates[activeCurrency]?.rate || newRates.USD.rate;
-        await setDoc(doc(db, 'settings', 'general'), {
-          activeCurrency,
-          exchangeRate: activeRate,
-          currencyRates: newRates,
-          ratesLastSynced: new Date().toISOString()
-        }, { merge: true });
+        // Only save to Firestore if explicitly requested by Admin in Ajustes!
+        if (saveToFirestore) {
+          const activeRate = newRates[activeCurrency]?.rate || newRates.USD.rate;
+          await setDoc(doc(db, 'settings', 'general'), {
+            activeCurrency,
+            exchangeRate: activeRate,
+            currencyRates: newRates,
+            ratesLastSynced: new Date().toISOString()
+          }, { merge: true });
+        }
 
         return true;
       }
@@ -126,9 +128,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    refreshRates();
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(refreshRates, 5 * 60 * 1000);
+    // Background fetch for reference only, never overwrite Admin Firestore configuration
+    refreshRates(false);
+    const interval = setInterval(() => refreshRates(false), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 

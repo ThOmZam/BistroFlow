@@ -3,18 +3,44 @@ import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/
 import { db } from '../lib/firebase';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
 import { MenuItem, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe } from 'lucide-react';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 import { useBookmarks } from '../lib/bookmarks';
+import { useCurrency } from '../context/CurrencyContext';
 import CurrencySelector from '../components/CurrencySelector';
+import { getQRCodeUrl, getFallbackQRCodeUrl } from '../lib/qrUtils';
 
 export default function MenuSettingsView({ currentUser }: { currentUser?: any }) {
   const { menu, tables, exchangeRate, settings, promotions, ingredients } = useRestaurantData();
+  const { activeCurrency, currentRateBs, currencySymbol, updateManualRate } = useCurrency();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [activeTab, setActiveTab] = useState<'menu' | 'tables' | 'general' | 'toast_pos' | 'promotions' | 'payments' | 'notifications'>('menu');
+
+  useEffect(() => {
+    const handleSetTab = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    const handleSelectMenuItem = (e: any) => {
+      if (e.detail?.item) {
+        setActiveTab('menu');
+        handleEditMenu(e.detail.item);
+      } else if (e.detail?.table) {
+        setActiveTab('tables');
+        setSelectedQRTable(e.detail.table);
+      }
+    };
+    window.addEventListener('set_settings_tab', handleSetTab);
+    window.addEventListener('select_menu_item', handleSelectMenuItem);
+    return () => {
+      window.removeEventListener('set_settings_tab', handleSetTab);
+      window.removeEventListener('select_menu_item', handleSelectMenuItem);
+    };
+  }, [menu, tables]);
   
   // Menu State
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
@@ -110,9 +136,17 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
   // Restaurant General Info State
   const [restaurantNameInput, setRestaurantNameInput] = useState(settings?.restaurantName || 'BistroFlow');
+  const [logoUrlInput, setLogoUrlInput] = useState((settings as any)?.logoUrl || '');
+  const [sloganInput, setSloganInput] = useState((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
   const [restaurantPhoneInput, setRestaurantPhoneInput] = useState(settings?.restaurantPhone || '+584121234567');
   const [restaurantAddressInput, setRestaurantAddressInput] = useState(settings?.restaurantAddress || 'Caracas, Venezuela');
   const [deliveryEnabledInput, setDeliveryEnabledInput] = useState(true);
+  const [minDeliveryOrderEnabledInput, setMinDeliveryOrderEnabledInput] = useState<boolean>(
+    (settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false
+  );
+  const [minDeliveryOrderAmountInput, setMinDeliveryOrderAmountInput] = useState<number>(
+    (settings as any)?.minDeliveryOrderAmount !== undefined ? Number((settings as any).minDeliveryOrderAmount) : 10
+  );
   const [pickupEnabledInput, setPickupEnabledInput] = useState(true);
   const [deliveryZonesInput, setDeliveryZonesInput] = useState<DeliveryZone[]>(
     settings?.deliveryZones || DEFAULT_DELIVERY_ZONES
@@ -162,6 +196,11 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   const [coursePacingEnabledInput, setCoursePacingEnabledInput] = useState(true);
   const [seatOrderingEnabledInput, setSeatOrderingEnabledInput] = useState(true);
   const [feedbackEnabledInput, setFeedbackEnabledInput] = useState(true);
+  const [kitchenModeInput, setKitchenModeInput] = useState<'kds' | 'direct_print'>((settings as any)?.kitchenMode || 'kds');
+  const [kitchenPaperWidthInput, setKitchenPaperWidthInput] = useState<'80mm' | '58mm'>((settings as any)?.kitchenPaperWidth || '80mm');
+  const [autoPrintKitchenTicketInput, setAutoPrintKitchenTicketInput] = useState<boolean>(
+    (settings as any)?.autoPrintKitchenTicket !== undefined ? (settings as any).autoPrintKitchenTicket : true
+  );
 
   useEffect(() => {
     setRateInput(exchangeRate.toString());
@@ -172,9 +211,13 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setZelleNameInput(settings?.zelleName || 'BistroFlow SL');
     setWhatsappPhoneInput(settings?.whatsappPhone || '+584121234567');
     setRestaurantNameInput(settings?.restaurantName || 'BistroFlow');
+    setLogoUrlInput((settings as any)?.logoUrl || '');
+    setSloganInput((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
     setRestaurantPhoneInput(settings?.restaurantPhone || '+584121234567');
     setRestaurantAddressInput(settings?.restaurantAddress || 'Caracas, Venezuela');
     setDeliveryEnabledInput(settings?.deliveryEnabled !== undefined ? settings?.deliveryEnabled : true);
+    setMinDeliveryOrderEnabledInput((settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false);
+    setMinDeliveryOrderAmountInput((settings as any)?.minDeliveryOrderAmount !== undefined ? Number((settings as any).minDeliveryOrderAmount) : 10);
     setPickupEnabledInput(settings?.pickupEnabled !== undefined ? settings?.pickupEnabled : true);
     setDeliveryZonesInput(settings?.deliveryZones && settings.deliveryZones.length > 0 ? settings.deliveryZones : DEFAULT_DELIVERY_ZONES);
     setQrOrderingEnabledInput(settings?.qrOrderingEnabled !== undefined ? settings?.qrOrderingEnabled : true);
@@ -208,6 +251,9 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setCoursePacingEnabledInput(settings?.coursePacingEnabled !== undefined ? settings?.coursePacingEnabled : true);
     setSeatOrderingEnabledInput(settings?.seatOrderingEnabled !== undefined ? settings?.seatOrderingEnabled : true);
     setFeedbackEnabledInput(settings?.feedbackEnabled !== undefined ? settings?.feedbackEnabled : true);
+    setKitchenModeInput((settings as any)?.kitchenMode || 'kds');
+    setKitchenPaperWidthInput((settings as any)?.kitchenPaperWidth || '80mm');
+    setAutoPrintKitchenTicketInput((settings as any)?.autoPrintKitchenTicket !== undefined ? (settings as any).autoPrintKitchenTicket : true);
     setCreditEnabledInput(settings?.creditEnabled !== undefined ? settings.creditEnabled : false);
     if (settings?.paymentMethodsList && Array.isArray(settings.paymentMethodsList) && settings.paymentMethodsList.length > 0) {
       setPaymentMethodsListInput(settings.paymentMethodsList);
@@ -226,15 +272,18 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         auto86Enabled: auto86EnabledInput,
         coursePacingEnabled: coursePacingEnabledInput,
         seatOrderingEnabled: seatOrderingEnabledInput,
-        feedbackEnabled: feedbackEnabledInput
+        feedbackEnabled: feedbackEnabledInput,
+        kitchenMode: kitchenModeInput,
+        kitchenPaperWidth: kitchenPaperWidthInput,
+        autoPrintKitchenTicket: autoPrintKitchenTicketInput
       }, { merge: true });
 
-      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración de Operaciones & KDS', `Propinas: ${suggestedTipsEnabledInput ? 'SÍ' : 'NO'} | KDS Alerta: ${kdsWarningMinutesInput}m / ${kdsCriticalMinutesInput}m`);
+      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración de Operaciones & KDS', `Modo Cocina: ${kitchenModeInput === 'direct_print' ? 'Impresión Directa' : 'KDS Pantalla'} | Ancho Papel: ${kitchenPaperWidthInput}`);
       playSuccessSound();
-      alert('⚡ Configuración de Operaciones & KDS guardada correctamente');
+      alert('⚡ Configuración de Operaciones & Cocina guardada correctamente');
     } catch (err) {
       playErrorSound();
-      alert('Error guardando configuración de Operaciones & KDS');
+      alert('Error guardando configuración de Operaciones & Cocina');
     }
   };
 
@@ -414,9 +463,13 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     try {
       await setDoc(doc(db, 'settings', 'general'), {
         restaurantName: restaurantNameInput,
+        logoUrl: logoUrlInput,
+        slogan: sloganInput,
         restaurantPhone: restaurantPhoneInput,
         restaurantAddress: restaurantAddressInput,
         deliveryEnabled: deliveryEnabledInput,
+        minDeliveryOrderEnabled: minDeliveryOrderEnabledInput,
+        minDeliveryOrderAmount: Number(minDeliveryOrderAmountInput) || 0,
         pickupEnabled: pickupEnabledInput,
         deliveryZones: deliveryZonesInput,
         qrOrderingEnabled: qrOrderingEnabledInput,
@@ -608,14 +661,14 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   };
 
   return (
-    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
-      <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
+    <div className="w-full max-w-6xl mx-auto flex-1 flex flex-col space-y-6 pb-20 min-h-full px-2 sm:px-4">
+      <header className="mb-6 border-b border-slate-200/80 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">
             Administración del Establecimiento
           </span>
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">Configuración del Local</h2>
-          <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Gestiona el menú, mesas, promociones y configuración general.</p>
+          <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Gestiona el menú, mesas, promociones, moneda y configuración general.</p>
         </div>
         {activeTab === 'menu' && (
           <div className="flex items-center gap-2.5 shrink-0">
@@ -630,14 +683,50 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         )}
       </header>
 
-      <div className="flex gap-2 border-b border-slate-200 mb-8 overflow-x-auto">
-        <button onClick={() => setActiveTab('menu')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'menu' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Menú</button>
-        <button onClick={() => setActiveTab('tables')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'tables' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Mesas</button>
-        <button onClick={() => setActiveTab('promotions')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'promotions' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Promociones y Banners</button>
-        <button onClick={() => setActiveTab('general')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'general' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Configuración General</button>
-        <button onClick={() => setActiveTab('toast_pos')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'toast_pos' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>⚡ Operaciones & KDS</button>
-        <button onClick={() => setActiveTab('payments')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'payments' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>Métodos de Pago</button>
-        <button onClick={() => setActiveTab('notifications')} className={`pb-3 px-4 text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'notifications' ? 'border-b-2 border-black text-black' : 'text-slate-400 hover:text-black'}`}>🔔 Alertas y Notificaciones</button>
+      {/* Sub-menu Navegación de Ajustes - Impecable, Centrado, Responsive y Sin Romperse */}
+      <div className="w-full mb-8">
+        <div className="bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 shadow-2xs flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth">
+          {[
+            { id: 'menu', label: 'Menú & Platos', icon: UtensilsCrossed, badge: menu.length },
+            { id: 'tables', label: 'Mesas & QR', icon: Grid, badge: tables.length },
+            { id: 'promotions', label: 'Promociones', icon: Sparkles, badge: promotions.length },
+            { id: 'general', label: 'General & Local', icon: Building2 },
+            { id: 'payments', label: 'Moneda & Pagos', icon: DollarSign, highlight: true },
+            { id: 'toast_pos', label: 'Operaciones & KDS', icon: Zap },
+            { id: 'notifications', label: 'Alertas & Sistema', icon: Bell }
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  playClickSound();
+                }}
+                className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                  isActive
+                    ? 'bg-slate-900 text-white shadow-md shadow-slate-900/10 scale-[1.01]'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80 bg-transparent'
+                }`}
+              >
+                <Icon size={16} className={isActive ? 'text-white' : tab.highlight ? 'text-emerald-600' : 'text-slate-400'} />
+                <span>{tab.label}</span>
+                {tab.badge !== undefined && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'
+                  }`}>
+                    {tab.badge}
+                  </span>
+                )}
+                {tab.highlight && !isActive && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {activeTab === 'menu' && (
@@ -753,18 +842,65 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
       {activeTab === 'tables' && (
         <>
+          {/* TOP CONTROL CARD FOR QR ORDERS */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-[32px] p-6 mb-8 border border-slate-800 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-2xl shrink-0 ${qrOrderingEnabledInput ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30' : 'bg-slate-800 text-slate-400'}`}>
+                📱
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-extrabold text-base sm:text-lg text-white">Pedidos Directos por Código QR en Mesas</h3>
+                  <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${qrOrderingEnabledInput ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
+                    {qrOrderingEnabledInput ? '🟢 HABILITADO' : '🔴 DESACTIVADO'}
+                  </span>
+                </div>
+                <p className="text-slate-300 text-xs mt-1 max-w-2xl leading-relaxed">
+                  {qrOrderingEnabledInput 
+                    ? 'Los comensales pueden escanear el código QR de su mesa y enviar pedidos directamente a cocina.' 
+                    : 'La opción de pedir por QR está apagada. Al escanear el QR, los clientes verán el menú únicamente como catálogo informativo.'}
+                </p>
+              </div>
+            </div>
+
+            <button 
+              onClick={async () => {
+                const newValue = !qrOrderingEnabledInput;
+                setQrOrderingEnabledInput(newValue);
+                try {
+                  await setDoc(doc(db, 'settings', 'restaurant'), { qrOrderingEnabled: newValue }, { merge: true });
+                  await logAction('system', currentUser?.name || 'Administrador', 'Cambió estado de Pedidos QR', `Nuevos pedidos QR: ${newValue ? 'HABILITADO' : 'DESACTIVADO'}`);
+                  playSuccessSound();
+                  alert(newValue ? '✅ Pedidos Directos por QR Activados para todas las mesas' : '⏸️ Pedidos por QR Desactivados (Modo Carta Informativa)');
+                } catch (e) {
+                  console.error('Error updating qrOrderingEnabled:', e);
+                  playErrorSound();
+                  alert('Error al actualizar la opción de QR.');
+                }
+              }}
+              className={`px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all duration-200 shrink-0 shadow-lg flex items-center gap-2 cursor-pointer ${
+                qrOrderingEnabledInput 
+                  ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 shadow-emerald-500/20' 
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
+              }`}
+            >
+              <QrCode size={16} />
+              <span>{qrOrderingEnabledInput ? 'Desactivar Pedidos QR' : 'Activar Pedidos QR'}</span>
+            </button>
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
               <p className="text-slate-500 text-xs">Administra tus mesas y haz clic en sus códigos QR para imprimirlos o compartirlos con tus clientes.</p>
             </div>
-            <button onClick={() => { setIsCreatingTable(true); setTableData({ number: '', capacity: 4, status: 'free' }); }} className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold text-sm shadow-lg shadow-black/10 hover:scale-105 transition-all self-end sm:self-auto">
+            <button onClick={() => { setIsCreatingTable(true); setTableData({ number: '', capacity: 4, status: 'free' }); }} className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold text-sm shadow-lg shadow-black/10 hover:scale-105 transition-all self-end sm:self-auto cursor-pointer">
               <Plus size={18} /> Nueva Mesa
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {tables.map(t => {
               const qrUrl = `${window.location.origin}/?table=${t.id}`;
-              const chartApiUrl = `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(qrUrl)}`;
+              const qrImageUrl = getQRCodeUrl(qrUrl, 200);
               return (
                 <div key={t.id} className="bg-white rounded-[32px] p-6 shadow-sm border border-slate-100 text-center flex flex-col items-center justify-between">
                   <div className="flex flex-col items-center w-full">
@@ -783,7 +919,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   >
                     <div className="bg-white p-2.5 rounded-xl border border-slate-200/40 shadow-sm mix-blend-multiply group-hover:scale-[1.03] transition-transform">
                       <img 
-                        src={chartApiUrl} 
+                        src={qrImageUrl} 
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = getFallbackQRCodeUrl(qrUrl, 200);
+                        }}
                         alt={`QR Mesa ${t.number}`} 
                         className="w-24 h-24 object-contain"
                       />
@@ -808,9 +947,37 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       )}
 
       {activeTab === 'general' && (
-        <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm max-w-2xl">
+        <div className="w-full max-w-4xl mx-auto bg-white rounded-[32px] p-6 sm:p-10 border border-slate-200/80 shadow-sm">
           <h3 className="font-bold text-lg mb-6 flex items-center gap-2">🏢 Información del Restaurante</h3>
           <div className="space-y-6">
+            {/* LOGO & BRAND IDENTITY */}
+            <div className="p-4 bg-slate-50/70 border border-slate-100 rounded-2xl flex flex-col sm:flex-row items-center gap-4">
+              <div className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+                {logoUrlInput ? (
+                  <img src={logoUrlInput} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-[#EEF4FF] text-blue-600 font-black text-lg flex items-center justify-center">
+                    {(restaurantNameInput || 'B').charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 w-full space-y-1.5">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Logo / Imagen del Negocio (URL)
+                </label>
+                <input 
+                  type="text" 
+                  value={logoUrlInput}
+                  onChange={e => setLogoUrlInput(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 outline-none focus:border-black font-medium transition-colors text-xs"
+                  placeholder="https://ejemplo.com/logo.png"
+                />
+                <span className="text-[10px] text-slate-400 block">
+                  Aparece en el círculo superior del menú lateral. Si está vacío se mostrará la inicial con estilo circular.
+                </span>
+              </div>
+            </div>
+
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Restaurante</label>
               <input 
@@ -820,7 +987,19 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
                 placeholder="Nombre comercial"
               />
-              <span className="text-[10px] text-slate-400 mt-1 block">Este nombre aparecerá como el título principal en la web de tus clientes y el panel de administración.</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Este nombre aparecerá en el encabezado del menú lateral y la web de clientes.</span>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Eslogan o Subtítulo del Menú</label>
+              <input 
+                type="text" 
+                value={sloganInput}
+                onChange={e => setSloganInput(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
+                placeholder="Ej. TU PARADA DE SABOR EN LA VÍA... o SISTEMA GASTRONÓMICO & POS"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">Texto secundario que se muestra debajo del nombre en el menú lateral.</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -995,6 +1174,60 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${deliveryEnabledInput ? 'translate-x-6' : 'translate-x-0'}`} />
                     </button>
                   </div>
+
+                  {/* Delivery Minimum Order Rule Toggle & Amount */}
+                  {deliveryEnabledInput && (
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-sm text-slate-950 flex items-center gap-1.5">
+                            <ShoppingBag size={16} className="text-blue-600" />
+                            Regla de Pedido Mínimo para Delivery
+                          </span>
+                          <span className="text-xs text-slate-500 block mt-0.5">
+                            Exigir un monto mínimo en productos para permitir pedidos con entrega a domicilio.
+                          </span>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setMinDeliveryOrderEnabledInput(!minDeliveryOrderEnabledInput)}
+                          className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none shrink-0 cursor-pointer ${
+                            minDeliveryOrderEnabledInput ? 'bg-blue-600' : 'bg-slate-300'
+                          }`}
+                        >
+                          <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${
+                            minDeliveryOrderEnabledInput ? 'translate-x-6' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {minDeliveryOrderEnabledInput && (
+                        <div className="pt-3 border-t border-slate-200/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex-1">
+                            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">
+                              Monto Mínimo de Pedido (USD)
+                            </label>
+                            <span className="text-[11px] text-slate-400 block">
+                              Los clientes no podrán avanzar al pago por delivery si el subtotal de productos es inferior a este monto.
+                            </span>
+                          </div>
+                          <div className="relative w-full sm:w-44 shrink-0">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">$</span>
+                            <input 
+                              type="number"
+                              min="0"
+                              step="0.5"
+                              value={minDeliveryOrderAmountInput}
+                              onChange={e => setMinDeliveryOrderAmountInput(Math.max(0, parseFloat(e.target.value) || 0))}
+                              className="w-full pl-8 pr-12 py-2.5 bg-white border border-slate-200 rounded-xl font-black text-sm text-slate-900 outline-none focus:border-blue-600 transition-colors shadow-xs"
+                              placeholder="10.00"
+                            />
+                            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">USD</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {deliveryEnabledInput && (
                     <div className="p-5 bg-amber-50/40 rounded-2xl border border-amber-200/80 space-y-4">
@@ -1276,7 +1509,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       )}
 
       {activeTab === 'toast_pos' && (
-        <div className="bg-white rounded-[32px] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-8 max-w-4xl">
+        <div className="w-full max-w-4xl mx-auto bg-white rounded-[32px] p-6 sm:p-10 border border-slate-200/80 shadow-sm space-y-8">
           <div className="border-b border-slate-100 pb-5">
             <span className="text-[10px] uppercase font-black tracking-widest text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
               Ajustes de Operaciones y Cocina
@@ -1291,6 +1524,104 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             
+            {/* CARD 0: MODO DE TRABAJO DE COCINA E IMPRESIÓN DIRECTA */}
+            <div className="md:col-span-2 bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-md space-y-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400 font-extrabold text-xl">
+                    🍳
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-white text-base">Modo de Operación de Cocina</h4>
+                    <p className="text-slate-300 text-xs">Configura si la cocina dispone de pantalla KDS o si se opera mediante Impresión Térmica Directa.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                {/* Selector Modo KDS vs Impresión Directa */}
+                <div className="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl space-y-3">
+                  <label className="text-xs font-black uppercase tracking-wider text-amber-400 block">
+                    Modo de Trabajo de Cocina
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setKitchenModeInput('kds')}
+                      className={`p-3 rounded-xl text-xs font-black transition-all flex flex-col items-center gap-1.5 border cursor-pointer ${
+                        kitchenModeInput === 'kds'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                          : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      <span className="text-base">📺</span>
+                      <span>Pantalla KDS</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKitchenModeInput('direct_print')}
+                      className={`p-3 rounded-xl text-xs font-black transition-all flex flex-col items-center gap-1.5 border cursor-pointer ${
+                        kitchenModeInput === 'direct_print'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                          : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      <span className="text-base">🖨️</span>
+                      <span>Impresión Directa</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {kitchenModeInput === 'direct_print' 
+                      ? '⚡ Sin pantalla en cocina. Al enviar comandas desde Caja/Mesero se marcarán como enviadas y se imprimirá el ticket térmico.'
+                      : '📺 Pantalla interactiva en cocina. Las comandas entran a la cola KDS para avance manual de platos.'}
+                  </p>
+                </div>
+
+                {/* Formato de Impresora Térmica */}
+                <div className="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl space-y-3">
+                  <label className="text-xs font-black uppercase tracking-wider text-amber-400 block">
+                    Formato de Impresión Térmica
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setKitchenPaperWidthInput('80mm')}
+                      className={`p-2.5 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                        kitchenPaperWidthInput === '80mm'
+                          ? 'bg-white text-slate-950 border-white shadow-sm'
+                          : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      80mm (Estándar POS)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKitchenPaperWidthInput('58mm')}
+                      className={`p-2.5 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                        kitchenPaperWidthInput === '58mm'
+                          ? 'bg-white text-slate-950 border-white shadow-sm'
+                          : 'bg-slate-900/80 text-slate-400 border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      58mm (Compacto)
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoPrintKitchenTicketInput}
+                      onChange={(e) => setAutoPrintKitchenTicketInput(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-200">
+                      Imprimir comanda de cocina automáticamente al enviar pedido
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             {/* CARD 1: KDS UMBRALES Y COLORES */}
             <div className="bg-slate-50/70 border border-slate-200/80 rounded-3xl p-6 space-y-5">
               <div className="flex items-center gap-2.5">
@@ -1559,7 +1890,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       )}
 
       {activeTab === 'payments' && (
-        <div className="bg-white rounded-[32px] p-6 sm:p-8 border border-slate-100 shadow-sm max-w-5xl space-y-8">
+        <div className="w-full max-w-5xl mx-auto bg-white rounded-[32px] p-6 sm:p-10 border border-slate-200/80 shadow-sm space-y-8">
           {/* pyDolarVenezuela 3-Rates Selector & Live Rates Dashboard */}
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -1569,11 +1900,64 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 </span>
                 <h3 className="text-xl font-black text-slate-900">Monitor y Selector de Moneda Activa</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  La moneda seleccionada aquí rige todos los precios, comandas, cuentas y cálculos del sistema.
+                  La moneda y tasa seleccionadas aquí por la Administración rigen todos los precios, cuentas y comandas del restaurante.
                 </p>
               </div>
             </div>
-            <CurrencySelector variant="expanded" />
+            <CurrencySelector variant="expanded" editable={currentUser?.role === 'admin'} />
+          </div>
+
+          {/* Admin Quick Direct Exchange Rate Box */}
+          <div className="bg-gradient-to-br from-slate-50 to-emerald-50/40 rounded-3xl p-6 border border-slate-200/80">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Control Exclusivo de Administración
+                  </span>
+                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                    <Lock size={12} className="text-slate-400" /> Solo Admin en Ajustes
+                  </span>
+                </div>
+                <h4 className="text-base font-black text-slate-900 mt-1">
+                  Fijar Tasa de Cambio Manual ({activeCurrency} a Bolívares)
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  Tasa que se utilizará en todo el sistema (Caja, Mesas, Delivery, Web Clientes) para calcular los montos en Bolívares (VES).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                <div className="relative flex-1 sm:w-44">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">Bs.</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={rateInput}
+                    onChange={(e) => setRateInput(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-900 focus:border-black outline-none shadow-2xs"
+                    placeholder="Ej: 874.73"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const val = parseFloat(rateInput);
+                    if (!isNaN(val) && val > 0) {
+                      await updateManualRate(activeCurrency, val);
+                      playSuccessSound();
+                      alert(`✅ Tasa de cambio de ${activeCurrency} fijada a Bs. ${val.toFixed(2)} exitosamente.`);
+                    } else {
+                      alert('Ingresa una tasa numérica válida mayor a 0');
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer shrink-0"
+                >
+                  Guardar Tasa
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Master Control: Función de Crédito */}
@@ -2807,7 +3191,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         )}
 
       {activeTab === 'notifications' && (
-        <div className="bg-white rounded-[32px] p-8 border border-slate-100 shadow-sm max-w-2xl">
+        <div className="w-full max-w-3xl mx-auto bg-white rounded-[32px] p-6 sm:p-10 border border-slate-200/80 shadow-sm space-y-8">
           <h3 className="font-black text-lg mb-2 flex items-center gap-2">🔔 Centro de Alertas y Notificaciones</h3>
           <p className="text-xs text-slate-400 mb-6">Configura cómo deseas enterarte de las acciones del local en tiempo real (pedidos, cajas, inventario y asistencia).</p>
           
@@ -3030,10 +3414,37 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 <X size={20} />
               </button>
               
-              <div className="text-center mb-6">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Autoservicio Mesa</span>
-                <h3 className="text-2xl font-black mt-2 tracking-tight">Código QR de Mesa {selectedQRTable.number}</h3>
-                <p className="text-xs text-slate-400 mt-1">Comparte o imprime el código QR para que los clientes ordenen desde su mesa.</p>
+              {/* Quick Toggle for QR Ordering inside Modal */}
+              <div className="mb-6 bg-slate-50 border border-slate-200/80 p-4 rounded-2xl flex items-center justify-between gap-3 text-left">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-3 h-3 rounded-full shrink-0 ${qrOrderingEnabledInput ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 block">
+                      {qrOrderingEnabledInput ? 'Pedidos por QR Activados' : 'Pedidos por QR Desactivados'}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      {qrOrderingEnabledInput ? 'Los clientes pueden pedir directo desde la mesa' : 'Menú en modo catálogo informativo'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    const newValue = !qrOrderingEnabledInput;
+                    setQrOrderingEnabledInput(newValue);
+                    try {
+                      await setDoc(doc(db, 'settings', 'restaurant'), { qrOrderingEnabled: newValue }, { merge: true });
+                      await logAction('system', currentUser?.name || 'Administrador', 'Cambió estado de Pedidos QR', `Nuevos pedidos QR: ${newValue ? 'HABILITADO' : 'DESACTIVADO'}`);
+                      playSuccessSound();
+                    } catch (e) {
+                      console.error('Error updating qrOrderingEnabled:', e);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-colors shrink-0 cursor-pointer ${
+                    qrOrderingEnabledInput ? 'bg-rose-100 hover:bg-rose-200 text-rose-700' : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800'
+                  }`}
+                >
+                  {qrOrderingEnabledInput ? 'Desactivar' : 'Activar'}
+                </button>
               </div>
 
               {/* QR Code Printable placard preview */}
@@ -3043,7 +3454,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 
                 <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200/30 mb-4 mix-blend-multiply">
                   <img 
-                    src={`https://chart.googleapis.com/chart?cht=qr&chs=250x250&chl=${encodeURIComponent(window.location.origin + '/?table=' + selectedQRTable.id)}`} 
+                    src={getQRCodeUrl(window.location.origin + '/?table=' + selectedQRTable.id, 250)} 
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = getFallbackQRCodeUrl(window.location.origin + '/?table=' + selectedQRTable.id, 250);
+                    }}
                     alt={`QR Code Mesa ${selectedQRTable.number}`} 
                     className="w-48 h-48"
                   />
@@ -3087,7 +3501,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
                   <button 
                     onClick={() => {
-                      const qrUrl = `https://chart.googleapis.com/chart?cht=qr&chs=350x350&chl=${encodeURIComponent(window.location.origin + '/?table=' + selectedQRTable.id)}`;
+                      const tableUrl = window.location.origin + '/?table=' + selectedQRTable.id;
+                      const qrUrl = getQRCodeUrl(tableUrl, 350);
                       const printWindow = window.open('', '_blank');
                       if (printWindow) {
                         printWindow.document.write(`
@@ -3185,7 +3600,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                               <div class="card">
                                 <div class="logo">${settings?.restaurantName || 'BistroFlow'}</div>
                                 <div class="tagline">Menú Digital y Auto-servicio QR</div>
-                                <img class="qr" src="${qrUrl}" alt="QR Code" />
+                                <img class="qr" src="${qrUrl}" onerror="this.src='https://quickchart.io/qr?size=350&text=' + encodeURIComponent('${tableUrl}')" alt="QR Code" />
                                 <h1 class="table-num font-weight: 950;">Mesa ${selectedQRTable.number}</h1>
                                 <div class="capacity">Capacidad: ${selectedQRTable.capacity} Personas</div>
                                 <div class="steps">

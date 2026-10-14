@@ -848,7 +848,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
               Ajustar
             </button>
           </div>
-          <div className="relative z-50 flex items-center gap-2">
+          <div className="relative z-10 flex items-center gap-2">
             <button
               onClick={() => setIsEditingLayout(!isEditingLayout)}
               className={`text-xs font-bold px-4 py-3 rounded-2xl border transition-all ${isEditingLayout ? 'bg-indigo-600 text-white border-indigo-700 shadow-lg shadow-indigo-200' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}

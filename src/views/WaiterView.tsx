@@ -28,7 +28,12 @@ import {
   AlertTriangle,
   Ticket,
   Flame,
-  Zap
+  Zap,
+  ArrowLeft,
+  Copy,
+  Sparkles,
+  ShieldCheck,
+  Printer
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, onSnapshot, getDocs, collectionGroup, query, where, getDoc, deleteDoc } from 'firebase/firestore';
 import { logAction } from '../lib/logger';
@@ -39,6 +44,7 @@ import { Table, MenuItem, Session, CourseType, CourseStatus, ExtraOption, Paymen
 import { useBookmarks } from '../lib/bookmarks';
 import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
+import { printKitchenTicket, KitchenTicketItem } from '../lib/printer';
 import CurrencySelector from '../components/CurrencySelector';
 
 export default function WaiterView({ currentUser }: { currentUser?: any }) {
@@ -59,6 +65,20 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   } = useCurrency();
   const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
+
+  // Listen for global search selection
+  useEffect(() => {
+    const handleSelectTable = (e: any) => {
+      if (e.detail?.tableId) {
+        const foundTable = tables.find(t => t.id === e.detail.tableId || String(t.number) === String(e.detail.tableNumber));
+        if (foundTable) {
+          setSelectedTable(foundTable);
+        }
+      }
+    };
+    window.addEventListener('select_table', handleSelectTable);
+    return () => window.removeEventListener('select_table', handleSelectTable);
+  }, [tables]);
   const [cart, setCart] = useState<{ 
     item: MenuItem; 
     qty: number; 
@@ -426,16 +446,35 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
       await logAction('order', waiterName, 'Envió un pedido a cocina', `Mesa ${selectedTable.number}: ${itemNames}`);
 
+      const initialStatus = (settings as any)?.kitchenMode === 'direct_print' ? 'enviado' : 'pending';
       let addedAmount = 0;
+      const printedItems: KitchenTicketItem[] = [];
+
       for (const entry of cart) {
         const itemPrice = getCartEntryPrice(entry);
         addedAmount += itemPrice * entry.qty;
+
+        const excludedNames = (entry.excludedIngredientIds || []).map(id => {
+          const ing = ingredients.find(i => i.id === id);
+          return ing ? ing.name : id;
+        });
+
+        printedItems.push({
+          itemName: entry.item.name,
+          quantity: entry.qty,
+          note: entry.note || '',
+          course: entry.course || entry.item.course || 'main',
+          seatNumber: entry.seatNumber || 1,
+          excludedIngredients: excludedNames,
+          extras: entry.selectedExtras || []
+        });
+
         await addDoc(ordersRef, {
           menuItemId: entry.item.id,
           itemName: entry.item.name,
           price: itemPrice,
           quantity: entry.qty,
-          status: 'pending',
+          status: initialStatus,
           timestamp: new Date().toISOString(),
           note: entry.note || '',
           course: entry.course || entry.item.course || 'main',
@@ -444,8 +483,20 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           excludedIngredientIds: entry.excludedIngredientIds || [],
           extras: entry.selectedExtras || [],
           batchId,
-          tableName: 'MESA ' + selectedTable.number,
+          tableName: selectedTable.id.startsWith('delivery-') ? `LLEVAR: ${selectedTable.number}` : `MESA ${selectedTable.number}`,
           waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'
+        });
+      }
+
+      // Auto-print thermal ticket if direct print mode or autoPrint is enabled
+      if ((settings as any)?.kitchenMode === 'direct_print' || (settings as any)?.autoPrintKitchenTicket !== false) {
+        printKitchenTicket({
+          tableName: selectedTable.id.startsWith('delivery-') ? `LLEVAR: ${selectedTable.number}` : `MESA ${selectedTable.number}`,
+          waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero',
+          timestamp: new Date().toISOString(),
+          items: printedItems,
+          paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
+          restaurantName: settings?.restaurantName || 'BistroFlow'
         });
       }
 
@@ -463,6 +514,36 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     } finally {
       setIsSendingOrder(false);
     }
+  };
+
+  const handlePrintKitchenTicketForSession = () => {
+    if (!selectedTable || activeOrders.length === 0) return;
+
+    const formattedItems: KitchenTicketItem[] = activeOrders.map(o => {
+      const excludedNames = (o.excludedIngredientIds || []).map((id: string) => {
+        const ing = ingredients.find(i => i.id === id);
+        return ing ? ing.name : id;
+      });
+
+      return {
+        itemName: o.itemName,
+        quantity: o.quantity || 1,
+        note: o.note || '',
+        course: o.course,
+        seatNumber: o.seatNumber,
+        excludedIngredients: excludedNames,
+        extras: o.extras || []
+      };
+    });
+
+    printKitchenTicket({
+      tableName: selectedTable.id.startsWith('delivery-') ? `LLEVAR: ${selectedTable.number}` : `MESA ${selectedTable.number}`,
+      waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero',
+      timestamp: new Date().toISOString(),
+      items: formattedItems,
+      paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
+      restaurantName: settings?.restaurantName || 'BistroFlow'
+    });
   };
 
   const [isPaying, setIsPaying] = useState(false);
@@ -1286,7 +1367,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const finalTotal = activeOrdersSubtotalAfterCoupon + tipAmount;
 
   return (
-    <div className="h-full flex flex-col gap-4">
+    <div className="relative h-full flex flex-col gap-4">
       {/* KITCHEN ALERTS BANNER - Always visible at top of Waiter View */}
       {readyOrdersList.length > 0 && (
         <div className="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 sm:p-4 shrink-0 shadow-sm">
@@ -1352,179 +1433,338 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       )}
 
       <div className="flex-1 flex gap-8 min-h-0">
-        {/* Left: Table Map */}
-        <div className={`flex-1 bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 ${selectedTable ? 'hidden lg:flex lg:mr-[540px] xl:mr-[600px]' : 'flex'}`}>
-          {/* HEADER & TABLE STATUS FILTER */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 shrink-0">
-          <div>
-            <h2 className="text-base sm:text-lg font-black uppercase tracking-wider text-slate-800">Mapa de Mesas</h2>
-            <p className="text-slate-400 text-[11px] sm:text-xs">
-              Mesero activo: <strong className="text-indigo-600 font-extrabold">{currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'}</strong>
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/50 self-start sm:self-auto">
-              {[
-                { id: 'all', label: 'Todas' },
-                { id: 'free', label: 'Libres', dot: 'bg-slate-300' },
-                { id: 'occupied', label: 'Ocupadas', dot: 'bg-rose-500' },
-                { id: 'ready', label: 'Con Platos', dot: 'bg-emerald-500 animate-pulse' },
-              ].map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => setTableFilter(f.id as any)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all ${
-                    tableFilter === f.id ? 'bg-black text-white shadow' : 'text-slate-500 hover:text-black hover:bg-white'
-                  }`}
-                >
-                  {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
-                  {f.label}
-                </button>
-              ))}
+        {/* Left: Table Map & Delivery */}
+        <div className={`flex-1 overflow-hidden flex flex-col transition-all duration-300 ${selectedTable ? 'hidden lg:flex lg:mr-[540px] xl:mr-[600px]' : 'flex'}`}>
+          {/* TOP METRICS & STATS SUMMARY BAR */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 shrink-0">
+            {/* Stat 1: Libres */}
+            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Libres</span>
+                <span className="text-lg font-black text-slate-800">
+                  {tables.filter(t => t.status === 'free').length} <span className="text-xs font-bold text-slate-400">/ {tables.length}</span>
+                </span>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <Users size={18} />
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div className="flex-1 relative rounded-3xl p-4 overflow-auto">
-          {tables.length === 0 && activeSessions.filter(s => s.type === 'delivery').length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-300 font-medium italic">
-              Sin mesas cargadas. Ve a Admin para configurar.
+            {/* Stat 2: Ocupadas */}
+            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Ocupadas</span>
+                <span className="text-lg font-black text-rose-600">
+                  {tables.filter(t => t.status !== 'free').length}
+                </span>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
+                <Clock size={18} />
+              </div>
             </div>
-          )}
-          
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-6 mb-8">
-            {filteredTables.map((table) => {
-              const session = getSessionForTable(table.id);
-              const hasReadyOrders = session && readyOrdersList.some(o => o.docRefPath?.includes(`/sessions/${session.id}/`));
-              const isStarred = isBookmarked(table.id, 'table');
-              return (
-                <motion.button
-                  key={table.id}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    setFirstAccountName('');
-                    setSelectedTable(table);
-                  }}
-                  className={`aspect-square rounded-[24px] flex flex-col items-center justify-center transition-all relative group/card ${
-                    table.status === 'free' 
-                      ? 'bg-slate-50 border-2 border-dashed border-slate-200 hover:border-black' 
-                      : hasReadyOrders
-                        ? 'bg-emerald-50 border-2 border-emerald-500 shadow-lg shadow-emerald-500/10'
-                        : 'bg-rose-50 border-2 border-rose-500 shadow-md'
-                  }`}
-                >
-                  {/* Bookmark Star Button (Admin Only) */}
-                  {currentUser?.role === 'admin' && (
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleBookmark({
-                          id: table.id,
-                          type: 'table',
-                          name: `Mesa ${table.number.toString().padStart(2, '0')}`,
-                          details: table.status === 'free' ? 'Disponible' : 'Ocupada'
-                        });
-                      }}
-                      className={`absolute top-2 left-2 p-1.5 rounded-xl transition-all z-10 cursor-pointer ${
-                        isStarred 
-                          ? 'bg-amber-100/90 text-amber-500 shadow-sm' 
-                          : 'bg-slate-200/50 text-slate-400 opacity-0 group-hover/card:opacity-100 hover:bg-amber-50 hover:text-amber-500'
-                      }`}
-                      title={isStarred ? "Quitar de Marcadores" : "Añadir a Marcadores"}
-                    >
-                      <Star size={13} className={isStarred ? "fill-amber-400 text-amber-500" : ""} />
-                    </div>
-                  )}
 
-                  {session && (
-                    <div className={`absolute top-0 right-0 p-2 text-white text-[8px] font-bold px-2 rounded-bl-xl ${hasReadyOrders ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}>
-                      {hasReadyOrders ? 'LISTO 🔔' : 'En curso'}
-                    </div>
-                  )}
-                  <span className={`text-xs font-bold ${table.status === 'free' ? 'text-slate-400' : hasReadyOrders ? 'text-emerald-950 font-extrabold' : 'text-rose-900'}`}>
-                    MESA {table.number.toString().padStart(2, '0')}
-                  </span>
-                  <span className={`text-[10px] font-bold uppercase mt-1 ${table.status === 'free' ? 'text-emerald-500' : hasReadyOrders ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {table.status === 'free' ? 'DISPONIBLE' : hasReadyOrders ? 'PLATO LISTO 🍽️' : 'OCUPADA'}
-                  </span>
-                </motion.button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center justify-between mb-6 border-t border-slate-100 pt-6">
-            <div>
-              <h2 className="text-lg font-semibold">Delivery / Para Llevar</h2>
-              <p className="text-slate-400 text-xs">Gestiona pedidos para llevar.</p>
+            {/* Stat 3: Platos Listos */}
+            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Platos Listos</span>
+                <span className="text-lg font-black text-emerald-600 flex items-center gap-1">
+                  {readyOrdersList.length}
+                  {readyOrdersList.length > 0 && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />}
+                </span>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <Zap size={18} />
+              </div>
             </div>
-            <button
-              onClick={() => setIsCreatingDelivery(true)}
-              className="bg-black text-white px-4 py-2 rounded-xl text-xs font-bold hover:scale-105 transition-transform"
-            >
-              + Nuevo Pedido
-            </button>
-          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pb-32 md:pb-8">
-            {activeSessions.filter(s => s.type === 'delivery').map(session => (
-              <motion.button
-                key={session.id}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  setSelectedTable({ id: 'delivery-' + session.id, number: session.customerName || 'Llevar', status: 'occupied', capacity: 1 });
-                  setViewingDeliveryInfo(session);
-                }}
-                className="aspect-square rounded-[24px] flex flex-col items-center justify-center transition-all relative bg-amber-50 border-2 border-amber-500 shadow-md"
+            {/* Stat 4: Delivery / Llevar */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase text-slate-300 tracking-wider block">Delivery / Llevar</span>
+                <span className="text-lg font-black text-amber-400">
+                  {activeSessions.filter(s => s.type === 'delivery').length}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsCreatingDelivery(true)}
+                className="w-9 h-9 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center font-extrabold transition-all active:scale-95 cursor-pointer shadow-md"
+                title="Nuevo Pedido Delivery"
               >
-                <div className="absolute top-0 right-0 p-2 bg-amber-500 text-white text-[8px] font-bold px-2 rounded-bl-xl">
-                  Llevar
+                <Plus size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* HEADER & TABLE STATUS FILTER */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-black text-white rounded-xl shadow-sm">
+                <Sparkles size={16} />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-black uppercase tracking-wider text-slate-900">Mapa del Salón</h2>
+                <p className="text-slate-500 text-[11px]">
+                  Atendiendo como: <strong className="text-indigo-600 font-extrabold">{currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero'}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex flex-wrap gap-1 bg-slate-200/70 p-1 rounded-xl self-start sm:self-auto">
+                {[
+                  { id: 'all', label: `Todas (${tables.length})` },
+                  { id: 'free', label: `Libres (${tables.filter(t => t.status === 'free').length})`, dot: 'bg-emerald-500' },
+                  { id: 'occupied', label: `Ocupadas (${tables.filter(t => t.status !== 'free').length})`, dot: 'bg-rose-500' },
+                  { id: 'ready', label: `Con Platos (${readyOrdersList.length})`, dot: 'bg-emerald-500 animate-pulse' },
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setTableFilter(f.id as any)}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      tableFilter === f.id ? 'bg-black text-white shadow-md' : 'text-slate-600 hover:text-black hover:bg-white/80'
+                    }`}
+                  >
+                    {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* TABLES & DELIVERY CONTAINER */}
+          <div className="flex-1 relative rounded-3xl overflow-auto pr-1">
+            {tables.length === 0 && activeSessions.filter(s => s.type === 'delivery').length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-400 font-medium italic">
+                Sin mesas cargadas. Ve a Admin para configurar el restaurante.
+              </div>
+            )}
+            
+            {/* GRID DE MESAS */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4 mb-8">
+              {filteredTables.map((table) => {
+                const session = getSessionForTable(table.id);
+                const hasReadyOrders = session && readyOrdersList.some(o => o.docRefPath?.includes(`/sessions/${session.id}/`));
+                const isStarred = isBookmarked(table.id, 'table');
+                
+                // Calculate session duration if active
+                const durationMinutes = session?.createdAt 
+                  ? Math.max(1, Math.floor((Date.now() - new Date(session.createdAt).getTime()) / 60000))
+                  : null;
+
+                const isWaitingBill = table.status === 'waiting_bill';
+
+                return (
+                  <motion.button
+                    key={table.id}
+                    whileHover={{ y: -3, scale: 1.02 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => {
+                      setFirstAccountName('');
+                      setSelectedTable(table);
+                    }}
+                    className={`min-h-[135px] p-3.5 rounded-2xl flex flex-col justify-between transition-all relative group/card cursor-pointer border text-left ${
+                      table.status === 'free' 
+                        ? 'bg-white border-slate-200/90 shadow-sm hover:border-slate-800 hover:shadow-md' 
+                        : hasReadyOrders
+                          ? 'bg-emerald-500 text-white border-emerald-400 shadow-lg shadow-emerald-500/20 animate-pulse'
+                          : isWaitingBill
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                            : 'bg-slate-900 text-white border-slate-800 shadow-md hover:border-rose-500'
+                    }`}
+                  >
+                    {/* Top Row: Bookmark & Status Badge */}
+                    <div className="flex items-start justify-between gap-1 w-full">
+                      <div className="flex items-center gap-1">
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider ${
+                          table.status === 'free'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : hasReadyOrders
+                              ? 'bg-white text-emerald-900 font-extrabold'
+                              : isWaitingBill
+                                ? 'bg-slate-950 text-amber-400 font-extrabold'
+                                : 'bg-rose-500/90 text-white font-extrabold'
+                        }`}>
+                          {table.status === 'free' ? 'LIBRE' : hasReadyOrders ? '🔔 LISTO' : isWaitingBill ? '💳 POR COBRAR' : 'OCUPADA'}
+                        </span>
+                      </div>
+
+                      {currentUser?.role === 'admin' && (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleBookmark({
+                              id: table.id,
+                              type: 'table',
+                              name: `Mesa ${table.number.toString().padStart(2, '0')}`,
+                              details: table.status === 'free' ? 'Disponible' : 'Ocupada'
+                            });
+                          }}
+                          className={`p-1 rounded-lg transition-all z-10 cursor-pointer ${
+                            isStarred 
+                              ? 'bg-amber-400/30 text-amber-300' 
+                              : 'text-slate-400 opacity-0 group-hover/card:opacity-100 hover:bg-white/20'
+                          }`}
+                          title={isStarred ? "Quitar de Marcadores" : "Añadir a Marcadores"}
+                        >
+                          <Star size={13} className={isStarred ? "fill-amber-400 text-amber-400" : ""} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Middle: Table Number & Capacity */}
+                    <div className="my-2">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-[11px] font-extrabold opacity-70 uppercase tracking-widest">MESA</span>
+                        <span className="text-2xl font-black tracking-tight">
+                          {table.number.toString().padStart(2, '0')}
+                        </span>
+                      </div>
+
+                      {table.capacity && (
+                        <div className="flex items-center gap-1 text-[10px] font-bold opacity-75 mt-0.5">
+                          <Users size={11} /> {table.capacity} pax
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom: Session Info or Free prompt */}
+                    <div className="pt-2 border-t border-current/10 flex items-center justify-between text-[10px] font-extrabold">
+                      {session ? (
+                        <>
+                          <span className="truncate max-w-[90px] opacity-90">
+                            {session.customerName || session.waiterName || 'Comanda activa'}
+                          </span>
+                          {durationMinutes !== null && (
+                            <span className="flex items-center gap-0.5 opacity-80 shrink-0">
+                              <Clock size={10} /> {durationMinutes}m
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-400 group-hover/card:text-slate-900 transition-colors">
+                          + Abrir Comanda
+                        </span>
+                      )}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+
+            {/* SECCIÓN DELIVERY / PARA LLEVAR REDISEÑADA */}
+            <div className="mt-8 border-t border-slate-200/80 pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-500 text-slate-950 rounded-xl shadow-sm">
+                    <ShoppingBag size={18} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black uppercase text-slate-900 tracking-wider">Delivery / Para Llevar</h2>
+                    <p className="text-slate-500 text-[11px]">Pedidos express y despachos en curso.</p>
+                  </div>
                 </div>
-                <span className="text-xs font-bold text-amber-900 truncate px-2 w-full text-center">
-                  {session.customerName || 'Delivery'}
-                </span>
-                <span className="text-[10px] font-bold uppercase mt-1 text-amber-600">
-                  ACTIVO
-                </span>
-              </motion.button>
-            ))}
+
+                <button
+                  onClick={() => setIsCreatingDelivery(true)}
+                  className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Plus size={14} /> Nuevo Pedido
+                </button>
+              </div>
+
+              {/* CARDS DELIVERY */}
+              {activeSessions.filter(s => s.type === 'delivery').length === 0 ? (
+                <div className="p-6 text-center bg-white/60 rounded-2xl border border-dashed border-slate-300">
+                  <ShoppingBag size={24} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-xs font-bold text-slate-500">No hay pedidos para llevar o delivery activos</p>
+                  <button
+                    onClick={() => setIsCreatingDelivery(true)}
+                    className="mt-2 text-xs font-black text-amber-600 hover:text-amber-700 underline cursor-pointer"
+                  >
+                    + Crear Pedido Express
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 pb-28 md:pb-8">
+                  {activeSessions.filter(s => s.type === 'delivery').map(session => {
+                    const durationMinutes = session.createdAt 
+                      ? Math.max(1, Math.floor((Date.now() - new Date(session.createdAt).getTime()) / 60000))
+                      : null;
+
+                    return (
+                      <motion.button
+                        key={session.id}
+                        whileHover={{ y: -2, scale: 1.01 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => {
+                          setSelectedTable({ id: 'delivery-' + session.id, number: session.customerName || 'Llevar', status: 'occupied', capacity: 1 });
+                          setViewingDeliveryInfo(session);
+                        }}
+                        className="bg-white border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between text-left cursor-pointer group relative overflow-hidden"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="bg-amber-100 text-amber-900 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-lg flex items-center gap-1">
+                            <ShoppingBag size={11} /> LLEVAR / DELIVERY
+                          </span>
+                          {durationMinutes !== null && (
+                            <span className="text-[10px] font-extrabold text-slate-400 flex items-center gap-1">
+                              <Clock size={10} /> {durationMinutes}m
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="my-1.5">
+                          <span className="text-sm font-black text-slate-900 block truncate group-hover:text-amber-600 transition-colors">
+                            {session.customerName || 'Cliente sin nombre'}
+                          </span>
+                          {session.customerPhone && (
+                            <span className="text-[11px] text-slate-500 font-extrabold flex items-center gap-1 mt-0.5">
+                              <Phone size={10} /> {session.customerPhone}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="pt-2 mt-1 border-t border-slate-100 flex items-center justify-between text-xs">
+                          <span className="font-black text-slate-900">
+                            ${(session.totalAmount || session.totalUSD || 0).toFixed(2)}
+                          </span>
+                          <span className="text-[11px] font-extrabold text-amber-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                            Ver Comanda <ChevronRight size={12} />
+                          </span>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Right: Management Panel - From extreme top to extreme bottom */}
+      {/* Right: Management Panel - Integrated seamlessly into main view area keeping Sidebar & TopBar visible */}
       <AnimatePresence>
         {selectedTable && (
-          <>
-            {/* Backdrop for mobile / tablet screens */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedTable(null)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-xs z-[65] lg:hidden"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 w-full h-full z-[70] bg-white shadow-2xl flex flex-col overflow-hidden"
-            >
-              <div className="p-3.5 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white/95 backdrop-blur-sm z-10">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.99 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.99 }}
+            transition={{ duration: 0.15 }}
+            className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-30 bg-[#F8F9FA] flex flex-col overflow-hidden"
+          >
+              <div className="p-3.5 sm:p-5 border-b border-slate-200/60 flex items-center justify-between shrink-0 bg-[#F8F9FA] backdrop-blur-sm z-10">
                 <div className="flex items-center gap-2 sm:gap-3">
                   <button 
                     onClick={() => {
                       setSelectedTable(null);
                       setFirstAccountName('');
                     }}
-                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-black flex items-center gap-1 cursor-pointer"
-                    title="Cerrar comanda"
+                    className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title="Volver al mapa de mesas"
                   >
-                    <X size={16} />
-                    <span className="sm:hidden text-[11px]">Volver</span>
+                    <ArrowLeft size={16} />
+                    <span>Atrás</span>
                   </button>
                   <div>
                     <h3 className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight flex items-center gap-2">
@@ -2124,7 +2364,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Quick navigation to bill when cart is empty but table has active consumption */}
                     {cart.length === 0 && activeOrders.length > 0 && (
-                      <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] pb-[max(2.25rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-3 z-20">
+                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] z-20">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                           <span className="text-xs font-bold text-slate-700 truncate">
@@ -2146,9 +2386,22 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden min-h-0">
                     <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0 pb-28 sm:pb-6">
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
-                        <h4 className="font-bold text-xs sm:text-sm mb-3 flex justify-between uppercase tracking-wider text-slate-800">
-                          <span>Items Registrados</span>
-                          <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md text-[10px] font-black">{activeOrders.length}</span>
+                        <h4 className="font-bold text-xs sm:text-sm mb-3 flex items-center justify-between uppercase tracking-wider text-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span>Items Registrados</span>
+                            <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md text-[10px] font-black">{activeOrders.length}</span>
+                          </div>
+                          {activeOrders.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={handlePrintKitchenTicketForSession}
+                              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl text-[11px] font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                              title="Reimprimir comanda para cocina"
+                            >
+                              <Printer size={13} />
+                              <span>Imprimir Comanda Cocina</span>
+                            </button>
+                          )}
                         </h4>
                         <div className="space-y-3">
                           {activeOrders.map(order => {
@@ -2296,7 +2549,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex flex-col gap-2 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.75rem))] sm:pb-4">
+                    <div className="p-4 sm:p-5 bg-white border-t border-slate-200/80 flex flex-col gap-2.5 shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.08)]">
                       {selectedTable.id.startsWith('delivery-') ? (
                         <>
                           {activeOrders.length > 0 ? (
@@ -2433,26 +2686,20 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
               </div>
             )}
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-    </div>
+        )}
+      </AnimatePresence>
       {/* Payment Modal */}
       {/* Creating Delivery Modal */}
       <AnimatePresence>
         {isCreatingDelivery && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-none sm:rounded-3xl p-4 sm:p-6 w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-md shadow-2xl relative flex flex-col overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] p-4 sm:p-6 w-full h-full flex flex-col min-h-0 relative"
             >
-              <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Nuevo Delivery / Para Llevar</h3>
-                  <p className="text-xs text-slate-500">Completa los datos del nuevo pedido.</p>
-                </div>
+              <div className="flex items-center gap-3 mb-4 shrink-0 pb-3 border-b border-slate-200">
                 <button 
                   onClick={() => {
                     setIsCreatingDelivery(false);
@@ -2464,11 +2711,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     setDeliveryPaymentMethod('Efectivo');
                     setDeliveryPaymentReference('');
                   }}
-                  className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
-                  title="Cerrar"
+                  className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
                 >
-                  <X size={18} />
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
                 </button>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Paso 1: Nuevo Delivery / Para Llevar</h3>
+                  <p className="text-xs text-slate-500">Completa los datos del pedido por pasos para evitar errores</p>
+                </div>
               </div>
 
               <div className="space-y-4 overflow-y-auto pr-1 scrollbar-thin my-2 flex-1">
@@ -2706,25 +2957,25 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Editing Delivery Info Modal */}
       <AnimatePresence>
         {isEditingDeliveryInfo && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-none sm:rounded-3xl p-4 sm:p-6 w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-md shadow-2xl relative flex flex-col overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] p-4 sm:p-6 w-full h-full flex flex-col min-h-0 relative"
             >
-              <div className="flex justify-between items-start mb-2 pr-8 shrink-0">
+              <div className="flex items-center gap-3 mb-4 shrink-0 pb-3 border-b border-slate-200">
+                <button 
+                  onClick={() => setIsEditingDeliveryInfo(null)}
+                  className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 leading-tight">Editar Datos del Pedido</h3>
                   <p className="text-xs text-slate-500">Actualiza los datos de contacto y envío de este pedido.</p>
                 </div>
-                <button 
-                  onClick={() => setIsEditingDeliveryInfo(null)}
-                  className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer"
-                  title="Cerrar"
-                >
-                  <X size={18} />
-                </button>
               </div>
 
               <div className="space-y-4 overflow-y-auto pr-1 scrollbar-thin my-2 flex-1">
@@ -2993,28 +3244,31 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isAddingAccount && selectedTable && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[80] p-6">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col items-center justify-center p-6">
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[40px] p-8 w-full max-w-sm shadow-2xl relative"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] p-6 w-full max-w-md flex flex-col relative"
             >
-              <button 
-                onClick={() => {
-                  setIsAddingAccount(false);
-                  setNewAccountName('');
-                }}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                title="Cerrar"
-              >
-                <X size={20} />
-              </button>
-              
-              <h3 className="text-xl font-bold mb-4">Nueva Cuenta</h3>
-              <p className="text-sm text-slate-500 mb-6">
-                {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
-              </p>
+              <div className="flex items-center gap-3 mb-6 shrink-0 w-full pb-3 border-b border-slate-200">
+                <button 
+                  onClick={() => {
+                    setIsAddingAccount(false);
+                    setNewAccountName('');
+                  }}
+                  className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 leading-tight">Nueva Cuenta</h3>
+                  <p className="text-xs text-slate-500">
+                    {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
+                  </p>
+                </div>
+              </div>
 
               <div className="space-y-4 mb-8">
                 <div>
@@ -3025,7 +3279,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     onChange={e => setNewAccountName(e.target.value)}
                     placeholder="Ej. Juan Pérez"
                     autoFocus
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
+                    className="w-full bg-white border border-slate-200 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleAddAccount();
                     }}
@@ -3047,16 +3301,16 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isPaying && selectedTable && (
-          <div className="fixed inset-0 z-[80] bg-white sm:bg-black/60 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none sm:rounded-[36px] w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-lg shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border border-slate-100"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] w-full h-full flex flex-col overflow-hidden relative"
             >
               {/* Header */}
-              <div className="p-4 sm:p-6 border-b border-slate-100 bg-white z-10 shrink-0 flex items-center justify-between">
-                <div className="flex items-center gap-2">
+              <div className="px-5 py-3.5 border-b border-slate-200/80 bg-white z-20 shrink-0 flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-3">
                   <button 
                     onClick={() => {
                       setIsPaying(false);
@@ -3071,829 +3325,549 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       setAdminPinError('');
                       setNonCreditClientMode('none');
                     }}
-                    className="sm:hidden p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-800 transition-colors text-xs font-black flex items-center gap-1 cursor-pointer"
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-all text-xs font-bold flex items-center gap-2 cursor-pointer border border-slate-200/70"
                   >
-                    ← Volver
+                    <ArrowLeft size={16} />
+                    <span>Atrás</span>
                   </button>
                   <div>
-                    <h3 className="text-base sm:text-xl font-black text-slate-900 leading-tight">Procesar Pago</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight leading-tight">Procesar Pago y Confirmación</h3>
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-white px-2 py-0.5 rounded-md">
+                        Paso Final
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500 font-medium">
-                      {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number}
+                      {selectedTable.id.startsWith('delivery-') ? 'Pedido Delivery/Llevar: ' : 'Mesa '}{selectedTable.number} • Verificación de Cobro
                     </p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => {
-                    setIsPaying(false);
-                    setReceiptImage(null);
-                    setSelectedClientIdForCredit('');
-                    setCreditName('');
-                    setCreditPhone('');
-                    setCreditId('');
-                    setCreditAddress('');
-                    setCreditEmail('');
-                    setAdminPin('');
-                    setAdminPinError('');
-                    setNonCreditClientMode('none');
-                  }}
-                  className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors cursor-pointer hidden sm:block"
-                >
-                  <X size={18} />
-                </button>
+
+                {/* Cash Shift Status Badge */}
+                {!activeShift ? (
+                  <div className="hidden sm:flex items-center gap-2 bg-rose-50 text-rose-700 px-3.5 py-1.5 rounded-xl border border-rose-200 text-xs font-bold">
+                    <Lock size={14} className="text-rose-600" />
+                    <span>Caja Cerrada</span>
+                  </div>
+                ) : (
+                  <div className="hidden sm:flex items-center gap-2 bg-emerald-50 text-emerald-950 px-3.5 py-1.5 rounded-xl border border-emerald-200 text-xs font-bold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Turno: {activeShift.shiftName}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Cash Shift Status Notification */}
-              {!activeShift ? (
-                <div className="mx-5 sm:mx-6 mt-4 p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl flex items-start gap-3">
+              {/* Cash Shift Status Warning if closed */}
+              {!activeShift && (
+                <div className="mx-5 sm:mx-6 mt-4 p-4 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl flex items-start gap-3 shrink-0">
                   <Lock className="text-amber-600 shrink-0 mt-0.5" size={20} />
                   <div>
                     <h4 className="text-xs font-black uppercase tracking-wider text-amber-950">Apertura de Caja Requerida</h4>
                     <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                      No se puede emitir el cobro porque <strong>no hay ningún turno de caja abierto</strong>. Por normativa fiscal y de arqueo, solicita al cajero o administrador realizar la <strong>Apertura de Turno</strong> en el módulo de Caja.
+                      No se puede emitir el cobro porque <strong>no hay ningún turno de caja abierto</strong>. Por normativa fiscal, solicita realizar la <strong>Apertura de Turno</strong> en el módulo de Caja.
                     </p>
                   </div>
                 </div>
-              ) : (
-                <div className="mx-5 sm:mx-6 mt-3 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="font-bold text-emerald-950">Caja Abierta: {activeShift.shiftName}</span>
-                  </div>
-                  <span className="text-[10px] text-emerald-700 font-medium">Cajero: {activeShift.openedBy}</span>
-                </div>
               )}
 
-              {/* Scrollable Body */}
-              <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5">
-                {/* Option to pay only specific items / consumption at table close */}
-                {!selectedTable.id.startsWith('delivery-') && (
-                  <div className="bg-purple-50/80 border border-purple-200/80 rounded-2xl p-4 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                          <Scissors size={18} />
-                        </div>
-                        <div>
-                          <span className="text-xs font-black text-purple-950 block">¿Pago parcial o dividido por consumo?</span>
-                          <span className="text-[10px] text-purple-700 font-medium block">Cobrar únicamente los platos consumidos por 1 persona</span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsPaying(false);
-                          initPartialModal();
-                        }}
-                        className="text-xs bg-purple-900 hover:bg-black text-white font-extrabold px-3.5 py-2 rounded-xl transition-all shrink-0 shadow-sm flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <span>Seleccionar Platos</span> →
-                      </button>
-                    </div>
-                  </div>
-                )}
+              {/* Scrollable Grid Body */}
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 scrollbar-none">
+                <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-6">
 
-                {/* Cupones de descuento en Comanda */}
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mb-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                      <Ticket size={14} className="text-indigo-600" />
-                      Cupón de Descuento Promocional
-                    </span>
-                    {appliedWaiterCoupon && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAppliedWaiterCoupon(null);
-                          setWaiterCouponError(null);
-                          setWaiterCouponCode('');
-                        }}
-                        className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer uppercase"
-                      >
-                        Quitar cupón
-                      </button>
-                    )}
-                  </div>
-
-                  {appliedWaiterCoupon ? (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-black text-xs">
-                          ✓
-                        </span>
-                        <div>
-                          <span className="font-mono font-black text-xs text-emerald-950 block">
-                            {appliedWaiterCoupon.code}
-                          </span>
-                          <span className="text-[10px] text-emerald-700 font-bold block">
-                            {appliedWaiterCoupon.discountType === 'percentage' 
-                              ? `${appliedWaiterCoupon.discountValue}% OFF aplicado` 
-                              : `-$${appliedWaiterCoupon.discountValue} USD aplicado`}
+                  {/* LEFT COLUMN: HERO TOTAL CARD + PAYMENT METHOD SELECTOR */}
+                  <div className="md:col-span-5 space-y-5">
+                    
+                    {/* Total Hero Banner Card */}
+                    <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+                      <div className="relative z-10 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Resumen Total de Comanda</span>
+                          <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg">
+                            1 USD = {currentRateBs.toFixed(2)} Bs
                           </span>
                         </div>
+
+                        <div>
+                          <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest block mb-0.5">Monto Total ({activeCurrency})</span>
+                          <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight">{formatPrice(finalTotal)}</div>
+                        </div>
+
+                        <div className="bg-white/10 backdrop-blur-md p-3.5 rounded-2xl border border-white/10 flex items-center justify-between">
+                          <div>
+                            <span className="text-slate-300 text-[9px] font-black uppercase tracking-wider block">Equivalente Bolívares (VES)</span>
+                            <div className="text-xl font-black text-emerald-400 font-mono">{formatBs(toBolivares(finalTotal))}</div>
+                          </div>
+                          <Receipt size={24} className="text-white/20" />
+                        </div>
                       </div>
-                      <span className="font-black text-xs text-emerald-700">
-                        -{formatPrice(waiterCouponDiscount)}
-                      </span>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Código de cupón (ej: BISTRO20)"
-                          value={waiterCouponCode}
-                          onChange={(e) => {
-                            setWaiterCouponCode(e.target.value.toUpperCase());
-                            setWaiterCouponError(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const raw = waiterCouponCode.trim().toUpperCase();
-                              if (!raw) return;
-                              const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
-                              if (!found) {
-                                setWaiterCouponError('Cupón no encontrado');
-                                return;
-                              }
-                              if (found.status !== 'active') {
-                                setWaiterCouponError('Cupón temporalmente inactivo');
-                                return;
-                              }
-                              if (found.minSpend && activeOrdersTotal < found.minSpend) {
-                                setWaiterCouponError(`Consumo mínimo: $${found.minSpend}`);
-                                return;
-                              }
-                              setAppliedWaiterCoupon(found);
-                              setWaiterCouponError(null);
-                            }
-                          }}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase outline-none focus:border-indigo-600"
-                        />
+
+                    {/* Option to pay only specific items / consumption */}
+                    {!selectedTable.id.startsWith('delivery-') && (
+                      <div className="bg-purple-50/80 border border-purple-200/80 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-2xs">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                            <Scissors size={18} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-purple-950 block">¿Pago dividido por consumo?</span>
+                            <span className="text-[10px] text-purple-700 font-medium block">Cobrar únicamente ítems seleccionados</span>
+                          </div>
+                        </div>
                         <button
                           type="button"
                           onClick={() => {
-                            const raw = waiterCouponCode.trim().toUpperCase();
-                            if (!raw) return;
-                            const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
-                            if (!found) {
-                              setWaiterCouponError('Cupón no encontrado');
-                              return;
-                            }
-                            if (found.status !== 'active') {
-                              setWaiterCouponError('Cupón temporalmente inactivo');
-                              return;
-                            }
-                            if (found.minSpend && activeOrdersTotal < found.minSpend) {
-                              setWaiterCouponError(`Consumo mínimo: $${found.minSpend}`);
-                              return;
-                            }
-                            setAppliedWaiterCoupon(found);
-                            setWaiterCouponError(null);
+                            setIsPaying(false);
+                            initPartialModal();
                           }}
-                          className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl cursor-pointer"
+                          className="text-xs bg-purple-900 hover:bg-black text-white font-black px-3 py-2 rounded-xl transition-all shrink-0 shadow-xs flex items-center gap-1 cursor-pointer"
                         >
-                          Aplicar
+                          <span>Dividir</span> →
                         </button>
                       </div>
-                      {waiterCouponError && (
-                        <p className="text-[10px] font-bold text-rose-600">{waiterCouponError}</p>
-                      )}
+                    )}
 
-                      {/* Quick Available Coupons Chips */}
-                      {coupons && coupons.filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now())).length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                          <span className="text-[9px] font-bold uppercase text-slate-400">Cupones:</span>
-                          {coupons
-                            .filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now()))
-                            .slice(0, 3)
-                            .map(c => (
-                              <button
-                                key={c.id}
-                                type="button"
-                                onClick={() => {
-                                  setWaiterCouponCode(c.code);
-                                  setAppliedWaiterCoupon(c);
-                                  setWaiterCouponError(null);
-                                }}
-                                className="text-[10px] font-mono font-black bg-indigo-50 border border-indigo-200/70 text-indigo-700 px-2 py-0.5 rounded-lg hover:bg-indigo-100 transition-colors cursor-pointer"
-                              >
-                                🏷️ {c.code} (-{c.discountType === 'percentage' ? `${c.discountValue}%` : `$${c.discountValue}`})
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-              {/* Total Card */}
-              <div className="bg-slate-50 p-6 rounded-3xl mb-6 border border-slate-100">
-                <div className="flex justify-between items-end">
-                  <div>
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block mb-1">Total a cobrar ({activeCurrency})</span>
-                    <div className="text-3xl font-light text-slate-900">{formatPrice(finalTotal)}</div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block mb-1">En Bolívares</span>
-                    <div className="text-xl font-bold text-rose-600">{formatBs(toBolivares(finalTotal))}</div>
-                    <div className="text-[9px] text-slate-400 font-medium">Tasa ({activeCurrency}): {currentRateBs.toFixed(2)} Bs/{currencySymbol}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                {/* Method selector */}
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Método de Pago</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {[
-                      ...availablePaymentMethods.map(m => ({ id: m.id, label: m.name, currency: m.currency, methodObj: m })),
-                      { id: 'mixto', label: 'Mixto', currency: 'any', methodObj: null }
-                    ].map(method => (
-                      <button 
-                        key={method.id}
-                        type="button"
-                        onClick={() => {
-                          setPaymentMethod(method.id);
-                          if (method.methodObj?.currency === 'Bs') setPaymentCurrency('Bs');
-                          else if (method.methodObj?.currency === 'EUR') setPaymentCurrency('EUR');
-                          else if (method.methodObj?.currency === 'USDT') setPaymentCurrency('USDT');
-                          else if (method.id === 'pago_movil' || method.id === 'punto') setPaymentCurrency('Bs');
-                          else setPaymentCurrency('USD');
-                        }}
-                        className={`p-3 rounded-2xl border text-xs font-bold transition-all ${paymentMethod === method.id ? 'border-none bg-black text-white shadow-md' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-                      >
-                        {method.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Punto de Venta info card */}
-                {paymentMethod === 'punto' && (
-                  <div className="bg-blue-50/50 border border-blue-100 rounded-3xl p-5 space-y-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-blue-100/50">
-                      <span className="font-bold text-xs text-blue-900">Punto de Venta (Tarjeta POS)</span>
-                      <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">VES / Bolívares</span>
-                    </div>
-                    <div className="text-xs text-slate-700 space-y-2">
-                      <p className="text-slate-600 font-medium">
-                        {availablePaymentMethods.find(m => m.id === 'punto')?.details?.notes || 'Procesar tarjeta de débito o crédito nacional en el punto físico del local.'}
-                      </p>
-                      <div className="flex items-center justify-between pt-1 border-t border-blue-100/40">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Total en Bolívares:</span>
-                        <span className="font-extrabold text-blue-900 text-base">{formatBs(toBolivares(finalTotal))}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Custom method info card */}
-                {(() => {
-                  const customObj = availablePaymentMethods.find(m => m.id === paymentMethod && !['pago_movil', 'zelle', 'divisa', 'punto', 'credito', 'mixto'].includes(m.id));
-                  if (!customObj) return null;
-                  return (
-                    <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 space-y-3">
-                      <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                        <span className="font-bold text-xs text-slate-900">{customObj.name}</span>
-                        <span className="text-[10px] bg-slate-200 text-slate-800 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                          Moneda: {customObj.currency}
+                    {/* Coupons Section */}
+                    <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                          <Ticket size={15} className="text-indigo-600" />
+                          Cupón de Descuento
                         </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
-                        {customObj.details?.bank && (
-                          <div><span className="text-[9px] uppercase font-bold text-slate-400 block">Banco/Plataforma</span><span className="font-bold">{customObj.details.bank}</span></div>
-                        )}
-                        {customObj.details?.phone && (
-                          <div><span className="text-[9px] uppercase font-bold text-slate-400 block">Teléfono</span><span className="font-mono font-bold">{customObj.details.phone}</span></div>
-                        )}
-                        {customObj.details?.email && (
-                          <div className="col-span-2"><span className="text-[9px] uppercase font-bold text-slate-400 block">Correo / ID</span><span className="font-mono font-bold break-all">{customObj.details.email}</span></div>
-                        )}
-                        {customObj.details?.accountHolder && (
-                          <div className="col-span-2"><span className="text-[9px] uppercase font-bold text-slate-400 block">Titular</span><span className="font-bold">{customObj.details.accountHolder}</span></div>
-                        )}
-                        {customObj.details?.notes && (
-                          <div className="col-span-2 pt-1"><p className="text-[11px] text-slate-600 italic">{customObj.details.notes}</p></div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Pago Móvil info & share card */}
-                {paymentMethod === 'pago_movil' && (
-                  <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-5 space-y-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-emerald-100/50">
-                      <span className="font-bold text-xs text-emerald-800">Datos de Pago Móvil</span>
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Copiar / Compartir</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Banco</span>
-                        <span className="font-bold">{settings?.pagoMovilBanco || 'Mercantil (0105)'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Teléfono</span>
-                        <span className="font-bold font-mono">{settings?.pagoMovilPhone || '0412-1234567'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Cédula / RIF</span>
-                        <span className="font-bold font-mono">{settings?.pagoMovilId || 'V-12345678'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Monto Total</span>
-                        <span className="font-bold text-emerald-700">Bs. {(finalTotal * exchangeRate).toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Zelle info & share card */}
-                {paymentMethod === 'zelle' && (
-                  <div className="bg-indigo-50/50 border border-indigo-100 rounded-3xl p-5 space-y-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-indigo-100/50">
-                      <span className="font-bold text-xs text-indigo-800">Datos de Zelle</span>
-                      <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Copiar / Compartir</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-700">
-                      <div className="col-span-2">
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Correo Electrónico</span>
-                        <span className="font-bold font-mono text-indigo-900 break-all">{settings?.zelleEmail || 'pagos@bistroflow.com'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Titular</span>
-                        <span className="font-bold">{settings?.zelleName || 'BistroFlow S.A.'}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-bold block">Monto Total</span>
-                        <span className="font-bold text-indigo-700">${finalTotal.toFixed(2)} USD</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                
-                {paymentMethod === 'mixto' && (
-                  <div className="bg-slate-50 border border-slate-100 rounded-3xl p-5 space-y-4">
-                    <div className="pb-2 border-b border-slate-200/50 flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-800 uppercase tracking-wider">Pagos Mixtos</span>
-                      <span className="text-xs font-bold font-mono text-slate-700 text-right">Restante: <br className="sm:hidden" /><span className="text-rose-600">${Math.max(0, finalTotal - mixedPayments.reduce((s, p) => s + p.amountUSD, 0)).toFixed(2)}</span> <span className="text-[10px] text-slate-400 font-medium">/ Bs. {(Math.max(0, finalTotal - mixedPayments.reduce((s, p) => s + p.amountUSD, 0)) * exchangeRate).toFixed(2)}</span></span>
-                    </div>
-
-                    {mixedPayments.length > 0 && (
-                      <div className="space-y-2">
-                        {mixedPayments.map(p => (
-                          <div key={p.id} className="flex justify-between items-center bg-white p-3 rounded-2xl border border-slate-100 text-xs">
-                            <div>
-                              <span className="font-bold block uppercase">{p.method.replace('_', ' ')}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">{p.reference || 'N/A'}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="font-bold font-mono text-slate-700">${p.amountUSD.toFixed(2)} <span className="text-[9px] text-slate-400">({p.currency === "Bs" ? `Bs. ${(p.amountUSD * exchangeRate).toFixed(2)}` : "USD"})</span></span>
-                              <button type="button" onClick={() => setMixedPayments(mixedPayments.filter(x => x.id !== p.id))} className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg"><Trash2 size={14}/></button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {finalTotal - mixedPayments.reduce((s, p) => s + p.amountUSD, 0) > 0.001 && (
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Método</label>
-                            <select id="mixto_method" onChange={(e) => setCurrentMixtoCurrency(e.target.value === 'divisa' || e.target.value === 'zelle' ? 'USD' : 'Bs')} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2 outline-none text-xs">
-                              <option value="pago_movil">Pago Móvil</option>
-                              <option value="zelle">Zelle</option>
-                              <option value="divisa">Divisa ($)</option>
-                              <option value="punto">Punto (Bs)</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Monto ({currentMixtoCurrency})</label>
-                            <input 
-                              type="number" 
-                              id="mixto_amount"
-                              placeholder="Ej. 10" 
-                              step="0.01"
-                              className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2 outline-none text-xs"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <label className="block text-[9px] font-bold uppercase text-slate-400 mb-1">Referencia</label>
-                            <input 
-                              type="text" 
-                              id="mixto_ref"
-                              placeholder="Obligatorio para digital" 
-                              className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2 outline-none text-xs"
-                            />
-                          </div>
-                        </div>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const m = (document.getElementById('mixto_method') as HTMLSelectElement).value;
-                            const rawAmt = parseFloat((document.getElementById('mixto_amount') as HTMLInputElement).value) || 0;
-                            const ref = (document.getElementById('mixto_ref') as HTMLInputElement).value;
-                            
-                            if (rawAmt <= 0) return alert('Ingrese un monto válido');
-                            if ((m === 'pago_movil' || m === 'zelle' || m === 'punto') && !ref.trim()) return alert('Referencia requerida para este método');
-                            
-                            const currency = (m === 'pago_movil' || m === 'punto') ? 'Bs' : 'USD';
-                            const amtUSD = currency === 'Bs' ? rawAmt / exchangeRate : rawAmt;
-                            
-                            setMixedPayments([...mixedPayments, { id: Date.now().toString(), method: m, amountUSD: amtUSD, currency, reference: ref, receiptImage: null }]);
-                            (document.getElementById('mixto_amount') as HTMLInputElement).value = '';
-                            (document.getElementById('mixto_ref') as HTMLInputElement).value = '';
-                          }}
-                          className="w-full py-2 bg-indigo-50 text-indigo-700 font-bold text-[10px] uppercase rounded-xl hover:bg-indigo-100"
-                        >
-                          + Agregar Pago
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Image Upload and Reference for digital payments */}
-                {(paymentMethod === 'pago_movil' || paymentMethod === 'zelle' || paymentMethod === 'punto' || paymentMethod === 'transferencia' || paymentMethod === 'mixto') && (
-                  <div className="space-y-4 mt-4">
-                    {paymentMethod !== 'mixto' && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Moneda del Pago</label>
-                          <select 
-                            value={paymentCurrency}
-                            onChange={(e) => setPaymentCurrency(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm appearance-none"
+                        {appliedWaiterCoupon && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAppliedWaiterCoupon(null);
+                              setWaiterCouponError(null);
+                              setWaiterCouponCode('');
+                            }}
+                            className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer uppercase"
                           >
-                            <option value="Bs">Bolívares (Bs)</option>
-                            <option value="USD">Dólares ($)</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Referencia <span className="text-rose-500 font-extrabold">(OBLIGATORIO)</span></label>
-                          <input 
-                            type="text" 
-                            value={paymentRef}
-                            onChange={e => setPaymentRef(e.target.value)}
-                            placeholder="Ej. 123456"
-                            required
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-sm font-mono"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Image Receipt Uploader */}
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                          Comprobante / Captura de Pago <span className="text-rose-500 ml-1 font-extrabold">(OBLIGATORIO)</span>
-                        </label>
-                        {receiptImage && (
-                          <button 
-                            type="button" 
-                            onClick={() => setReceiptImage(null)} 
-                            className="text-[10px] font-bold text-rose-500 hover:underline"
-                          >
-                            Eliminar imagen
+                            Quitar
                           </button>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <label className={`w-full flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-4 cursor-pointer transition-all ${receiptImage ? 'border-emerald-500 bg-emerald-50/20' : 'border-slate-200 hover:border-black'}`}>
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            onChange={handleImageChange} 
-                            className="hidden" 
-                          />
-                          {isUploadingReceipt ? (
-                            <span className="text-xs text-slate-400 animate-pulse font-medium">Procesando imagen...</span>
-                          ) : receiptImage ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 border border-emerald-200">
-                                <img src={receiptImage} alt="Voucher Preview" className="w-full h-full object-cover" />
-                              </div>
-                              <div className="text-left">
-                                <span className="text-xs font-bold text-emerald-800 block">Comprobante Cargado</span>
-                                <span className="text-[9px] text-emerald-600 block">Imagen optimizada</span>
-                              </div>
+                      {appliedWaiterCoupon ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-black text-xs">
+                              ✓
+                            </span>
+                            <div>
+                              <span className="font-mono font-black text-xs text-emerald-950 block">
+                                {appliedWaiterCoupon.code}
+                              </span>
+                              <span className="text-[10px] text-emerald-700 font-bold block">
+                                {appliedWaiterCoupon.discountType === 'percentage' 
+                                  ? `${appliedWaiterCoupon.discountValue}% OFF aplicado` 
+                                  : `-$${appliedWaiterCoupon.discountValue} USD aplicado`}
+                              </span>
                             </div>
-                          ) : (
-                            <div className="text-center">
-                              <span className="text-xs font-bold text-slate-600 block">Subir captura o foto</span>
-                              <span className="text-[9px] text-slate-400 block">Soporta PNG, JPG</span>
-                            </div>
+                          </div>
+                          <span className="font-black text-xs text-emerald-700">
+                            -{formatPrice(waiterCouponDiscount)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="CÓDIGO (EJ: BISTRO20)"
+                              value={waiterCouponCode}
+                              onChange={(e) => {
+                                setWaiterCouponCode(e.target.value.toUpperCase());
+                                setWaiterCouponError(null);
+                              }}
+                              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase outline-none focus:border-slate-900"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const raw = waiterCouponCode.trim().toUpperCase();
+                                if (!raw) return;
+                                const found = (coupons || []).find(c => c.code.trim().toUpperCase() === raw);
+                                if (!found) {
+                                  setWaiterCouponError('Cupón no encontrado');
+                                  return;
+                                }
+                                if (found.status !== 'active') {
+                                  setWaiterCouponError('Cupón inactivo');
+                                  return;
+                                }
+                                if (found.minSpend && activeOrdersTotal < found.minSpend) {
+                                  setWaiterCouponError(`Consumo mín: $${found.minSpend}`);
+                                  return;
+                                }
+                                setAppliedWaiterCoupon(found);
+                                setWaiterCouponError(null);
+                              }}
+                              className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl cursor-pointer"
+                            >
+                              Aplicar
+                            </button>
+                          </div>
+                          {waiterCouponError && (
+                            <p className="text-[10px] font-bold text-rose-600">{waiterCouponError}</p>
                           )}
-                        </label>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Payment Method Selector Grid */}
+                    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-3">
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-800">
+                        1. Selecciona Método de Pago
+                      </label>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {[
+                          ...availablePaymentMethods.map(m => ({ id: m.id, label: m.name, currency: m.currency, methodObj: m })),
+                          { id: 'mixto', label: 'Pago Mixto', currency: 'any', methodObj: null }
+                        ].map(method => {
+                          const isSelected = paymentMethod === method.id;
+                          return (
+                            <button 
+                              key={method.id}
+                              type="button"
+                              onClick={() => {
+                                setPaymentMethod(method.id);
+                                if (method.methodObj?.currency === 'Bs') setPaymentCurrency('Bs');
+                                else if (method.methodObj?.currency === 'EUR') setPaymentCurrency('EUR');
+                                else if (method.methodObj?.currency === 'USDT') setPaymentCurrency('USDT');
+                                else if (method.id === 'pago_movil' || method.id === 'punto') setPaymentCurrency('Bs');
+                                else setPaymentCurrency('USD');
+                              }}
+                              className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between h-20 ${
+                                isSelected 
+                                  ? 'bg-slate-900 border-slate-900 text-white shadow-md ring-2 ring-slate-900/20' 
+                                  : 'bg-slate-50/70 border-slate-200/80 text-slate-700 hover:bg-slate-100/80 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between w-full">
+                                <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'
+                                }`}>
+                                  {method.currency || 'USD'}
+                                </span>
+                                {isSelected && <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />}
+                              </div>
+                              <span className="text-xs font-black truncate">{method.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
+
                   </div>
-                )}
 
-                {/* CRM Client Selector for non-credit payments */}
-                {paymentMethod !== 'credito' && (
-                  <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6 space-y-4">
-                    <div className="pb-3 border-b border-slate-200/50 flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1">
-                        👤 CRM: Control de Pedidos
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-400">(Opcional)</span>
-                    </div>
+                  {/* RIGHT COLUMN: PAYMENT DETAILS, FILE UPLOADER & CRM IDENTIFICATION */}
+                  <div className="md:col-span-7 space-y-5">
 
-                    <div className="flex gap-2">
-                      {[
-                        { id: 'none', label: 'Sin Registro' },
-                        { id: 'existing', label: 'Elegir de CRM' },
-                        { id: 'new', label: 'Nuevo Cliente' }
-                      ].map(mode => (
-                        <button
-                          key={mode.id}
-                          type="button"
-                          onClick={() => {
-                            setNonCreditClientMode(mode.id as any);
-                            // Clear inputs when switching mode
-                            setSelectedClientIdForCredit('');
-                            setCreditName('');
-                            setCreditPhone('');
-                            setCreditId('');
-                            setCreditAddress('');
-                            setCreditEmail('');
-                          }}
-                          className={`flex-1 py-2 px-1 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border ${
-                            nonCreditClientMode === mode.id
-                              ? 'bg-black text-white border-transparent shadow-sm'
-                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                          }`}
-                        >
-                          {mode.label}
-                        </button>
-                      ))}
-                    </div>
+                    {/* Dynamic Info Box Based on Selected Payment Method */}
+                    {paymentMethod === 'pago_movil' && (
+                      <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                        <div className="flex justify-between items-center pb-2.5 border-b border-emerald-200/70">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="font-black text-xs text-emerald-950 uppercase tracking-wider">Datos Pago Móvil Oficial</span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const txt = `PAGO MOVIL ${settings?.pagoMovilBanco || 'Mercantil'}\nTelf: ${settings?.pagoMovilPhone || '0412-1234567'}\nRIF/CI: ${settings?.pagoMovilId || 'V-12345678'}\nMonto: Bs. ${(finalTotal * currentRateBs).toFixed(2)}`;
+                              navigator.clipboard.writeText(txt);
+                              alert('¡Datos de Pago Móvil copiados al portapapeles!');
+                            }}
+                            className="text-[10px] font-black text-emerald-800 bg-white border border-emerald-300 hover:bg-emerald-100 px-3 py-1 rounded-lg transition-colors cursor-pointer uppercase shadow-2xs"
+                          >
+                            Copiar Datos 📋
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-slate-800 pt-1">
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Banco</span>
+                            <span className="font-extrabold text-slate-900">{settings?.pagoMovilBanco || 'Mercantil (0105)'}</span>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Teléfono</span>
+                            <span className="font-extrabold font-mono text-slate-900">{settings?.pagoMovilPhone || '0412-1234567'}</span>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Cédula / RIF</span>
+                            <span className="font-extrabold font-mono text-slate-900">{settings?.pagoMovilId || 'V-12345678'}</span>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Monto Total Bs</span>
+                            <span className="font-black text-emerald-700 font-mono">Bs. {(finalTotal * currentRateBs).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                    {nonCreditClientMode === 'existing' && (
-                      <div className="space-y-3">
+                    {paymentMethod === 'zelle' && (
+                      <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                        <div className="flex justify-between items-center pb-2.5 border-b border-indigo-200/70">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                            <span className="font-black text-xs text-indigo-950 uppercase tracking-wider">Datos de Cuenta Zelle</span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const txt = `ZELLE: ${settings?.zelleEmail || 'pagos@bistroflow.com'}\nTitular: ${settings?.zelleName || 'BistroFlow S.A.'}\nMonto: $${finalTotal.toFixed(2)} USD`;
+                              navigator.clipboard.writeText(txt);
+                              alert('¡Datos de Zelle copiados al portapapeles!');
+                            }}
+                            className="text-[10px] font-black text-indigo-800 bg-white border border-indigo-300 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors cursor-pointer uppercase shadow-2xs"
+                          >
+                            Copiar Datos 📋
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-xs text-slate-800 pt-1">
+                          <div className="bg-white/80 p-3 rounded-xl border border-indigo-100 col-span-2">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Correo Zelle</span>
+                            <span className="font-black font-mono text-indigo-900 text-sm break-all">{settings?.zelleEmail || 'pagos@bistroflow.com'}</span>
+                          </div>
+                          <div className="bg-white/80 p-3 rounded-xl border border-indigo-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Titular</span>
+                            <span className="font-extrabold text-slate-900">{settings?.zelleName || 'BistroFlow S.A.'}</span>
+                          </div>
+                          <div className="bg-white/80 p-3 rounded-xl border border-indigo-100">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold block">Monto en Dólares</span>
+                            <span className="font-black text-indigo-700 font-mono">${finalTotal.toFixed(2)} USD</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Reference & File Receipt Uploader Card */}
+                    {(paymentMethod === 'pago_movil' || paymentMethod === 'zelle' || paymentMethod === 'punto' || paymentMethod === 'transferencia' || paymentMethod === 'mixto') && (
+                      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-4">
+                        <label className="block text-[11px] font-black uppercase tracking-wider text-slate-800">
+                          2. Verificación de Transacción
+                        </label>
+
+                        {paymentMethod !== 'mixto' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Moneda Recibida</label>
+                              <select 
+                                value={paymentCurrency}
+                                onChange={(e) => setPaymentCurrency(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-bold text-xs"
+                              >
+                                <option value="Bs">Bolívares (Bs)</option>
+                                <option value="USD">Dólares ($)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                                Nº de Referencia <span className="text-rose-500 font-extrabold">*</span>
+                              </label>
+                              <input 
+                                type="text" 
+                                value={paymentRef}
+                                onChange={e => setPaymentRef(e.target.value)}
+                                placeholder="Ej. 849201"
+                                required
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-mono font-bold text-xs"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Receipt Dropzone File Uploader */}
                         <div>
-                          <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Buscar Cliente en CRM</label>
-                          <select
-                            value={selectedClientIdForCredit}
-                            onChange={e => {
-                              const cid = e.target.value;
-                              setSelectedClientIdForCredit(cid);
-                              if (cid === '') {
+                          <div className="flex justify-between items-center mb-1.5">
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              Comprobante / Captura de Pago <span className="text-rose-500 font-extrabold">*</span>
+                            </label>
+                            {receiptImage && (
+                              <button 
+                                type="button" 
+                                onClick={() => setReceiptImage(null)} 
+                                className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Quitar Captura
+                              </button>
+                            )}
+                          </div>
+
+                          <label className={`w-full flex items-center justify-center border-2 border-dashed rounded-2xl p-4 cursor-pointer transition-all ${
+                            receiptImage 
+                              ? 'border-emerald-500 bg-emerald-50/30' 
+                              : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100/70 hover:border-slate-400'
+                          }`}>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={handleImageChange} 
+                              className="hidden" 
+                            />
+                            {isUploadingReceipt ? (
+                              <span className="text-xs text-slate-400 animate-pulse font-bold">Procesando imagen...</span>
+                            ) : receiptImage ? (
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 border border-emerald-300 shrink-0 shadow-2xs">
+                                  <img src={receiptImage} alt="Voucher Preview" className="w-full h-full object-cover" />
+                                </div>
+                                <div className="text-left">
+                                  <span className="text-xs font-black text-emerald-950 block">✓ Comprobante Adjuntado Correctamente</span>
+                                  <span className="text-[10px] text-emerald-700 font-medium block">Haz clic si deseas cambiar la foto</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-center py-1">
+                                <span className="text-xs font-black text-slate-700 block">📁 Adjuntar Foto de Comprobante / Voucher</span>
+                                <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Soporta PNG, JPG (OBLIGATORIO)</span>
+                              </div>
+                            )}
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CRM / Customer Identification Card */}
+                    {paymentMethod !== 'credito' && (
+                      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-4">
+                        <div className="pb-2 border-b border-slate-100 flex items-center justify-between">
+                          <span className="font-black text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                            👤 Control de Cliente (CRM)
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">(Opcional)</span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: 'none', label: 'Sin Registro' },
+                            { id: 'existing', label: 'Elegir CRM' },
+                            { id: 'new', label: 'Nuevo Cliente' }
+                          ].map(mode => (
+                            <button
+                              key={mode.id}
+                              type="button"
+                              onClick={() => {
+                                setNonCreditClientMode(mode.id as any);
+                                setSelectedClientIdForCredit('');
                                 setCreditName('');
                                 setCreditPhone('');
                                 setCreditId('');
                                 setCreditAddress('');
                                 setCreditEmail('');
-                              } else {
-                                const found = clients.find(c => c.id === cid);
-                                if (found) {
-                                  setCreditName(found.name || '');
-                                  setCreditPhone(found.phone || '');
-                                  setCreditId(found.cedula || '');
-                                  setCreditAddress(found.address || '');
-                                  setCreditEmail(found.correo || '');
-                                }
-                              }
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-semibold text-xs cursor-pointer text-slate-700"
-                          >
-                            <option value="">-- Seleccione Cliente --</option>
-                            {clients.map(c => (
-                              <option key={c.id} value={c.id}>
-                                👤 {c.name} {c.cedula ? `(CI: ${c.cedula})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        {selectedClientIdForCredit && (
-                          <div className="p-3 bg-white border border-slate-100 rounded-2xl text-[11px] text-slate-600 space-y-1">
-                            <div><strong className="text-slate-800">Nombre:</strong> {creditName}</div>
-                            <div><strong className="text-slate-800">Teléfono:</strong> {creditPhone}</div>
-                            <div><strong className="text-slate-800">Cédula:</strong> {creditId}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {nonCreditClientMode === 'new' && (
-                      <div className="space-y-3 text-xs">
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Nombre Completo *</label>
-                          <input 
-                            type="text" 
-                            value={creditName}
-                            onChange={e => setCreditName(e.target.value)}
-                            placeholder="Ej. Juan Pérez"
-                            required
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-medium"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Teléfono *</label>
-                            <input 
-                              type="tel" 
-                              value={creditPhone}
-                              onChange={e => setCreditPhone(e.target.value)}
-                              placeholder="Ej. +584125556677"
-                              required
-                              className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-medium"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Cédula / RIF *</label>
-                            <input 
-                              type="text" 
-                              value={creditId}
-                              onChange={e => setCreditId(e.target.value)}
-                              placeholder="Ej. V-12345678"
-                              required
-                              className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-medium"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Dirección (Opcional)</label>
-                          <input 
-                            type="text" 
-                            value={creditAddress}
-                            onChange={e => setCreditAddress(e.target.value)}
-                            placeholder="Ej. Chacao, Caracas"
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-medium"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Email (Opcional)</label>
-                          <input 
-                            type="email" 
-                            value={creditEmail}
-                            onChange={e => setCreditEmail(e.target.value)}
-                            placeholder="Ej. juan@gmail.com"
-                            className="w-full bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-black font-medium"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Crédito client registration form */}
-                {paymentMethod === 'credito' && (
-                  <div className="bg-slate-50 border border-slate-100 rounded-3xl p-6 space-y-4">
-                    <div className="pb-3 border-b border-slate-200/50 flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-800 uppercase tracking-wider">Registro de Cliente de Crédito</span>
-                      <span className="text-[9px] font-bold text-slate-400">(Campos Obligatorios)</span>
-                    </div>
-
-                    <div className="space-y-3 text-xs">
-                      <div>
-                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Buscar Cliente en CRM (Opcional)</label>
-                        <select
-                          value={selectedClientIdForCredit}
-                          onChange={e => {
-                            const cid = e.target.value;
-                            setSelectedClientIdForCredit(cid);
-                            if (cid === '') {
-                              setCreditName('');
-                              setCreditPhone('');
-                              setCreditId('');
-                              setCreditAddress('');
-                              setCreditEmail('');
-                            } else {
-                              const found = clients.find(c => c.id === cid);
-                              if (found) {
-                                setCreditName(found.name || '');
-                                setCreditPhone(found.phone || '');
-                                setCreditId(found.cedula || '');
-                                setCreditAddress(found.address || '');
-                                setCreditEmail(found.correo || '');
-                              }
-                            }
-                          }}
-                          className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-semibold text-xs cursor-pointer text-slate-700 mb-2"
-                        >
-                          <option value="">-- Registrar Nuevo Cliente --</option>
-                          {clients.map(c => (
-                            <option key={c.id} value={c.id}>
-                              👤 {c.name} {c.cedula ? `(CI: ${c.cedula})` : ''} - Deuda: ${c.debt || 0}
-                            </option>
+                              }}
+                              className={`py-2 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                                nonCreditClientMode === mode.id
+                                  ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {mode.label}
+                            </button>
                           ))}
-                        </select>
-                      </div>
+                        </div>
 
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Nombre Completo</label>
-                        <input 
-                          type="text" 
-                          value={creditName}
-                          onChange={e => setCreditName(e.target.value)}
-                          placeholder="Ej. Carlos Mendoza"
-                          required
-                          className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-medium"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Teléfono</label>
-                          <input 
-                            type="tel" 
-                            value={creditPhone}
-                            onChange={e => setCreditPhone(e.target.value)}
-                            placeholder="Ej. +584125556677"
-                            required
-                            className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-medium"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Cédula / RIF</label>
-                          <input 
-                            type="text" 
-                            value={creditId}
-                            onChange={e => setCreditId(e.target.value)}
-                            placeholder="Ej. V-15443221"
-                            required
-                            className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-medium"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Dirección de Domicilio</label>
-                        <input 
-                          type="text" 
-                          value={creditAddress}
-                          onChange={e => setCreditAddress(e.target.value)}
-                          placeholder="Ej. Av. Francisco de Miranda, Chacao"
-                          required
-                          className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-medium"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Email</label>
-                        <input 
-                          type="email" 
-                          value={creditEmail}
-                          onChange={e => setCreditEmail(e.target.value)}
-                          placeholder="Ej. carlos@gmail.com"
-                          required
-                          className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="border-t border-slate-200/50 pt-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-amber-100 text-amber-800 rounded-lg">
-                          <AlertCircle size={14} />
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Autorización de Crédito</span>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">PIN de Aprobación Admin (Opcional para validar al instante)</label>
-                        <input 
-                          type="password" 
-                          maxLength={4}
-                          value={adminPin}
-                          onChange={e => {
-                            setAdminPin(e.target.value);
-                            setAdminPinError('');
-                          }}
-                          placeholder="Ingrese PIN Admin para auto-aprobación"
-                          className="w-full bg-white border border-slate-100 rounded-xl p-3 outline-none focus:border-black font-mono text-center tracking-[0.5em] text-sm"
-                        />
-                        {adminPinError && (
-                          <span className="text-[10px] text-rose-500 font-bold block mt-1">{adminPinError}</span>
+                        {nonCreditClientMode === 'existing' && (
+                          <div className="space-y-3 pt-1">
+                            <select
+                              value={selectedClientIdForCredit}
+                              onChange={e => {
+                                const cid = e.target.value;
+                                setSelectedClientIdForCredit(cid);
+                                if (cid === '') {
+                                  setCreditName('');
+                                  setCreditPhone('');
+                                  setCreditId('');
+                                  setCreditAddress('');
+                                  setCreditEmail('');
+                                } else {
+                                  const found = clients.find(c => c.id === cid);
+                                  if (found) {
+                                    setCreditName(found.name || '');
+                                    setCreditPhone(found.phone || '');
+                                    setCreditId(found.cedula || '');
+                                    setCreditAddress(found.address || '');
+                                    setCreditEmail(found.correo || '');
+                                  }
+                                }
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-bold text-xs cursor-pointer text-slate-800"
+                            >
+                              <option value="">-- Seleccionar Cliente del CRM --</option>
+                              {clients.map(c => (
+                                <option key={c.id} value={c.id}>
+                                  👤 {c.name} {c.cedula ? `(CI: ${c.cedula})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         )}
-                        <span className="text-[9px] text-slate-400 block mt-1 italic">Requiere autorización de Administrador. Si no dispone de autorización, se enviará la solicitud de crédito a la cola de Caja.</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
 
-              {/* Sticky Footer Confirm Action Button */}
-              <div className="p-4 sm:p-5 border-t border-slate-200 bg-white sm:bg-slate-50 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-5">
+                        {nonCreditClientMode === 'new' && (
+                          <div className="space-y-3 pt-1 text-xs">
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Nombre Completo *</label>
+                              <input 
+                                type="text" 
+                                value={creditName}
+                                onChange={e => setCreditName(e.target.value)}
+                                placeholder="Ej. Juan Pérez"
+                                required
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-bold"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Teléfono *</label>
+                                <input 
+                                  type="tel" 
+                                  value={creditPhone}
+                                  onChange={e => setCreditPhone(e.target.value)}
+                                  placeholder="Ej. +584125556677"
+                                  required
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-bold"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Cédula / RIF *</label>
+                                <input 
+                                  type="text" 
+                                  value={creditId}
+                                  onChange={e => setCreditId(e.target.value)}
+                                  placeholder="Ej. V-12345678"
+                                  required
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:border-slate-900 font-bold"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+              </div>
+
+              {/* STICKY BOTTOM ACTION FOOTER BAR */}
+              <div className="p-4 sm:p-5 border-t border-slate-200/80 bg-white shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.08)]">
                 <button 
                   onClick={handlePayment}
                   disabled={isUploadingReceipt || isSubmittingPayment || !activeShift}
-                  className={`w-full p-4 rounded-2xl font-bold shadow-lg flex justify-center items-center gap-2 transition-all cursor-pointer text-sm ${
+                  className={`w-full py-4 px-6 rounded-2xl font-black text-sm sm:text-base shadow-lg flex justify-center items-center gap-2.5 transition-all cursor-pointer active:scale-[0.99] ${
                     !activeShift
-                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                      : 'bg-black hover:bg-slate-800 text-white'
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-none'
+                      : 'bg-slate-900 hover:bg-black text-white shadow-slate-900/20'
                   }`}
                 >
                   {isSubmittingPayment ? (
                     <>
                       <span className="animate-spin">⏳</span>
-                      Procesando...
+                      Procesando Pago...
                     </>
                   ) : !activeShift ? (
                     <>
@@ -3902,44 +3876,47 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 size={18} />
+                      <CheckCircle2 size={20} className="text-emerald-400" />
                       {paymentMethod === 'pago_movil' || paymentMethod === 'zelle' 
-                        ? 'Confirmar Pago (Enviar a Caja)' 
+                        ? `Confirmar Pago (${formatPrice(finalTotal)})` 
                         : paymentMethod === 'credito' && !adminPin.trim()
-                          ? 'Solicitar Crédito'
-                          : 'Confirmar y Cerrar'}
+                          ? `Solicitar Crédito (${formatPrice(finalTotal)})`
+                          : `Confirmar Pago (${formatPrice(finalTotal)})`}
                     </>
                   )}
                 </button>
               </div>
+
             </motion.div>
           </div>
         )}
 
         {viewingDeliveryInfo && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-white rounded-[40px] w-full max-w-lg shadow-2xl overflow-hidden relative border border-slate-100"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] w-full h-full flex flex-col min-h-0 relative"
             >
               {/* Banner header */}
-              <div className="bg-amber-500 text-white p-8 relative">
+              <div className="bg-amber-500 text-white p-6 relative flex items-center gap-4">
                 <button 
                   onClick={() => setViewingDeliveryInfo(null)}
-                  className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors"
-                  title="Cerrar"
+                  className="px-3.5 py-2 bg-black/20 hover:bg-black/30 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
                 >
-                  <X size={18} />
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
                 </button>
-                <span className="text-[10px] bg-white/20 text-white font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  {viewingDeliveryInfo.deliveryType === 'pickup' ? 'Retiro en Local' : 'Envío a Domicilio'}
-                </span>
-                <h3 className="text-2xl font-black mt-3 leading-tight truncate">
-                  {viewingDeliveryInfo.customerName}
-                </h3>
-                <p className="text-white/80 text-xs mt-1">Detalles del pedido en curso</p>
+                <div>
+                  <span className="text-[10px] bg-white/20 text-white font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider inline-block mb-1">
+                    {viewingDeliveryInfo.deliveryType === 'pickup' ? 'Retiro en Local' : 'Envío a Domicilio'}
+                  </span>
+                  <h3 className="text-xl font-black leading-tight truncate">
+                    {viewingDeliveryInfo.customerName}
+                  </h3>
+                  <p className="text-white/80 text-xs">Detalles del pedido en curso</p>
+                </div>
               </div>
 
               {/* Body */}
@@ -4078,278 +4055,322 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         )}
       </AnimatePresence>
 
-      {/* WAITER: ITEM DETAIL/CUSTOMIZATION MODAL */}
+      {/* WAITER: ITEM DETAIL/CUSTOMIZATION PANEL */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/40 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
-            <div className="hidden sm:block absolute inset-0 cursor-pointer" onClick={() => setSelectedItem(null)} />
-            
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-none sm:rounded-[32px] w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-lg shadow-2xl relative border-0 sm:border border-slate-100 overflow-hidden z-10 flex flex-col"
+              initial={{ opacity: 0, scale: 0.99 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.99 }}
+              className="bg-[#F8F9FA] w-full h-full relative overflow-hidden z-10 flex flex-col"
             >
-              {/* Header */}
-              <div className="relative h-[180px] sm:h-[240px] w-full bg-slate-100 flex-shrink-0">
-                <img src={selectedItem.image || 'https://via.placeholder.com/300'} alt={selectedItem.name} className="w-full h-full object-cover" />
-                <button 
-                  onClick={() => setSelectedItem(null)}
-                  className="absolute top-4 right-4 p-2 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full text-white transition-all shadow-md"
-                >
-                  <X size={20} />
-                </button>
-                <span className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-md text-black text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm">
-                  {selectedItem.category}
-                </span>
-              </div>
-
-              {/* Body */}
-              <div className="p-6 md:p-8 overflow-y-auto flex-1">
-                <div className="mb-4">
-                  <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{selectedItem.name}</h3>
-                  <div className="flex items-baseline gap-3 mt-2">
-                    <span className="font-black text-2xl text-black">{formatPrice(selectedItem.price)}</span>
-                    <span className="text-sm text-slate-400 font-semibold">{formatBs(toBolivares(selectedItem.price))}</span>
+              {/* Sticky Header Bar */}
+              <div className="px-5 py-3.5 border-b border-slate-200/80 bg-white z-20 shrink-0 flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => setSelectedItem(null)}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-all text-xs font-bold flex items-center gap-2 cursor-pointer border border-slate-200/70"
+                  >
+                    <ArrowLeft size={16} />
+                    <span>Atrás</span>
+                  </button>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 tracking-tight">{selectedItem.name}</h3>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                      {selectedItem.category}
+                    </span>
                   </div>
                 </div>
 
-                {/* Personalizar Platillo */}
-                {selectedItem.recipe && selectedItem.recipe.length > 0 && (
-                  <div className="mb-6 p-4 bg-slate-50 border border-slate-100/60 rounded-2xl">
-                    <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <span>🍔</span> Personalizar ingredientes
-                    </h5>
-                    <p className="text-[10px] text-slate-400 mb-3">
-                      Quita los ingredientes que el cliente no desee:
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {selectedItem.recipe.map((ri) => {
-                        const ing = ingredients.find(i => i.id === ri.ingredientId);
-                        if (!ing) return null;
-                        const isExcluded = excludedIds.includes(ri.ingredientId);
-                        return (
-                          <label 
-                            key={ri.ingredientId} 
-                            className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer select-none transition-all ${
-                              isExcluded 
-                                ? 'bg-rose-50/40 border-rose-100 text-slate-400 line-through' 
-                                : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            <input 
-                              type="checkbox"
-                              checked={!isExcluded}
-                              onChange={() => {
-                                if (isExcluded) {
-                                  setExcludedIds(prev => prev.filter(id => id !== ri.ingredientId));
+                <div className="text-right">
+                  <span className="text-lg font-black text-slate-950 font-mono">{formatPrice(selectedItem.price)}</span>
+                  <span className="text-xs text-slate-400 font-bold block">{formatBs(toBolivares(selectedItem.price))}</span>
+                </div>
+              </div>
+
+              {/* Scrollable Body - Grid Layout */}
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 scrollbar-none">
+                <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-6">
+
+                  {/* LEFT COLUMN: HERO FOOD MEDIA + PRICE + QUICK NOTES */}
+                  <div className="md:col-span-5 space-y-5">
+                    
+                    {/* Media Card */}
+                    <div className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-sm relative group">
+                      <div className="h-56 sm:h-64 w-full bg-slate-100 relative overflow-hidden">
+                        <img src={selectedItem.image || 'https://via.placeholder.com/300'} alt={selectedItem.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                        <div className="absolute bottom-4 left-4 right-4 text-white">
+                          <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 backdrop-blur-md px-2.5 py-1 rounded-full text-white border border-white/20">
+                            {selectedItem.category}
+                          </span>
+                          <h2 className="text-xl font-black mt-1 text-white drop-shadow-sm">{selectedItem.name}</h2>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-white flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Precio Unitario</span>
+                          <span className="text-xl font-black text-slate-950 font-mono">{formatPrice(selectedItem.price)}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">En Bolívares</span>
+                          <span className="text-sm font-black text-emerald-700 font-mono">{formatBs(toBolivares(selectedItem.price))}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick Preferences & Custom Instructions */}
+                    <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-2xs space-y-3">
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-800">
+                        Preferencias y Notas Rápidas
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {['Término Medio', 'Bien Cocido', 'Sin Sal', 'Salsa Aparte', 'Poco Picante', 'Bien Tostado'].map(preset => {
+                          const isSelected = extraNote.includes(preset);
+                          return (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setExtraNote(prev => prev.replace(preset, '').replace(/^,\s*|,\s*$/, '').replace(/\s*,\s*,*/g, ', ').trim());
                                 } else {
-                                  setExcludedIds(prev => [...prev, ri.ingredientId]);
+                                  setExtraNote(prev => prev.trim() ? `${prev.trim()}, ${preset}` : preset);
                                 }
                               }}
-                              className="accent-black rounded border-slate-300 w-3.5 h-3.5"
-                            />
-                            <span className="text-xs font-semibold">{ing.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                                isSelected 
+                                  ? 'bg-slate-900 text-white border-slate-900 shadow-2xs' 
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {preset}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                {/* Ingredientes Extras */}
-                {selectedItem.extras && selectedItem.extras.length > 0 && (
-                  <div className="mb-6 p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl">
-                    <h5 className="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <span>🧀</span> Agregar Adicionales / Extras
-                    </h5>
-                    <p className="text-[10px] text-slate-400 mb-3">
-                      Añade extras deliciosos al plato:
-                    </p>
-                    <div className="grid grid-cols-1 gap-2">
-                      {selectedItem.extras.map((extra, idx) => {
-                        const isSelected = selectedExtras.some(e => e.name === extra.name);
-                        return (
-                          <label 
-                            key={idx} 
-                            className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer select-none transition-all ${
-                              isSelected 
-                                ? 'bg-indigo-50 border-indigo-200 text-indigo-950 shadow-sm font-bold' 
-                                : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                      <div>
+                        <textarea
+                          value={extraNote}
+                          onChange={(e) => setExtraNote(e.target.value)}
+                          placeholder="Instrucción especial para la cocina..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:border-slate-900 resize-none h-16 transition-colors"
+                        />
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* RIGHT COLUMN: INGREDIENT CUSTOMIZATION + EXTRAS + KDS TIMING */}
+                  <div className="md:col-span-7 space-y-5">
+
+                    {/* Personalizar Ingredientes (Quitar) */}
+                    {selectedItem.recipe && selectedItem.recipe.length > 0 && (
+                      <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-2xs space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="font-black text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                            🍔 Personalizar Ingredientes
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-bold">Desmarca para quitar</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {selectedItem.recipe.map((ri) => {
+                            const ing = ingredients.find(i => i.id === ri.ingredientId);
+                            if (!ing) return null;
+                            const isExcluded = excludedIds.includes(ri.ingredientId);
+                            return (
+                              <label 
+                                key={ri.ingredientId} 
+                                className={`flex items-center justify-between p-3 rounded-2xl border cursor-pointer select-none transition-all ${
+                                  isExcluded 
+                                    ? 'bg-rose-50/60 border-rose-200 text-rose-700 font-bold' 
+                                    : 'bg-slate-50/70 border-slate-200/80 text-slate-800 hover:bg-slate-100/80'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <input 
+                                    type="checkbox"
+                                    checked={!isExcluded}
+                                    onChange={() => {
+                                      if (isExcluded) {
+                                        setExcludedIds(prev => prev.filter(id => id !== ri.ingredientId));
+                                      } else {
+                                        setExcludedIds(prev => [...prev, ri.ingredientId]);
+                                      }
+                                    }}
+                                    className="accent-slate-900 rounded border-slate-300 w-4 h-4 cursor-pointer"
+                                  />
+                                  <span className="text-xs font-bold">{ing.name}</span>
+                                </div>
+                                {isExcluded && (
+                                  <span className="text-[9px] font-black uppercase text-rose-600 bg-rose-100 px-2 py-0.5 rounded-md">
+                                    Sin {ing.name}
+                                  </span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ingredientes Extras */}
+                    {selectedItem.extras && selectedItem.extras.length > 0 && (
+                      <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-2xs space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="font-black text-xs text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                            🧀 Adicionales & Extras
+                          </span>
+                          <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">Opcional</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {selectedItem.extras.map((extra, idx) => {
+                            const isSelected = selectedExtras.some(e => e.name === extra.name);
+                            return (
+                              <label 
+                                key={idx} 
+                                className={`flex items-center justify-between p-3 rounded-2xl border cursor-pointer select-none transition-all ${
+                                  isSelected 
+                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-black shadow-2xs' 
+                                    : 'bg-slate-50/70 border-slate-200/80 text-slate-800 hover:bg-slate-100'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <input 
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {
+                                      if (isSelected) {
+                                        setSelectedExtras(prev => prev.filter(e => e.name !== extra.name));
+                                      } else {
+                                        setSelectedExtras(prev => [...prev, extra]);
+                                      }
+                                    }}
+                                    className="accent-indigo-600 rounded border-indigo-300 w-4 h-4 cursor-pointer"
+                                  />
+                                  <span className="text-xs font-bold">{extra.name}</span>
+                                </div>
+                                <span className="text-xs font-black text-indigo-600 font-mono bg-indigo-100/80 px-2.5 py-0.5 rounded-lg">
+                                  +${extra.price.toFixed(2)}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* KDS Timing & Seat Selection Card */}
+                    <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+                      <div>
+                        <label className="block text-[11px] font-black text-slate-900 uppercase tracking-wider mb-2 flex items-center justify-between">
+                          <span>🍽️ Tiempo de Entrega (Pase por Tiempos)</span>
+                          <span className="text-[9px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md font-bold">KDS Avanzado</span>
+                        </label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { id: 'starter', label: '🥗 Entrada' },
+                            { id: 'main', label: '🥩 Fuerte' },
+                            { id: 'dessert', label: '🍰 Postre' },
+                            { id: 'beverage', label: '🍹 Bebida' }
+                          ].map(c => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => setSelectedCourse(c.id as CourseType)}
+                              className={`py-2.5 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                                selectedCourse === c.id
+                                  ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                        <span className="text-xs font-bold text-slate-800">Estado de Envío:</span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCourseStatus('fired')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                              selectedCourseStatus === 'fired'
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <input 
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {
-                                  if (isSelected) {
-                                    setSelectedExtras(prev => prev.filter(e => e.name !== extra.name));
-                                  } else {
-                                    setSelectedExtras(prev => [...prev, extra]);
-                                  }
-                                }}
-                                className="accent-indigo-600 rounded border-indigo-300 w-3.5 h-3.5"
-                              />
-                              <span className="text-xs">{extra.name}</span>
-                            </div>
-                            <span className="text-xs font-black text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-lg border border-indigo-100/40">
-                              +${extra.price.toFixed(2)}
-                            </span>
-                          </label>
-                        );
-                      })}
+                            🔥 Marchar Ya
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCourseStatus('hold')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                              selectedCourseStatus === 'hold'
+                                ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            ⏳ En Espera
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100">
+                        <label className="block text-[11px] font-black text-slate-900 uppercase tracking-wider mb-2">
+                          💺 Asiento / Comensal
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => setSelectedSeatNumber(s)}
+                              className={`w-9 h-9 rounded-xl text-xs font-black transition-all border cursor-pointer ${
+                                selectedSeatNumber === s
+                                  ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {/* Preset Custom Note Chips */}
-                <div className="mb-4">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    Notas o Preferencias Rápidas
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['Término Medio', 'Bien Cocido', 'Sin Sal', 'Salsa Aparte', 'Poco Picante', 'Bien Tostado'].map(preset => {
-                      const isSelected = extraNote.includes(preset);
-                      return (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => {
-                            if (isSelected) {
-                              setExtraNote(prev => prev.replace(preset, '').replace(/^,\s*|,\s*$/, '').replace(/\s*,\s*,*/g, ', ').trim());
-                            } else {
-                              setExtraNote(prev => prev.trim() ? `${prev.trim()}, ${preset}` : preset);
-                            }
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all border ${
-                            isSelected 
-                              ? 'bg-black text-white border-black shadow-sm' 
-                              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                          }`}
-                        >
-                          {preset}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* TOAST FEATURE: Course Firing & Seat Selection */}
-                <div className="mb-6 p-4 bg-indigo-50/60 border border-indigo-100 rounded-2xl space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-indigo-900 uppercase tracking-wider mb-2 flex items-center justify-between">
-                      <span>🍽️ Tiempo de Entrega (Pase por Tiempos)</span>
-                      <span className="text-[9px] text-indigo-600 bg-white px-2 py-0.5 rounded-full font-bold">KDS Avanzado</span>
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {[
-                        { id: 'starter', label: '🥗 Entrada' },
-                        { id: 'main', label: '🥩 Fuerte' },
-                        { id: 'dessert', label: '🍰 Postre' },
-                        { id: 'beverage', label: '🍹 Bebida' }
-                      ].map(c => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => setSelectedCourse(c.id as CourseType)}
-                          className={`py-2 rounded-xl text-xs font-black transition-all border ${
-                            selectedCourse === c.id
-                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
-                              : 'bg-white text-indigo-950 border-indigo-200/80 hover:bg-indigo-100/50'
-                          }`}
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1 border-t border-indigo-100/80">
-                    <span className="text-xs font-bold text-indigo-900">Estado de Envío:</span>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCourseStatus('fired')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                          selectedCourseStatus === 'fired'
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-white text-slate-600 border border-indigo-200'
-                        }`}
-                      >
-                        🔥 Marchar Ya
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCourseStatus('hold')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                          selectedCourseStatus === 'hold'
-                            ? 'bg-amber-500 text-slate-950 shadow-sm'
-                            : 'bg-white text-slate-600 border border-indigo-200'
-                        }`}
-                      >
-                        ⏳ En Espera
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-indigo-100/80">
-                    <label className="block text-[10px] font-black text-indigo-900 uppercase tracking-wider mb-2">
-                      💺 Asiento / Comensal
-                    </label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setSelectedSeatNumber(s)}
-                          className={`w-8 h-8 rounded-xl text-xs font-black transition-all border ${
-                            selectedSeatNumber === s
-                              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                              : 'bg-white text-slate-700 border-indigo-200 hover:bg-slate-100'
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Extra note text area */}
-                <div className="mb-6">
-                  <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
-                    ✍️ Nota o Instrucción especial
-                  </label>
-                  <textarea
-                    value={extraNote}
-                    onChange={(e) => setExtraNote(e.target.value)}
-                    placeholder="Ej: Sin cebolla, término medio, etc..."
-                    className="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-3 text-xs font-medium outline-none focus:border-black resize-none h-16 transition-colors"
-                  />
                 </div>
               </div>
 
-              {/* Action buttons */}
-              <div className="p-4 pb-6 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 z-20 pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.5rem))] sm:pb-6 shadow-[0_-8px_25px_rgba(0,0,0,0.06)]">
+              {/* STICKY BOTTOM ACTION FOOTER BAR */}
+              <div className="p-4 sm:p-5 border-t border-slate-200/80 bg-white shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] flex items-center justify-between gap-4">
                 {/* Quantity Controls */}
-                <div className="flex items-center justify-between sm:justify-start gap-4 bg-slate-100 rounded-2xl p-1.5 self-center sm:setModalQty">
+                <div className="flex items-center gap-3 bg-slate-100 rounded-2xl p-1.5 border border-slate-200/70">
                   <button 
                     onClick={() => setModalQty(prev => Math.max(1, prev - 1))}
-                    className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-100 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100"
+                    className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-700 shadow-2xs border border-slate-200 cursor-pointer"
                   >
                     <Minus size={16} />
                   </button>
-                  <span className="font-black text-base w-8 text-center select-none">{modalQty}</span>
+                  <span className="font-black text-base w-8 text-center select-none font-mono">{modalQty}</span>
                   <button 
                     onClick={() => setModalQty(prev => prev + 1)}
-                    className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-100 active:scale-95 transition-all text-slate-600 shadow-sm border border-slate-100"
+                    className="w-10 h-10 rounded-xl bg-white flex items-center justify-center hover:bg-slate-50 active:scale-95 transition-all text-slate-700 shadow-2xs border border-slate-200 cursor-pointer"
                   >
                     <Plus size={16} />
                   </button>
                 </div>
 
-                {/* Confirm additions */}
+                {/* Confirm Addition Button */}
                 <button 
                   onClick={() => {
                     const finalExclusions = excludedIds.map(id => ingredients.find(ing => ing.id === id)?.name).filter(Boolean);
@@ -4368,13 +4389,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                     );
                     setSelectedItem(null);
                   }}
-                  className="flex-1 bg-black hover:bg-slate-800 text-white p-4 rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg"
+                  className="flex-1 bg-slate-900 hover:bg-black text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg shadow-slate-900/20 cursor-pointer"
                 >
                   <span>Agregar al Pedido</span>
                   <span className="opacity-40 font-normal">|</span>
-                  <span>{formatPrice(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty)}</span>
+                  <span className="font-mono text-emerald-400 font-extrabold">{formatPrice(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty)}</span>
                 </button>
               </div>
+
             </motion.div>
           </div>
         )}
@@ -4383,30 +4405,29 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Modal for Itemized Split & Partial Payment by Consumption */}
       <AnimatePresence>
         {isPartialModalOpen && selectedTable && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/50 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-none sm:rounded-[32px] p-4 sm:p-8 w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-xl shadow-2xl relative flex flex-col overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] p-4 sm:p-6 w-full h-full relative flex flex-col overflow-hidden"
             >
-              <button
-                onClick={() => setIsPartialModalOpen(false)}
-                className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
-              >
-                <X size={18} />
-              </button>
-
-              <div className="mb-4 pr-8">
-                <div className="flex items-center gap-2 text-purple-600 mb-1 font-extrabold text-xs uppercase tracking-wider">
-                  <Scissors size={16} /> Pago y Separación por Consumo
+              <div className="flex items-center gap-3 mb-4 shrink-0 pb-3 border-b border-slate-200">
+                <button
+                  onClick={() => setIsPartialModalOpen(false)}
+                  className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
+                <div>
+                  <div className="flex items-center gap-1.5 text-purple-600 font-extrabold text-xs uppercase tracking-wider">
+                    <Scissors size={14} /> Pago por Consumo
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight">
+                    Seleccionar Ítems a Pagar
+                  </h3>
                 </div>
-                <h3 className="text-xl font-black text-slate-900">
-                  Seleccionar Ítems a Pagar
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedTable.id.startsWith('delivery-') ? 'Pedido: ' : 'Mesa '}{selectedTable.number} • Escoge qué platos va a pagar o separar esta persona.
-                </p>
               </div>
 
               {/* Name input */}
@@ -4418,7 +4439,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <UserCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                   <input
                     type="text"
-                    placeholder="Ej: Thomas"
+                    placeholder="Ej: Andrés"
                     value={partialPayerName}
                     onChange={e => setPartialPayerName(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-purple-600 transition-colors text-xs font-bold text-slate-800"

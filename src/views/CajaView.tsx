@@ -36,6 +36,7 @@ import {
   Lock,
   Unlock,
   Receipt,
+  ArrowLeft,
   PlusCircle,
   MinusCircle,
   Printer,
@@ -48,6 +49,7 @@ import { useRestaurantData } from '../hooks/useRestaurantData';
 import { useCurrency } from '../context/CurrencyContext';
 import CurrencySelector from '../components/CurrencySelector';
 import { playClickSound, playCashSound, playSuccessSound, playErrorSound } from '../lib/audio';
+import { printKitchenTicket } from '../lib/printer';
 
 export default function CajaView({ currentUser }: { currentUser?: any }) {
   const { settings, tables } = useRestaurantData();
@@ -339,6 +341,40 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   const [viewingCompletedSession, setViewingCompletedSession] = useState<any | null>(null);
   const [completedSessionOrders, setCompletedSessionOrders] = useState<any[]>([]);
   const [isLoadingCompletedOrders, setIsLoadingCompletedOrders] = useState(false);
+
+  // Listen for global search selection
+  useEffect(() => {
+    const handleOpenCajaSession = (e: any) => {
+      if (e.detail?.session) {
+        const sess = e.detail.session;
+        if (sess.deliveryType || sess.type === 'delivery' || sess.type === 'pickup' || sess.customerName) {
+          setActiveTab('delivery_pickup');
+          setViewingDeliveryOrder(sess);
+        } else if (sess.paymentStatus === 'pending_validation') {
+          setActiveTab('validation');
+          setConfirmingSession({ session: sess, type: 'approve' });
+        } else {
+          setActiveTab('tables');
+          if (sess.tableId) {
+            setViewingDeliveryOrder(sess);
+          }
+        }
+      } else if (e.detail?.tab) {
+        setActiveTab(e.detail.tab);
+      }
+    };
+    const handleSetCajaTab = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    window.addEventListener('open_caja_session', handleOpenCajaSession);
+    window.addEventListener('set_caja_tab', handleSetCajaTab);
+    return () => {
+      window.removeEventListener('open_caja_session', handleOpenCajaSession);
+      window.removeEventListener('set_caja_tab', handleSetCajaTab);
+    };
+  }, []);
 
   useEffect(() => {
     if (!viewingCompletedSession) {
@@ -689,16 +725,42 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         }
       }
 
-      // If it is a delivery session, we must also push all its orders to 'pending' (sent to kitchen)
+      // If it is a delivery/pickup session, push orders to kitchen (enviado if direct_print, pending if KDS)
       if (isDelivery) {
+        const isDirectPrint = (settings as any)?.kitchenMode === 'direct_print';
+        const targetStatus = isDirectPrint ? 'enviado' : 'pending';
         const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
         const orderSnaps = await getDocs(ordersRef);
         const promises = orderSnaps.docs.map(orderDoc => {
           return updateDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id), {
-            status: 'pending' // Enters kitchen queue
+            status: targetStatus
           });
         });
         await Promise.all(promises);
+
+        // Auto-print thermal kitchen ticket if direct print mode or autoPrint is active
+        if (isDirectPrint || (settings as any)?.autoPrintKitchenTicket !== false) {
+          const itemsToPrint = orderSnaps.docs.map(d => {
+            const data = d.data();
+            return {
+              itemName: data.name || data.itemName || 'Platillo',
+              quantity: data.quantity || 1,
+              note: data.notes || data.note || '',
+              excludedIngredients: data.excludedIngredients || [],
+              extras: data.extras || []
+            };
+          });
+          if (itemsToPrint.length > 0) {
+            printKitchenTicket({
+              tableName: `DELIVERY/LLEVAR: ${session.customerName || 'Cliente'}`,
+              waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja',
+              timestamp: new Date().toISOString(),
+              items: itemsToPrint,
+              paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
+              restaurantName: (settings as any)?.restaurantName || 'BISTROFLOW'
+            });
+          }
+        }
       }
 
       setConfirmingSession(null);
@@ -776,7 +838,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   };
 
   return (
-    <div className="w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
+    <div className="relative w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
       <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
@@ -891,9 +953,9 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </div>
 
-      {/* TASA DE CAMBIO BAR & CURRENCY SELECTOR */}
+      {/* TASA DE CAMBIO BAR & CURRENCY SELECTOR - READ ONLY */}
       <div className="mb-6">
-        <CurrencySelector variant="bar" />
+        <CurrencySelector variant="bar" editable={false} />
       </div>
 
       {/* METRIC CARDS */}
@@ -938,7 +1000,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
           </div>
           <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between">
             <span className="text-xs text-slate-400 font-medium">1 {currencySymbol} = {currentRateBs.toFixed(2)} Bs.</span>
-            <CurrencySelector variant="compact" showSyncButton={false} />
+            <CurrencySelector variant="compact" showSyncButton={false} editable={false} />
           </div>
         </div>
       </div>
@@ -1734,20 +1796,24 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       {/* CONFIRMATION APPROVED/REJECTED MODALS */}
       <AnimatePresence>
         {confirmingSession && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-black/40 sm:backdrop-blur-sm flex flex-col sm:items-center sm:justify-center p-0 sm:p-6 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-none sm:rounded-[40px] p-6 sm:p-8 w-full h-full sm:h-auto sm:max-w-md shadow-2xl relative flex flex-col justify-between overflow-y-auto"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] p-6 sm:p-8 w-full h-full flex flex-col justify-between relative"
             >
-              <button 
-                onClick={() => setConfirmingSession(null)}
-                className="absolute top-6 right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                disabled={isProcessing}
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-3 mb-4 shrink-0 pb-3 border-b border-slate-200">
+                <button 
+                  onClick={() => setConfirmingSession(null)}
+                  className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  disabled={isProcessing}
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
+                <h3 className="text-lg font-black text-slate-900">Validación de Transacción / Caja</h3>
+              </div>
 
               {confirmingSession.type === 'approve' ? (
                 <>
@@ -1981,12 +2047,36 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
               </div>
 
               {/* Action buttons */}
-              <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <div className="p-8 bg-slate-50 border-t border-slate-100 flex flex-wrap sm:flex-nowrap gap-3">
                 <button 
                   onClick={() => setViewingDeliveryOrder(null)}
-                  className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 p-4 rounded-xl font-bold text-sm transition-colors"
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-4 rounded-xl font-bold text-sm transition-colors"
                 >
                   Cerrar
+                </button>
+                <button
+                  onClick={() => {
+                    const formatted = deliveryOrders.map(o => ({
+                      itemName: o.name || o.itemName || 'Platillo',
+                      quantity: o.quantity || 1,
+                      note: o.notes || o.note || '',
+                      excludedIngredients: o.excludedIngredients || [],
+                      extras: o.extras || []
+                    }));
+                    printKitchenTicket({
+                      tableName: `DELIVERY/LLEVAR: ${viewingDeliveryOrder.customerName || 'Cliente'}`,
+                      waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja',
+                      timestamp: new Date().toISOString(),
+                      items: formatted,
+                      paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
+                      restaurantName: (settings as any)?.restaurantName || 'BISTROFLOW'
+                    });
+                  }}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-5 py-4 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 shrink-0 shadow-md"
+                  title="Imprimir comanda de cocina en formato térmico (80mm/58mm)"
+                >
+                  <Printer size={18} />
+                  <span>Imprimir Comanda</span>
                 </button>
                 <button 
                   onClick={async () => {
@@ -2029,19 +2119,26 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </AnimatePresence>
 
-      {/* OPEN SHIFT MODAL */}
+      {/* OPEN SHIFT PANEL */}
       <AnimatePresence>
         {isOpeningShiftModalOpen && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-slate-950/80 sm:backdrop-blur-md flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-none sm:rounded-[32px] max-w-lg w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden shadow-2xl border-0 sm:border border-slate-100 flex flex-col"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] w-full h-full overflow-hidden flex flex-col relative"
             >
-              <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+              <div className="p-6 bg-slate-900 text-white flex items-center gap-4">
+                <button 
+                  onClick={() => setIsOpeningShiftModalOpen(false)} 
+                  className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950">
+                  <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950 shrink-0">
                     <Key size={20} />
                   </div>
                   <div>
@@ -2049,9 +2146,6 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                     <p className="text-xs text-slate-400">Inicia un nuevo turno para controlar cobros y arqueos</p>
                   </div>
                 </div>
-                <button onClick={() => setIsOpeningShiftModalOpen(false)} className="text-slate-400 hover:text-white p-2">
-                  <X size={20} />
-                </button>
               </div>
 
               <div className="p-6 space-y-4 flex-1 overflow-y-auto min-h-0">
@@ -2256,19 +2350,26 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </AnimatePresence>
 
-      {/* CLOSE SHIFT & ARQUEO MODAL */}
+      {/* CLOSE SHIFT & ARQUEO PANEL */}
       <AnimatePresence>
         {isClosingShiftModalOpen && activeShift && (
-          <div className="fixed inset-0 z-[70] bg-white sm:bg-slate-950/80 sm:backdrop-blur-md flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-none sm:rounded-[32px] max-w-2xl w-full h-full sm:h-auto sm:max-h-[90vh] overflow-hidden shadow-2xl border-0 sm:border border-slate-100 flex flex-col"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="bg-[#F8F9FA] w-full h-full overflow-hidden flex flex-col relative"
             >
-              <div className="p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="p-6 bg-slate-900 text-white flex items-center gap-4 shrink-0">
+                <button 
+                  onClick={() => setIsClosingShiftModalOpen(false)} 
+                  className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Atrás</span>
+                </button>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-950">
+                  <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-950 shrink-0">
                     <Lock size={20} />
                   </div>
                   <div>
@@ -2276,9 +2377,6 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                     <p className="text-xs text-slate-400">Cuadre de efectivo real vs esperado del turno</p>
                   </div>
                 </div>
-                <button onClick={() => setIsClosingShiftModalOpen(false)} className="text-slate-400 hover:text-white p-2">
-                  <X size={20} />
-                </button>
               </div>
 
               <div className="p-6 space-y-6 overflow-y-auto scrollbar-thin flex-1 min-h-0">

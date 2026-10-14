@@ -49,6 +49,17 @@ export default function PersonalView() {
   const [orderByField, setOrderByField] = useState<'name' | 'salary' | 'date'>('name');
   const [activeTab, setActiveTab] = useState<'stats' | 'contract' | 'notes' | 'payroll'>('stats');
 
+  // Listen for global search selection
+  useEffect(() => {
+    const handleSelectEmployee = (e: any) => {
+      if (e.detail?.employeeId) {
+        setSelectedEmployeeId(e.detail.employeeId);
+      }
+    };
+    window.addEventListener('select_employee', handleSelectEmployee);
+    return () => window.removeEventListener('select_employee', handleSelectEmployee);
+  }, []);
+
   // Registration Modal State
   const [isAddingEmployee, setIsAddingEmployee] = useState(false);
   const [empName, setEmpName] = useState('');
@@ -160,6 +171,69 @@ export default function PersonalView() {
       seedDefaults();
     }
   }, [isLoading, schedules]);
+
+  // Pre-seed base staff and admin if employees collection is empty
+  useEffect(() => {
+    if (!isLoading && employees.length === 0) {
+      const seedEmployees = async () => {
+        try {
+          const defaultStaff = [
+            {
+              name: 'Gerencia General',
+              role: 'admin',
+              email: 'admin@bistroflow.com',
+              pin: '1234',
+              schedule: 'Dirección General (08:00 - 22:00)',
+              salary: 1000,
+              phone: '+58 412 0000000',
+              notes: 'Administración Principal',
+              status: 'active',
+              createdAt: new Date().toISOString()
+            },
+            {
+              name: 'Carlos Mesero',
+              role: 'waiter',
+              email: 'mesero@bistroflow.com',
+              pin: '1234',
+              schedule: 'Turno Mañana (08:00 - 16:00)',
+              salary: 250,
+              phone: '+58 414 1111111',
+              status: 'active',
+              createdAt: new Date().toISOString()
+            },
+            {
+              name: 'Elena Cocinera',
+              role: 'cook',
+              email: 'cocina@bistroflow.com',
+              pin: '5678',
+              schedule: 'Turno Completo (10:00 - 20:00)',
+              salary: 300,
+              phone: '+58 414 2222222',
+              status: 'active',
+              createdAt: new Date().toISOString()
+            },
+            {
+              name: 'Roberto Cajero',
+              role: 'finance',
+              email: 'caja@bistroflow.com',
+              pin: '4321',
+              schedule: 'Turno Tarde (12:00 - 21:00)',
+              salary: 350,
+              phone: '+58 414 3333333',
+              status: 'active',
+              createdAt: new Date().toISOString()
+            }
+          ];
+          for (const s of defaultStaff) {
+            await addDoc(collection(db, 'employees'), s);
+          }
+        } catch (e) {
+          console.error('Error seeding employees in PersonalView:', e);
+        }
+      };
+      seedEmployees();
+    }
+  }, [isLoading, employees.length]);
 
   const handleToggleSchedDay = (day: string) => {
     setSchedDays(prev => 
