@@ -63,12 +63,16 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
         return;
       }
 
+      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
+      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
+
       if (!res.ok || !data.success) {
-        // Direct offline check for admin
-        if (cleanEmail.toLowerCase() === 'admin@bistroflow.com' && (cleanPin === '1234' || cleanPin === '1612')) {
+        // Direct fallback for authorized admin email & PIN
+        if (isAdminEmail && isAdminPin) {
+          const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
           localStorage.setItem('demo_role', 'admin');
-          localStorage.setItem('demo_employee_id', 'admin-master');
-          localStorage.setItem('demo_user_name', 'Administrador');
+          localStorage.setItem('demo_employee_id', 'admin-thomas');
+          localStorage.setItem('demo_user_name', name);
           localStorage.setItem('demo_user_email', cleanEmail);
           localStorage.setItem('demo_user_pin', cleanPin);
           try { await signInAnonymously(auth); } catch {}
@@ -105,17 +109,20 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
       window.location.reload();
     } catch (err: any) {
       console.error('Auth error:', err);
-      if (cleanEmail.toLowerCase() === 'admin@bistroflow.com' && (cleanPin === '1234' || cleanPin === '1612')) {
+      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
+      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
+      if (isAdminEmail && isAdminPin) {
+        const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
         localStorage.setItem('demo_role', 'admin');
-        localStorage.setItem('demo_employee_id', 'admin-master');
-        localStorage.setItem('demo_user_name', 'Administrador');
+        localStorage.setItem('demo_employee_id', 'admin-thomas');
+        localStorage.setItem('demo_user_name', name);
         localStorage.setItem('demo_user_email', cleanEmail);
         localStorage.setItem('demo_user_pin', cleanPin);
         try { await signInAnonymously(auth); } catch {}
         window.location.reload();
         return;
       }
-      setError('Error al conectar con el servidor.');
+      setError('Error al conectar con el servidor de autenticación.');
     } finally {
       setIsLoading(false);
     }

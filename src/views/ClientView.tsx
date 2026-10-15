@@ -66,6 +66,20 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   } = useCurrency();
   const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
 
+  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
+  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
+  const brandColor = (settings as any)?.brandColor || '#16a34a';
+
+  const isDarkClient = bgTheme === 'dark_luxury' || sidebarTheme === 'dark';
+
+  useEffect(() => {
+    if (isDarkClient) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkClient]);
+
   // Retrieve table parameter from URL to support QR self-service across all routing formats
   const tableIdParam = useMemo(() => {
     try {
@@ -961,12 +975,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         return;
       }
 
+      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
+      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
+
       if (!res.ok || !data.success) {
-        // Direct offline fallback for admin
-        if (cleanEmail.toLowerCase() === 'admin@bistroflow.com' && (cleanPin === '1234' || cleanPin === '1612')) {
+        // Direct offline fallback for authorized admin
+        if (isAdminEmail && isAdminPin) {
+          const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
           localStorage.setItem('demo_role', 'admin');
-          localStorage.setItem('demo_employee_id', 'admin-master');
-          localStorage.setItem('demo_user_name', 'Administrador');
+          localStorage.setItem('demo_employee_id', 'admin-thomas');
+          localStorage.setItem('demo_user_name', name);
           localStorage.setItem('demo_user_email', cleanEmail);
           localStorage.setItem('demo_user_pin', cleanPin);
           try { await signInAnonymously(auth); } catch {}
@@ -1240,35 +1258,54 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     );
   };
 
+  const clientBgClass = isDarkClient 
+    ? 'bg-[#090D16] text-slate-100' 
+    : bgTheme === 'warm_silk' 
+      ? 'bg-[#FAF7F2] text-slate-900' 
+      : bgTheme === 'pure_white' 
+        ? 'bg-[#FFFFFF] text-slate-900' 
+        : 'bg-[#F8F9FA] text-slate-900';
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-black font-sans pb-32">
-      {/* TOP GREEN LOCATION & SEARCH HEADER MATCHING SCREENSHOT */}
-      <div className="bg-emerald-600 text-white pt-4 pb-4 px-4 sm:px-6 shadow-md rounded-b-[28px] mb-6">
+    <div className={`min-h-screen font-sans pb-32 transition-colors ${clientBgClass}`}>
+      {/* TOP CLEAN HEADER (No Brand Color Fill, No Delivery Address Bar) */}
+      <div className={`pt-4 pb-4 px-4 sm:px-6 shadow-sm rounded-b-[28px] mb-6 transition-colors border-b ${
+        isDarkClient 
+          ? 'bg-[#121826] border-slate-800 text-white' 
+          : 'bg-white border-slate-200/90 text-slate-900'
+      }`}>
         <div className="max-w-4xl mx-auto space-y-3">
-          {/* Delivery address / location bar */}
+          {/* Header Top Row: Logo/Name + Tracker & Staff Access */}
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                <Truck size={18} className="text-white" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[10px] text-emerald-200 font-bold uppercase tracking-wider block leading-none">
-                  {qrTable ? `Auto-servicio • Mesa ${qrTable.number}` : 'Dirección de Entrega'}
+            <div className="flex items-center gap-2.5 min-w-0">
+              {settings?.logoUrl ? (
+                <img 
+                  src={settings.logoUrl} 
+                  alt={settings?.restaurantName || "Bistro"} 
+                  className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0 shadow-2xs" 
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-black shadow-2xs shrink-0 text-sm">
+                  {settings?.restaurantName ? settings.restaurantName.charAt(0).toUpperCase() : 'B'}
+                </div>
+              )}
+              <div className="min-w-0 leading-tight">
+                <h1 className={`text-sm sm:text-base font-black truncate tracking-tight ${isDarkClient ? 'text-white' : 'text-slate-900'}`}>
+                  {settings?.restaurantName || "Q' Sandwich"}
+                </h1>
+                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">
+                  {qrTable ? `Mesa ${qrTable.number} • Auto-servicio` : (settings?.slogan || 'Menú Digital & Pedidos')}
                 </span>
-                <span className="text-sm font-black text-white truncate block max-w-[200px] xs:max-w-[260px] sm:max-w-md">
-                  {qrTable ? `${settings?.restaurantName || "Q' Sandwich"} • Mesa ${qrTable.number}` : (customerAddress || 'centro empresarial itc - Avenida 64')}
-                </span>
               </div>
-              <ChevronRight size={16} className="text-emerald-200 shrink-0" />
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
               {trackedSessionId && (
                 <button 
                   onClick={() => setIsTrackerDrawerOpen(true)}
-                  className="px-3 py-1.5 bg-white text-emerald-800 rounded-full text-xs font-black flex items-center gap-1 shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-xs font-black flex items-center gap-1 shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
                 >
-                  <Navigation size={13} className="animate-pulse text-emerald-600" />
+                  <Navigation size={13} className="animate-pulse" />
                   <span>Tracker</span>
                 </button>
               )}
@@ -1280,7 +1317,9 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   checkLockoutStatus();
                   setIsStaffLoginOpen(true);
                 }} 
-                className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all cursor-pointer"
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                  isDarkClient ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
                 title="Acceso Staff"
               >
                 <KeyRound size={16} />
@@ -1288,18 +1327,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
 
-          {/* Address Notice Pill matching Screenshot */}
-          <div className="bg-amber-300 text-amber-950 px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs">
-            <div className="flex items-center gap-2 min-w-0">
-              <Info size={16} className="text-amber-800 shrink-0" />
-              <span className="truncate">
-                {qrTable ? `Ordenando directamente desde Mesa ${qrTable.number}` : 'Tu dirección de entrega es diferente a tu ubicación actual'}
-              </span>
-            </div>
-            <ChevronRight size={14} className="shrink-0 text-amber-800" />
-          </div>
-
-          {/* Search Input + Map Button matching Screenshot */}
+          {/* Search Input + Map Button */}
           <div className="flex items-center gap-2 pt-1">
             <div className="relative flex-1">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -1308,7 +1336,11 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 placeholder="¿Qué se te antoja ordenar hoy?"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-white text-slate-900 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-400 text-sm font-medium shadow-sm placeholder:text-slate-400"
+                className={`w-full pl-10 pr-4 py-3 rounded-2xl outline-none text-sm font-medium shadow-sm placeholder:text-slate-400 transition-colors ${
+                  isDarkClient 
+                    ? 'bg-[#1b2438] text-white border border-slate-800 focus:border-emerald-500' 
+                    : 'bg-slate-50 text-slate-900 border border-slate-200 focus:ring-2 focus:ring-emerald-400'
+                }`}
               />
             </div>
             <button 
@@ -1317,10 +1349,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 const el = document.getElementById('full-menu-section');
                 if (el) el.scrollIntoView({ behavior: 'smooth' });
               }}
-              title="Ver en mapa / catálogo"
-              className="w-11 h-11 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl flex items-center justify-center shadow-sm shrink-0 active:scale-95 transition-all cursor-pointer"
+              title="Ver menú completo"
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm shrink-0 active:scale-95 transition-all cursor-pointer ${
+                isDarkClient ? 'bg-[#1b2438] hover:bg-slate-800 text-emerald-400 border border-slate-800' : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+              }`}
             >
-              <MapPin size={20} className="text-emerald-600" />
+              <MapPin size={20} className="text-emerald-500" />
             </button>
           </div>
         </div>
@@ -1448,63 +1482,6 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
         {/* PROMOTIONS BANNER SECTION */}
         <PromotionsBanner onPromoClick={handlePromoClick} categories={categories} promotions={promotions} />
-
-        {/* SECTION 1: RESTAURANTES CON PROMOS MATCHING SCREENSHOT */}
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <div>
-              <h3 className="font-black text-lg text-slate-900 tracking-tight flex items-center gap-1.5">
-                <span>Restaurantes con Promos</span>
-              </h3>
-              <p className="text-xs text-slate-400 font-medium">Promociones y combos especiales con descuento</p>
-            </div>
-            <button 
-              onClick={() => {
-                setCategory('All');
-                setSearchQuery('combo');
-                const el = document.getElementById('full-menu-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer"
-            >
-              Ver más
-            </button>
-          </div>
-
-          <div className="flex overflow-x-auto gap-4 pb-3 pt-1 scrollbar-hide snap-x snap-mandatory">
-            {menu.filter(m => m.alerts?.includes('Popular') || m.alerts?.includes('Promo') || m.category?.toLowerCase().includes('combo') || m.price < 18).slice(0, 8).map(item =>
-              renderHorizontalCard(item, "⚡ Cashea", "bg-amber-400 text-slate-900")
-            )}
-          </div>
-        </section>
-
-        {/* SECTION 2: PATROCINADO MATCHING SCREENSHOT */}
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <div>
-              <h3 className="font-black text-lg text-slate-900 tracking-tight flex items-center gap-1.5">
-                <span>Patrocinado</span>
-              </h3>
-              <p className="text-xs text-slate-400 font-medium">Recomendados y especiales del chef</p>
-            </div>
-            <button 
-              onClick={() => {
-                setCategory('All');
-                const el = document.getElementById('full-menu-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer"
-            >
-              Ver más
-            </button>
-          </div>
-
-          <div className="flex overflow-x-auto gap-4 pb-3 pt-1 scrollbar-hide snap-x snap-mandatory">
-            {menu.slice(0, 8).map(item =>
-              renderHorizontalCard(item, "⭐ Especial", "bg-emerald-600 text-white")
-            )}
-          </div>
-        </section>
 
         {/* SECTION 3: DESCUBRE POR CATEGORÍAS MATCHING SCREENSHOT */}
         <section className="mb-8">
@@ -1684,28 +1661,34 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
       {/* FLOAT BOTTOM BAR CART PREVIEW */}
       {cart.length > 0 && (
-        <div className="fixed bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))] left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-30">
+        <motion.div 
+          initial={{ y: 50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 50, opacity: 0 }}
+          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+          className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-50 pointer-events-auto"
+        >
           <button 
             onClick={() => setIsCartOpen(true)}
-            className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl flex justify-between items-center shadow-xl shadow-black/25 hover:scale-[1.02] transition-all"
+            className="w-full bg-slate-900/95 hover:bg-black text-white p-4 sm:p-4.5 rounded-2xl flex justify-between items-center shadow-[0_12px_35px_rgba(0,0,0,0.4)] backdrop-blur-md border border-white/10 hover:scale-[1.02] transition-all cursor-pointer"
           >
             <div className="flex items-center gap-3">
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl text-xs font-black">
+              <div className="bg-emerald-500 text-white w-7 h-7 rounded-xl text-xs font-black flex items-center justify-center shadow-xs">
                 {cart.reduce((sum, c) => sum + c.qty, 0)}
               </div>
-              <div>
-                <span className="text-sm font-bold uppercase tracking-wider block leading-none">Ver Carrito</span>
+              <div className="text-left">
+                <span className="text-xs sm:text-sm font-black uppercase tracking-wider block leading-none">Ver Carrito</span>
                 {!qrTable && deliveryType === 'delivery' && (
-                  <span className="text-[10px] text-amber-300 font-medium block mt-0.5">🛵 Incluye envío (${deliveryFeeUSD.toFixed(2)})</span>
+                  <span className="text-[10px] text-amber-300 font-medium block mt-0.5">🛵 Envío (${deliveryFeeUSD.toFixed(2)})</span>
                 )}
               </div>
             </div>
             <div className="text-right">
-              <span className="block font-bold text-sm">{formatPrice(!qrTable ? grandTotalUSD : cartTotal)}</span>
-              <span className="block text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(!qrTable ? grandTotalUSD : cartTotal))}</span>
+              <span className="block font-black text-sm">{formatPrice(!qrTable ? grandTotalUSD : cartTotal)}</span>
+              <span className="block text-[10px] text-slate-300 font-bold">{formatBs(toBolivares(!qrTable ? grandTotalUSD : cartTotal))}</span>
             </div>
           </button>
-        </div>
+        </motion.div>
       )}
 
       {/* CART SLIDE-OVER MODAL */}

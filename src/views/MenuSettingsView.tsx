@@ -196,6 +196,19 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   const [brandColorInput, setBrandColorInput] = useState<string>((settings as any)?.brandColor || '#2563eb');
   const [sidebarThemeInput, setSidebarThemeInput] = useState<'minimalist' | 'brand' | 'dark'>((settings as any)?.sidebarTheme || 'minimalist');
   const [bgThemeInput, setBgThemeInput] = useState<'kinetic' | 'warm_silk' | 'pure_white' | 'dark_luxury'>((settings as any)?.bgTheme || 'kinetic');
+
+  const updateThemeInstantly = async (sidebarThemeVal: string, bgThemeVal: string, brandColorVal: string) => {
+    try {
+      await setDoc(doc(db, 'settings', 'general'), {
+        sidebarTheme: sidebarThemeVal,
+        bgTheme: bgThemeVal,
+        brandColor: brandColorVal
+      }, { merge: true });
+      window.dispatchEvent(new Event('settings_updated'));
+    } catch (e) {
+      console.error('Error auto saving theme:', e);
+    }
+  };
   const [deliveryEnabledInput, setDeliveryEnabledInput] = useState(true);
   const [minDeliveryOrderEnabledInput, setMinDeliveryOrderEnabledInput] = useState<boolean>(
     (settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false
@@ -685,6 +698,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       const detailsStr = changes.length > 0 ? changes.join(' | ') : `Nombre: ${restaurantNameInput} | Estado: ${storeStatusInput}`;
 
       await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración general', detailsStr);
+      window.dispatchEvent(new Event('settings_updated'));
+      window.dispatchEvent(new Event('storage'));
       alert('Configuración general actualizada correctamente');
     } catch(err) { alert('Error guardando configuración general'); }
   };
@@ -1315,7 +1330,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       <button
                         key={c.hex}
                         type="button"
-                        onClick={() => setBrandColorInput(c.hex)}
+                        onClick={() => {
+                          setBrandColorInput(c.hex);
+                          updateThemeInstantly(sidebarThemeInput, bgThemeInput, c.hex);
+                        }}
                         className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
                           isSelected
                             ? 'bg-blue-50/60 border-blue-600 ring-2 ring-blue-600/20 shadow-2xs font-extrabold'
@@ -1343,13 +1361,21 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                     <input
                       type="color"
                       value={brandColorInput.startsWith('#') ? brandColorInput : '#2563eb'}
-                      onChange={e => setBrandColorInput(e.target.value)}
+                      onChange={e => {
+                        setBrandColorInput(e.target.value);
+                        updateThemeInstantly(sidebarThemeInput, bgThemeInput, e.target.value);
+                      }}
                       className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer p-0 bg-transparent shrink-0"
                     />
                     <input
                       type="text"
                       value={brandColorInput}
-                      onChange={e => setBrandColorInput(e.target.value)}
+                      onChange={e => {
+                        setBrandColorInput(e.target.value);
+                        if (e.target.value.length === 7) {
+                          updateThemeInstantly(sidebarThemeInput, bgThemeInput, e.target.value);
+                        }
+                      }}
                       placeholder="#2563eb"
                       className="w-32 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-600"
                     />
@@ -1392,9 +1418,13 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                         key={item.id}
                         type="button"
                         onClick={() => {
-                          setSidebarThemeInput(item.id as any);
-                          if (item.id === 'dark') setBgThemeInput('dark_luxury');
-                          else if (bgThemeInput === 'dark_luxury') setBgThemeInput('kinetic');
+                          const nextSidebar = item.id;
+                          let nextBg = bgThemeInput;
+                          if (nextSidebar === 'dark') nextBg = 'dark_luxury';
+                          else if (bgThemeInput === 'dark_luxury') nextBg = 'kinetic';
+                          setSidebarThemeInput(nextSidebar as any);
+                          setBgThemeInput(nextBg as any);
+                          updateThemeInstantly(nextSidebar, nextBg, brandColorInput);
                         }}
                         className={`p-4 rounded-2xl border text-left space-y-1 transition-all cursor-pointer ${
                           isSelected
@@ -1437,6 +1467,11 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       id: 'pure_white',
                       title: 'Blanco Puro (#ffffff)',
                       sub: 'Máximo contraste inmaculado'
+                    },
+                    {
+                      id: 'dark_luxury',
+                      title: 'Dark Luxury (#0b0f17)',
+                      sub: 'Fondo oscuro de lujo y alto contraste'
                     }
                   ].map(item => {
                     const isSelected = bgThemeInput === item.id;
@@ -1444,7 +1479,14 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => setBgThemeInput(item.id as any)}
+                        onClick={() => {
+                          const nextBg = item.id;
+                          setBgThemeInput(nextBg as any);
+                          let nextSidebar = sidebarThemeInput;
+                          if (nextBg === 'dark_luxury') nextSidebar = 'dark';
+                          setSidebarThemeInput(nextSidebar as any);
+                          updateThemeInstantly(nextSidebar, nextBg, brandColorInput);
+                        }}
                         className={`p-4 rounded-2xl border text-left space-y-1 transition-all cursor-pointer ${
                           isSelected
                             ? 'bg-blue-50/60 border-blue-600 ring-2 ring-blue-600/20 shadow-2xs'

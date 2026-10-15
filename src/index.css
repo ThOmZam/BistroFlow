@@ -8,3 +8,80 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ===================================================
+   DARK LUXURY GLOBAL MODE OVERRIDES
+   =================================================== */
+html.dark, body.dark {
+  background-color: #090D16 !important;
+  color: #F8FAFC !important;
+  color-scheme: dark;
+}
+
+/* Main background fields in dark mode */
+html.dark .bg-\[\#F8F9FA\],
+html.dark .bg-\[\#faf7f2\],
+html.dark .bg-\[\#FAF7F2\] {
+  background-color: #090D16 !important;
+  color: #F8FAFC !important;
+}
+
+/* White Cards, Panels & Containers turn into Dark Luxury Surfaces */
+html.dark .bg-white {
+  background-color: #111726 !important;
+  color: #F8FAFC !important;
+  border-color: #1E293B !important;
+}
+
+/* Soft Slate/Gray background containers */
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/70,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-100,
+html.dark .bg-slate-100\/90 {
+  background-color: #182234 !important;
+  color: #F8FAFC !important;
+  border-color: #26354D !important;
+}
+
+/* High contrast typography in Dark Luxury */
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-950,
+html.dark .text-black {
+  color: #F8FAFC !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-slate-600 {
+  color: #CBD5E1 !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #94A3B8 !important;
+}
+
+/* Borders in Dark Luxury */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/70,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/90,
+html.dark .border-slate-300 {
+  border-color: #222F46 !important;
+}
+
+/* Form Inputs in Dark Luxury */
+html.dark input:not([type="color"]),
+html.dark select,
+html.dark textarea {
+  background-color: #162032 !important;
+  color: #FFFFFF !important;
+  border-color: #2A3B56 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748B !important;
+}

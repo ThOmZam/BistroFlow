@@ -42,6 +42,8 @@ export default function App() {
   const [fallbackRole, setFallbackRole] = useState<string | null>(localStorage.getItem('demo_fallback_role'));
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [kitchenOrdersCount, setKitchenOrdersCount] = useState(0);
+  const [hasActiveClockIn, setHasActiveClockIn] = useState<boolean>(true);
 
   const { tables, exchangeRate, settings } = useRestaurantData();
   const { activeCurrency, currentRateBs, currencySymbol } = useCurrency();
@@ -91,10 +93,6 @@ export default function App() {
   const occupiedTables = tables.filter(t => t.status === 'occupied').length;
   const totalTables = tables.length || 1;
   const occupancyPercent = Math.round((occupiedTables / totalTables) * 100);
-
-  // Dynamic active orders in kitchen queue
-  const [kitchenOrdersCount, setKitchenOrdersCount] = useState(0);
-  const [hasActiveClockIn, setHasActiveClockIn] = useState<boolean>(true);
 
   // Listen to employee active clock-in status
   useEffect(() => {
@@ -198,6 +196,19 @@ export default function App() {
     setCurrentUser(null);
   };
 
+  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
+  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
+  
+  const isDarkApp = bgTheme === 'dark_luxury' || sidebarTheme === 'dark';
+
+  useEffect(() => {
+    if (isDarkApp) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkApp]);
+
   useKeyboardShortcuts({
     onOpenSearch: () => setIsSearchOpen(true),
     onOpenShortcuts: () => setIsShortcutsOpen(true),
@@ -220,9 +231,17 @@ export default function App() {
 
   const isOperationalView = ['waiter', 'kitchen', 'caja', 'dashboard', 'chat'].includes(activeView);
   const isBlockedByClockIn = currentUser.role !== 'admin' && !hasActiveClockIn && isOperationalView;
+  
+  const appBgClass = isDarkApp 
+    ? 'bg-[#090D16] text-slate-100' 
+    : bgTheme === 'warm_silk' 
+      ? 'bg-[#FAF7F2] text-slate-900' 
+      : bgTheme === 'pure_white' 
+        ? 'bg-[#FFFFFF] text-slate-900' 
+        : 'bg-[#F8F9FA] text-slate-900';
 
   return (
-    <div className="flex flex-col md:flex-row h-screen h-[100dvh] bg-[#F8F9FA] overflow-hidden text-[#000000] font-sans">
+    <div className={`flex flex-col md:flex-row h-screen h-[100dvh] overflow-hidden font-sans transition-colors ${appBgClass}`}>
       <Sidebar 
         role={currentUser.role} 
         onLogout={handleLogout} 
@@ -235,13 +254,14 @@ export default function App() {
       />
       
       {/* Right Content Column: Fixed Top Header + Main Content View */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-[#F8F9FA]">
+      <div className={`flex-1 flex flex-col min-w-0 h-full overflow-hidden transition-colors ${appBgClass}`}>
         {/* Global Superior Top Bar - Flush Edge to Edge */}
         <TopBar 
           onOpenSearch={() => setIsSearchOpen(true)} 
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           currentUser={currentUser}
           activeView={activeView}
+          onViewChange={setActiveView}
           restaurantName={settings?.restaurantName || 'Q\' Sandwich'}
           logoUrl={(settings as any)?.logoUrl || ''}
         />

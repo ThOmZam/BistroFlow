@@ -378,6 +378,13 @@ export default function Sidebar({
 
   const moreHasBadge = moreToolsList.some(tool => !!tool.badge);
 
+  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
+  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
+  const brandColor = (settings as any)?.brandColor || '#2563eb';
+
+  const isDarkSidebar = sidebarTheme === 'dark' || bgTheme === 'dark_luxury';
+  const isBrandSidebar = sidebarTheme === 'brand';
+
   return (
     <>
       {/* Desktop Sidebar */}
@@ -385,21 +392,40 @@ export default function Sidebar({
         initial={false}
         animate={{ width: isCollapsed ? 80 : 272 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className="hidden md:flex h-screen bg-white border-r border-slate-100 flex-col relative z-50 shadow-xs select-none shrink-0"
+        style={isBrandSidebar ? { backgroundColor: brandColor } : undefined}
+        className={`hidden md:flex h-screen flex-col relative z-50 select-none shrink-0 transition-colors ${
+          isDarkSidebar 
+            ? 'bg-[#0B0F17] text-white border-r border-slate-800/80 shadow-2xl' 
+            : isBrandSidebar 
+              ? 'text-white border-r border-white/10 shadow-2xl' 
+              : 'bg-white text-slate-900 border-r border-slate-100 shadow-xs'
+        }`}
       >
         {/* Top Header: Business Logo, Name, Slogan & Collapse Toggle */}
-        <div className={`pt-5 pb-3 border-b border-slate-100/70 transition-all ${isCollapsed ? 'px-3 flex flex-col items-center justify-center' : 'px-4 flex items-center justify-between gap-2.5'}`}>
+        <div className={`pt-5 pb-3 transition-all ${
+          isDarkSidebar 
+            ? 'border-b border-slate-800/70' 
+            : isBrandSidebar 
+              ? 'border-b border-white/15' 
+              : 'border-b border-slate-100/70'
+        } ${isCollapsed ? 'px-3 flex flex-col items-center justify-center' : 'px-4 flex items-center justify-between gap-2.5'}`}>
           {isCollapsed ? (
             <div className="flex flex-col items-center gap-2">
               <button 
                 onClick={toggleCollapse}
                 title="Expandir menú"
-                className="w-11 h-11 rounded-full border border-slate-100 bg-[#EEF4FF] overflow-hidden flex items-center justify-center shadow-xs hover:ring-2 hover:ring-blue-200 transition-all cursor-pointer group"
+                className={`w-11 h-11 rounded-full border overflow-hidden flex items-center justify-center shadow-xs transition-all cursor-pointer group ${
+                  isDarkSidebar 
+                    ? 'border-slate-800 bg-slate-900 text-white' 
+                    : isBrandSidebar 
+                      ? 'border-white/20 bg-white/10 text-white' 
+                      : 'border-slate-100 bg-[#EEF4FF] text-blue-600'
+                }`}
               >
                 {logoUrl ? (
                   <img src={logoUrl} alt={restaurantName} className="w-full h-full object-cover" />
                 ) : (
-                  <span className="font-black text-blue-600 text-sm group-hover:scale-110 transition-transform">
+                  <span className="font-black text-sm group-hover:scale-110 transition-transform">
                     {restaurantName.charAt(0).toUpperCase()}
                   </span>
                 )}
@@ -409,11 +435,17 @@ export default function Sidebar({
             <>
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 {/* Circular Brand Avatar */}
-                <div className="w-11 h-11 rounded-full border border-slate-100 bg-[#EEF4FF] overflow-hidden flex items-center justify-center shadow-xs shrink-0">
+                <div className={`w-11 h-11 rounded-full border overflow-hidden flex items-center justify-center shadow-xs shrink-0 ${
+                  isDarkSidebar 
+                    ? 'border-slate-800 bg-slate-900 text-white' 
+                    : isBrandSidebar 
+                      ? 'border-white/20 bg-white/10 text-white' 
+                      : 'border-slate-100 bg-[#EEF4FF] text-blue-600'
+                }`}>
                   {logoUrl ? (
                     <img src={logoUrl} alt={restaurantName} className="w-full h-full object-cover" />
                   ) : (
-                    <span className="font-black text-blue-600 text-base">
+                    <span className="font-black text-base">
                       {restaurantName.charAt(0).toUpperCase()}
                     </span>
                   )}
@@ -421,10 +453,14 @@ export default function Sidebar({
 
                 {/* Brand Name & Tagline */}
                 <div className="min-w-0 flex-1">
-                  <h1 className="font-black text-slate-900 text-sm tracking-tight truncate leading-tight">
+                  <h1 className={`font-black text-sm tracking-tight truncate leading-tight ${
+                    isDarkSidebar || isBrandSidebar ? 'text-white' : 'text-slate-900'
+                  }`}>
                     {restaurantName}
                   </h1>
-                  <p className="text-[9.5px] font-bold text-slate-400 tracking-wider uppercase truncate mt-0.5">
+                  <p className={`text-[9.5px] font-bold tracking-wider uppercase truncate mt-0.5 ${
+                    isDarkSidebar ? 'text-slate-400' : isBrandSidebar ? 'text-white/70' : 'text-slate-400'
+                  }`}>
                     {slogan}
                   </p>
                 </div>
@@ -433,7 +469,13 @@ export default function Sidebar({
               {/* Collapse Round Button */}
               <button 
                 onClick={toggleCollapse}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors shrink-0"
+                className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                  isDarkSidebar 
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' 
+                    : isBrandSidebar 
+                      ? 'bg-white/20 hover:bg-white/30 text-white' 
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-500'
+                }`}
                 title="Contraer menú"
               >
                 <ChevronLeft size={15} strokeWidth={2.5} />
@@ -448,11 +490,15 @@ export default function Sidebar({
             <div key={section.category} className="space-y-0.5">
               {/* Section Header or Divider */}
               {!isCollapsed ? (
-                <div className={`text-[10px] font-bold text-slate-400 tracking-wider px-3.5 uppercase ${sectionIdx === 0 ? 'pt-1.5 pb-1.5' : 'pt-3 pb-1.5'}`}>
+                <div className={`text-[10px] font-bold tracking-wider px-3.5 uppercase ${
+                  isDarkSidebar ? 'text-slate-500' : isBrandSidebar ? 'text-white/60' : 'text-slate-400'
+                } ${sectionIdx === 0 ? 'pt-1.5 pb-1.5' : 'pt-3 pb-1.5'}`}>
                   {section.category}
                 </div>
               ) : (
-                sectionIdx > 0 && <div className="w-8 mx-auto my-2 border-t border-slate-200/60" />
+                sectionIdx > 0 && <div className={`w-8 mx-auto my-2 border-t ${
+                  isDarkSidebar ? 'border-slate-800' : isBrandSidebar ? 'border-white/20' : 'border-slate-200/60'
+                }`} />
               )}
 
               {/* Section Items */}
@@ -462,40 +508,49 @@ export default function Sidebar({
                 const isDot = item.badge === '•';
                 const IconComponent = item.icon;
 
+                const buttonClass = isSelected
+                  ? isBrandSidebar
+                    ? 'bg-white text-slate-900 font-black shadow-md'
+                    : isDarkSidebar
+                      ? 'bg-blue-600 text-white font-bold shadow-lg shadow-blue-600/30'
+                      : 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/20'
+                  : isBrandSidebar
+                    ? 'text-white/80 hover:bg-white/15 hover:text-white font-medium'
+                    : isDarkSidebar
+                      ? 'text-slate-400 hover:bg-slate-800/60 hover:text-white font-medium'
+                      : 'text-slate-600 font-medium hover:bg-slate-100/80 hover:text-slate-900';
+
                 return (
                   <button
                     key={item.id}
                     onClick={() => onViewChange(item.id)}
                     title={isCollapsed ? item.label : undefined}
+                    style={isSelected && !isBrandSidebar && brandColor ? { backgroundColor: brandColor } : undefined}
                     className={`w-full flex items-center transition-all relative ${
                       isCollapsed 
-                        ? 'justify-center p-2.5 rounded-2xl my-0.5' 
-                        : 'gap-3.5 px-3.5 py-2.5 rounded-2xl my-0.5 text-left'
-                    } ${
-                      isSelected 
-                        ? 'bg-[#EEF4FF] text-blue-600 font-bold shadow-xs' 
-                        : 'text-slate-600 font-medium hover:bg-slate-50 hover:text-slate-900'
-                    }`}
+                        ? 'justify-center p-2.5 rounded-full my-0.5' 
+                        : 'gap-3.5 px-4 py-2.5 rounded-full my-0.5 text-left'
+                    } ${buttonClass}`}
                   >
-                    {/* Active Curved Left Indicator Accent (Exact Match to Screenshot) */}
+                    {/* Active Curved Left Indicator Accent */}
                     {isSelected && (
-                      <span className={`absolute left-0 bg-blue-600 rounded-r-full ${
-                        isCollapsed ? 'top-2 bottom-2 w-1' : 'top-1.5 bottom-1.5 w-1'
-                      }`} />
+                      <span className="absolute left-0 bg-white/80 rounded-r-full top-2 bottom-2 w-1" />
                     )}
 
                     {/* Icon with notification badge */}
                     <div className="relative shrink-0 flex items-center justify-center">
                       <IconComponent 
-                        size={20} 
+                        size={19} 
                         className={`transition-colors ${
-                          isSelected ? 'text-blue-600 stroke-[2.25]' : 'text-slate-400 stroke-[1.85]'
+                          isSelected 
+                            ? isBrandSidebar ? 'text-slate-900 stroke-[2.5]' : 'text-white stroke-[2.25]' 
+                            : isDarkSidebar ? 'text-slate-400 stroke-[1.85]' : isBrandSidebar ? 'text-white/80 stroke-[1.85]' : 'text-slate-500 stroke-[1.85]'
                         }`} 
                       />
                       {hasBadge && (
                         <span className={`absolute -top-1.5 -right-1.5 rounded-full flex items-center justify-center font-black leading-none ${
                           isDot 
-                            ? 'w-2 h-2 bg-emerald-500 ring-2 ring-white' 
+                            ? 'w-2 h-2 bg-emerald-400 ring-2 ring-blue-600' 
                             : 'text-[8.5px] min-w-4 h-4 px-1 bg-rose-500 text-white ring-2 ring-white shadow-xs'
                         }`}>
                           {!isDot && item.badge}
@@ -506,7 +561,9 @@ export default function Sidebar({
                     {/* Label */}
                     {!isCollapsed && (
                       <span className={`text-xs truncate tracking-tight ${
-                        isSelected ? 'font-bold text-blue-600' : 'font-medium text-slate-700'
+                        isSelected 
+                          ? isBrandSidebar ? 'font-black text-slate-900' : 'font-bold text-white' 
+                          : 'font-medium'
                       }`}>
                         {item.label}
                       </span>
@@ -588,78 +645,76 @@ export default function Sidebar({
         </div>
       </motion.aside>
 
-      {/* Mobile Bottom Navigation Bar: Exact match to Screenshot 1 */}
+      {/* Mobile Suspended Floating Pill Navigation Dock (Menú Flotante Píldora) */}
       {!isInsideTable && (
         <>
-          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200/90 z-50 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-            <div className="grid grid-cols-5 items-center justify-items-center px-1 select-none w-full">
-              {mobilePrimaryTabs.map((item) => {
-                const isSelected = activeView === item.id && !isMobileMoreOpen;
-                const hasBadge = !!item.badge;
-                const IconComponent = item.icon;
+          <nav className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white backdrop-blur-xl border border-slate-800/90 shadow-[0_16px_40px_rgba(0,0,0,0.35)] rounded-full px-2 py-1.5 flex items-center justify-between gap-1 w-[94vw] max-w-md ring-1 ring-white/10 select-none">
+            {mobilePrimaryTabs.map((item) => {
+              const isSelected = activeView === item.id && !isMobileMoreOpen;
+              const hasBadge = !!item.badge;
+              const IconComponent = item.icon;
 
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setIsMobileMoreOpen(false);
-                      onViewChange(item.id);
-                    }}
-                    className="w-full flex items-center justify-center cursor-pointer transition-all"
-                  >
-                    <div className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
-                      isSelected 
-                        ? 'bg-blue-50 text-blue-600' 
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}>
-                      <div className="relative mb-0.5">
-                        <IconComponent 
-                          size={22} 
-                          className={isSelected ? 'text-blue-600 stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'} 
-                        />
-                        {hasBadge && (
-                          <span className="absolute -top-1 -right-1.5 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black">
-                            {item.badge}
-                          </span>
-                        )}
-                      </div>
-                      <span className={`text-[11px] tracking-tight text-center ${
-                        isSelected ? 'font-bold text-blue-600' : 'font-medium text-slate-500'
-                      }`}>
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setIsMobileMoreOpen(false);
+                    onViewChange(item.id);
+                  }}
+                  className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                    isSelected 
+                      ? 'bg-blue-600 text-white rounded-full px-3.5 py-1.5 shadow-md shadow-blue-500/30 font-bold scale-[1.03]' 
+                      : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative flex items-center justify-center">
+                      <IconComponent 
+                        size={18} 
+                        className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-300 stroke-[1.8]'} 
+                      />
+                      {hasBadge && (
+                        <span className="absolute -top-1.5 -right-2 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-slate-900">
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && (
+                      <span className="text-xs font-bold tracking-tight whitespace-nowrap">
                         {item.label}
                       </span>
-                    </div>
-                  </button>
-                );
-              })}
-
-              {/* 5th button: "Más" matching Screenshot 1 */}
-              <button
-                onClick={() => setIsMobileMoreOpen(prev => !prev)}
-                className="w-full flex items-center justify-center cursor-pointer transition-all"
-              >
-                <div className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
-                  isMoreSelected || isMobileMoreOpen
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                  <div className="relative mb-0.5">
-                    <Sparkles 
-                      size={22} 
-                      className={isMoreSelected || isMobileMoreOpen ? 'text-blue-600 stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'} 
-                    />
-                    {moreHasBadge && (
-                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
                     )}
                   </div>
-                  <span className={`text-[11px] tracking-tight text-center ${
-                    isMoreSelected || isMobileMoreOpen ? 'font-bold text-blue-600' : 'font-medium text-slate-500'
-                  }`}>
+                </button>
+              );
+            })}
+
+            {/* 5th Pill button: "Más" */}
+            <button
+              onClick={() => setIsMobileMoreOpen(prev => !prev)}
+              className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                isMoreSelected || isMobileMoreOpen
+                  ? 'bg-blue-600 text-white rounded-full px-3.5 py-1.5 shadow-md shadow-blue-500/30 font-bold scale-[1.03]' 
+                  : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex items-center justify-center">
+                  <Sparkles 
+                    size={18} 
+                    className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-300 stroke-[1.8]'} 
+                  />
+                  {moreHasBadge && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900" />
+                  )}
+                </div>
+                {(isMoreSelected || isMobileMoreOpen) && (
+                  <span className="text-xs font-bold tracking-tight whitespace-nowrap">
                     Más
                   </span>
-                </div>
-              </button>
-            </div>
+                )}
+              </div>
+            </button>
           </nav>
 
           {/* Slide-up Sheet for "Más Herramientas" matching Screenshot 2 */}

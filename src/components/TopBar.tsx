@@ -29,6 +29,7 @@ interface TopBarProps {
   onOpenShortcuts: () => void;
   currentUser?: any;
   activeView?: string;
+  onViewChange?: (view: string) => void;
   restaurantName?: string;
   logoUrl?: string;
 }
@@ -50,18 +51,29 @@ const VIEW_LABELS: Record<string, { label: string; icon: any }> = {
   analytics: { label: 'Reportes', icon: TrendingUp },
 };
 
+import { useRestaurantData } from '../hooks/useRestaurantData';
+
 export default function TopBar({ 
   onOpenSearch, 
   onOpenShortcuts, 
   currentUser, 
   activeView,
+  onViewChange,
   restaurantName = "Q' Sandwich",
   logoUrl
 }: TopBarProps) {
   const { activeCurrency, currentRateBs } = useCurrency();
   const { bookmarks } = useBookmarks();
+  const { settings } = useRestaurantData();
   const [unreadCount, setUnreadCount] = useState(0);
   const [isInsideTable, setIsInsideTable] = useState(false);
+
+  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
+  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
+  const brandColor = (settings as any)?.brandColor || '#2563eb';
+
+  const isDark = sidebarTheme === 'dark' || bgTheme === 'dark_luxury';
+  const isBrand = sidebarTheme === 'brand';
 
   // Hide TopBar when waiter is inside a table comanda view
   useEffect(() => {
@@ -99,9 +111,15 @@ export default function TopBar({
   const currentViewInfo = activeView ? VIEW_LABELS[activeView] || { label: activeView, icon: UtensilsCrossed } : null;
 
   return (
-    <header className={`w-full bg-white border-b border-slate-200/90 px-3 sm:px-6 py-2 sm:py-2.5 items-center justify-between gap-2 sm:gap-3 shrink-0 z-30 shadow-2xs ${
-      activeView === 'kitchen' ? 'hidden md:flex' : 'flex'
-    }`}>
+    <header 
+      className={`w-full px-3 sm:px-6 py-2 sm:py-2.5 items-center justify-between gap-2 sm:gap-3 shrink-0 z-30 shadow-2xs transition-colors ${
+        activeView === 'kitchen' ? 'hidden md:flex' : 'flex'
+      } ${
+        isDark 
+          ? 'bg-[#090D16] text-white border-b border-slate-800/80' 
+          : 'bg-white text-slate-900 border-b border-slate-200/90'
+      }`}
+    >
       {/* Left: Mobile Brand Header & Desktop Omnipresent Search Bar */}
       <div className="flex items-center gap-2.5 flex-1 min-w-0 max-w-full md:max-w-md lg:max-w-xl">
         {/* Mobile-only Branding Header (Logo + Restaurant Name + Active Section) */}
@@ -150,6 +168,36 @@ export default function TopBar({
           </button>
         </div>
       </div>
+
+      {/* Desktop Floating Pill Quick Navigation Bar */}
+      {onViewChange && (
+        <div className="hidden xl:flex items-center gap-1 bg-slate-100/90 p-1 rounded-full border border-slate-200/90 shadow-2xs select-none">
+          {[
+            { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
+            { id: 'waiter', label: 'POS', icon: UtensilsCrossed },
+            { id: 'kitchen', label: 'Cocina', icon: ChefHat },
+            { id: 'caja', label: 'Caja', icon: DollarSign },
+            { id: 'inventory', label: 'Stock', icon: Package }
+          ].map(tab => {
+            const isSel = activeView === tab.id;
+            const IconComp = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => onViewChange(tab.id)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isSel 
+                    ? 'bg-slate-900 text-white shadow-xs scale-105' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                }`}
+              >
+                <IconComp size={13} className={isSel ? 'text-amber-400' : 'text-slate-400'} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Right Controls: Tasa de Cambio + Search Button + Quick Actions + User Profile */}
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
