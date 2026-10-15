@@ -16,12 +16,23 @@ interface TopBarProps {
   onOpenSearch: () => void;
   onOpenShortcuts: () => void;
   currentUser?: any;
+  activeView?: string;
 }
 
-export default function TopBar({ onOpenSearch, onOpenShortcuts, currentUser }: TopBarProps) {
+export default function TopBar({ onOpenSearch, onOpenShortcuts, currentUser, activeView }: TopBarProps) {
   const { activeCurrency, currentRateBs } = useCurrency();
   const { bookmarks } = useBookmarks();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isInsideTable, setIsInsideTable] = useState(false);
+
+  // Hide TopBar when waiter is inside a table comanda modal
+  useEffect(() => {
+    const handleTableModal = (e: any) => {
+      setIsInsideTable(!!e.detail?.isOpen);
+    };
+    window.addEventListener('table_modal_state', handleTableModal);
+    return () => window.removeEventListener('table_modal_state', handleTableModal);
+  }, []);
 
   // Listen to live counts broadcast by NotificationManager
   useEffect(() => {
@@ -43,8 +54,14 @@ export default function TopBar({ onOpenSearch, onOpenShortcuts, currentUser }: T
     window.dispatchEvent(new CustomEvent('open_cases_drawer'));
   };
 
+  if (isInsideTable) {
+    return null;
+  }
+
   return (
-    <header className="w-full bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 shrink-0 z-30 shadow-2xs">
+    <header className={`w-full bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 items-center justify-between gap-3 shrink-0 z-30 shadow-2xs ${
+      activeView === 'kds' ? 'hidden md:flex' : 'flex'
+    }`}>
       {/* Left: Global Search Trigger */}
       <div className="flex-1 max-w-md lg:max-w-xl">
         <button

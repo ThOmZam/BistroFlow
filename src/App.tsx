@@ -46,6 +46,33 @@ export default function App() {
   const { tables, exchangeRate, settings } = useRestaurantData();
   const { activeCurrency, currentRateBs, currencySymbol } = useCurrency();
   const [allSessions, setAllSessions] = useState<any[]>([]);
+  const [isInsideTable, setIsInsideTable] = useState(false);
+
+  // Sync with table comanda state to eliminate layout margins and floating modal effect
+  useEffect(() => {
+    const handleTableModal = (e: any) => {
+      setIsInsideTable(!!e.detail?.isOpen);
+    };
+    window.addEventListener('table_modal_state', handleTableModal);
+    return () => window.removeEventListener('table_modal_state', handleTableModal);
+  }, []);
+
+  // Redirect away from kitchen/KDS view if direct print mode without KDS is active
+  useEffect(() => {
+    const handleCheckDirectPrint = () => {
+      const isDirectPrint = localStorage.getItem('kitchenMode') === 'direct_print' || (settings as any)?.kitchenMode === 'direct_print';
+      if ((activeView === 'kitchen' || activeView === 'kds') && isDirectPrint) {
+        setActiveView('dashboard');
+      }
+    };
+    handleCheckDirectPrint();
+    window.addEventListener('settings_updated', handleCheckDirectPrint);
+    window.addEventListener('storage', handleCheckDirectPrint);
+    return () => {
+      window.removeEventListener('settings_updated', handleCheckDirectPrint);
+      window.removeEventListener('storage', handleCheckDirectPrint);
+    };
+  }, [activeView, settings]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'sessions'), (snap) => {
@@ -214,11 +241,18 @@ export default function App() {
           onOpenSearch={() => setIsSearchOpen(true)} 
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           currentUser={currentUser}
+          activeView={activeView}
         />
 
         <NotificationManager currentUser={currentUser} onViewChange={setActiveView} hideFloatingPill={true} />
         
-        <main className="flex-1 overflow-auto p-4 sm:p-6 md:p-8 pb-28 md:pb-8 flex flex-col min-w-0 w-full relative">
+        <main className={`flex-1 flex flex-col min-w-0 w-full relative ${
+          isInsideTable 
+            ? 'p-0 overflow-hidden' 
+            : activeView === 'kds'
+              ? 'overflow-auto p-2 sm:p-4 md:p-6 pb-20 md:pb-6'
+              : 'overflow-auto p-4 sm:p-6 md:p-8 pb-28 md:pb-8'
+        }`}>
 
         {isBlockedByClockIn ? (
           <div className="flex-1 flex items-center justify-center p-4 md:p-8">
@@ -276,7 +310,7 @@ export default function App() {
             
             {activeView === 'waiter' && <WaiterView currentUser={currentUser} />}
             {activeView === 'kitchen' && <KDSView currentUser={currentUser} />}
-            {activeView === 'caja' && <CajaView currentUser={currentUser} />}
+            {activeView === 'caja' && <CajaView currentUser={currentUser} onViewChange={setActiveView} />}
             {activeView === 'finance' && currentUser.role === 'admin' && <FinanceView />}
             {activeView === 'inventory' && currentUser.role === 'admin' && <InventoryView />}
             {activeView === 'analytics' && currentUser.role === 'admin' && <AdminView currentUser={currentUser} />}

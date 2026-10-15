@@ -79,6 +79,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     window.addEventListener('select_table', handleSelectTable);
     return () => window.removeEventListener('select_table', handleSelectTable);
   }, [tables]);
+
+  // Notify TopBar to hide global search bar when inside a table comanda
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('table_modal_state', { detail: { isOpen: !!selectedTable } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('table_modal_state', { detail: { isOpen: false } }));
+    };
+  }, [selectedTable]);
   const [cart, setCart] = useState<{ 
     item: MenuItem; 
     qty: number; 
@@ -102,6 +110,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [activeShift, setActiveShift] = useState<any | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
+  const [showMenuSearch, setShowMenuSearch] = useState(false);
   const [tableFilter, setTableFilter] = useState<'all' | 'free' | 'occupied' | 'ready'>('all');
   const [showReadyDetails, setShowReadyDetails] = useState(true);
   const { isBookmarked, toggleBookmark } = useBookmarks();
@@ -289,6 +298,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     }
 
     setIsSubmittingDelivery(true);
+    if (!activeShift) {
+      playErrorSound();
+      alert('⚠️ Caja Cerrada: No hay un turno de caja abierto por el cajero aún. Solicita al cajero que abra la caja para poder tomar pedidos.');
+      setIsSubmittingDelivery(false);
+      return;
+    }
     try {
       const activeZone = deliveryZones.find(z => z.id === selectedZoneId) || deliveryZones[0];
       const isDeliveryMode = deliveryType === 'delivery';
@@ -344,6 +359,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const startSession = async (table: Table) => {
     if (isSubmittingStartSession) return;
     if (!firstAccountName.trim()) return;
+
+    if (!activeShift) {
+      playErrorSound();
+      alert('⚠️ Caja Cerrada: No hay un turno de caja abierto por el cajero aún. Solicita al cajero que abra la caja antes de abrir mesas y comendar.');
+      return;
+    }
     
     // Prevent duplicate sessions
     if (activeSessions.some(s => s.tableId === table.id)) {
@@ -434,6 +455,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
   const sendOrder = async () => {
     if (isSendingOrder || !selectedTable || cart.length === 0) return;
+    if (!activeShift) {
+      playErrorSound();
+      alert('⚠️ Caja Cerrada: No hay un turno de caja abierto por el cajero aún. Solicita al cajero que abra la caja en Control de Caja para poder enviar comandas.');
+      return;
+    }
     const session = getSessionForTable(selectedTable.id);
     if (!session) return;
 
@@ -446,7 +472,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
       await logAction('order', waiterName, 'Envió un pedido a cocina', `Mesa ${selectedTable.number}: ${itemNames}`);
 
-      const initialStatus = (settings as any)?.kitchenMode === 'direct_print' ? 'enviado' : 'pending';
+      const isDirectPrint = (settings as any)?.kitchenMode === 'direct_print' || localStorage.getItem('kitchenMode') === 'direct_print';
+      const initialStatus = isDirectPrint ? 'ready' : 'pending';
       let addedAmount = 0;
       const printedItems: KitchenTicketItem[] = [];
 
@@ -787,6 +814,12 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     });
     return () => unsub();
   }, [viewingDeliveryInfo]);
+
+  // Sync full-screen view state across all active waiter panels (tables, deliveries, customization)
+  React.useEffect(() => {
+    const isAnyPanelOpen = !!selectedTable || isCreatingDelivery || !!isEditingDeliveryInfo || !!viewingDeliveryInfo || !!selectedItem;
+    window.dispatchEvent(new CustomEvent('table_modal_state', { detail: { isOpen: isAnyPanelOpen } }));
+  }, [selectedTable, isCreatingDelivery, isEditingDeliveryInfo, viewingDeliveryInfo, selectedItem]);
 
   // Credit registration states
   const [clients, setClients] = useState<any[]>([]);
@@ -1435,68 +1468,72 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       <div className="flex-1 flex gap-8 min-h-0">
         {/* Left: Table Map & Delivery */}
         <div className={`flex-1 overflow-hidden flex flex-col transition-all duration-300 ${selectedTable ? 'hidden lg:flex lg:mr-[540px] xl:mr-[600px]' : 'flex'}`}>
-          {/* TOP METRICS & STATS SUMMARY BAR */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 shrink-0">
+          {/* TOP METRICS & STATS SUMMARY BAR - ULTRA COMPACT TO MAXIMIZE TABLE VISIBILITY */}
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-3 mb-2 sm:mb-3.5 shrink-0">
             {/* Stat 1: Libres */}
-            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Libres</span>
-                <span className="text-lg font-black text-slate-800">
-                  {tables.filter(t => t.status === 'free').length} <span className="text-xs font-bold text-slate-400">/ {tables.length}</span>
+            <div className="bg-white/90 backdrop-blur-xs p-1.5 sm:p-2.5 rounded-xl border border-slate-200/80 shadow-2xs flex items-center justify-between min-w-0">
+              <div className="min-w-0">
+                <span className="text-[8px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-tight block truncate">Libres</span>
+                <span className="text-xs sm:text-base font-black text-slate-800 leading-tight">
+                  {tables.filter(t => t.status === 'free').length}<span className="text-[9px] sm:text-xs font-semibold text-slate-400">/{tables.length}</span>
                 </span>
               </div>
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-                <Users size={18} />
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0 ml-1">
+                <Users size={12} className="sm:hidden" />
+                <Users size={16} className="hidden sm:block" />
               </div>
             </div>
 
             {/* Stat 2: Ocupadas */}
-            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Ocupadas</span>
-                <span className="text-lg font-black text-rose-600">
+            <div className="bg-white/90 backdrop-blur-xs p-1.5 sm:p-2.5 rounded-xl border border-slate-200/80 shadow-2xs flex items-center justify-between min-w-0">
+              <div className="min-w-0">
+                <span className="text-[8px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-tight block truncate">Ocupadas</span>
+                <span className="text-xs sm:text-base font-black text-rose-600 leading-tight">
                   {tables.filter(t => t.status !== 'free').length}
                 </span>
               </div>
-              <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
-                <Clock size={18} />
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center font-bold shrink-0 ml-1">
+                <Clock size={12} className="sm:hidden" />
+                <Clock size={16} className="hidden sm:block" />
               </div>
             </div>
 
             {/* Stat 3: Platos Listos */}
-            <div className="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Platos Listos</span>
-                <span className="text-lg font-black text-emerald-600 flex items-center gap-1">
+            <div className="bg-white/90 backdrop-blur-xs p-1.5 sm:p-2.5 rounded-xl border border-slate-200/80 shadow-2xs flex items-center justify-between min-w-0">
+              <div className="min-w-0">
+                <span className="text-[8px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-tight block truncate">Listos</span>
+                <span className="text-xs sm:text-base font-black text-emerald-600 leading-tight flex items-center gap-0.5">
                   {readyOrdersList.length}
-                  {readyOrdersList.length > 0 && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />}
+                  {readyOrdersList.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block" />}
                 </span>
               </div>
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-                <Zap size={18} />
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shrink-0 ml-1">
+                <Zap size={12} className="sm:hidden" />
+                <Zap size={16} className="hidden sm:block" />
               </div>
             </div>
 
             {/* Stat 4: Delivery / Llevar */}
-            <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-3 rounded-2xl shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-extrabold uppercase text-slate-300 tracking-wider block">Delivery / Llevar</span>
-                <span className="text-lg font-black text-amber-400">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-1.5 sm:p-2.5 rounded-xl shadow-2xs flex items-center justify-between min-w-0">
+              <div className="min-w-0">
+                <span className="text-[8px] sm:text-[10px] font-extrabold uppercase text-slate-300 tracking-tight block truncate">Delivery</span>
+                <span className="text-xs sm:text-base font-black text-amber-400 leading-tight">
                   {activeSessions.filter(s => s.type === 'delivery').length}
                 </span>
               </div>
               <button
                 onClick={() => setIsCreatingDelivery(true)}
-                className="w-9 h-9 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center font-extrabold transition-all active:scale-95 cursor-pointer shadow-md"
+                className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center font-extrabold transition-all active:scale-95 cursor-pointer shrink-0 ml-1 shadow-xs"
                 title="Nuevo Pedido Delivery"
               >
-                <Plus size={18} />
+                <Plus size={12} className="sm:hidden" />
+                <Plus size={16} className="hidden sm:block" />
               </button>
             </div>
           </div>
 
           {/* HEADER & TABLE STATUS FILTER */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 shrink-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-2.5 sm:mb-4 shrink-0">
             <div className="flex items-center gap-2">
               <div className="p-2 bg-black text-white rounded-xl shadow-sm">
                 <Sparkles size={16} />
@@ -1747,75 +1784,70 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       <AnimatePresence>
         {selectedTable && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.99 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.99 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-30 bg-[#F8F9FA] flex flex-col overflow-hidden"
+            className="absolute inset-0 z-40 bg-[#F8F9FA] flex flex-col overflow-hidden"
           >
-              <div className="p-3.5 sm:p-5 border-b border-slate-200/60 flex items-center justify-between shrink-0 bg-[#F8F9FA] backdrop-blur-sm z-10">
-                <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-2 sm:p-2.5 pt-[max(0.6rem,env(safe-area-inset-top))] border-b border-slate-200 bg-white flex items-center justify-between gap-2 shrink-0 z-10 shadow-xs overflow-x-auto">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <button 
                     onClick={() => {
                       setSelectedTable(null);
                       setFirstAccountName('');
                     }}
-                    className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"
-                    title="Volver al mapa de mesas"
+                    className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-colors text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                    title="Volver"
                   >
                     <ArrowLeft size={16} />
                     <span>Atrás</span>
                   </button>
-                  <div>
-                    <h3 className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight flex items-center gap-2">
-                      <span>{selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}</span>
-                      <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                        !getSessionForTable(selectedTable.id)
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : selectedTable.status === 'free' 
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                            : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {!getSessionForTable(selectedTable.id) ? 'Fase 1: Apertura' : 'Fase 2: Comanda Activa'}
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="font-extrabold text-xs sm:text-sm text-slate-950">
+                      {selectedTable.id.startsWith('delivery-') ? 'Llevar: ' : 'Mesa '}{selectedTable.number}
+                    </span>
+                    {getSessionForTable(selectedTable.id)?.customerName && (
+                      <span className="text-xs bg-indigo-50 text-indigo-800 font-extrabold px-2 py-0.5 rounded-lg border border-indigo-200/60 truncate max-w-[120px]">
+                        👤 {getSessionForTable(selectedTable.id).customerName}
                       </span>
-                    </h3>
-                    <p className="text-slate-400 text-[10px] sm:text-xs">
-                      {!getSessionForTable(selectedTable.id)
-                        ? 'Paso 1 de 2: Registro del titular de la mesa'
-                        : `Comanda de ${getSessionForTable(selectedTable.id)?.customerName || 'Mesa'} • Carga de pedidos`}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="hidden sm:flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-2xl border border-slate-200/60 text-xs font-bold">
-                    <span className={`px-2.5 py-0.5 rounded-xl transition-all ${
-                      !getSessionForTable(selectedTable.id) 
-                        ? 'bg-black text-white shadow-xs' 
-                        : 'text-slate-400'
-                    }`}>
-                      1. Apertura
-                    </span>
-                    <ChevronRight size={12} className="text-slate-400" />
-                    <span className={`px-2.5 py-0.5 rounded-xl transition-all ${
-                      getSessionForTable(selectedTable.id) 
-                        ? 'bg-emerald-600 text-white shadow-xs' 
-                        : 'text-slate-400'
-                    }`}>
-                      2. Comanda
-                    </span>
+                    )}
                   </div>
 
-                  <button 
-                    onClick={() => {
-                      setSelectedTable(null);
-                      setFirstAccountName('');
-                    }}
-                    className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-black rounded-xl transition-all text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  >
-                    <X size={14} />
-                    <span>Cerrar</span>
-                  </button>
+                  {/* Account pills directly in header bar for Phase 2 dine-in */}
+                  {!selectedTable.id.startsWith('delivery-') && getSessionForTable(selectedTable.id) && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-none flex-1">
+                      {(getSessionForTable(selectedTable.id)?.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }]).map((acc: any) => {
+                        const isActive = activeAccountId === acc.id;
+                        const isPaid = acc.status === 'paid';
+                        return (
+                          <button
+                            key={acc.id}
+                            disabled={isPaid}
+                            onClick={() => setActiveAccountId(acc.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 border shrink-0 ${
+                              isActive
+                                ? 'bg-black text-white border-black'
+                                : isPaid 
+                                  ? 'bg-slate-100 text-slate-400 border-slate-200 line-through cursor-not-allowed'
+                                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${isPaid ? 'bg-slate-300' : isActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                            <span>{acc.name}</span>
+                          </button>
+                        );
+                      })}
+                      <button 
+                        onClick={() => setIsAddingAccount(true)}
+                        className="text-[11px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 px-2.5 py-1 rounded-lg font-bold flex items-center gap-0.5 shrink-0"
+                        title="Agregar Persona"
+                      >
+                        <Plus size={12} /> +Persona
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1955,13 +1987,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
             )}
 
             {!getSessionForTable(selectedTable.id) ? (
-              <div className="flex-1 overflow-y-auto bg-gradient-to-b from-slate-50/70 to-white flex flex-col items-center justify-center p-4 sm:p-8">
-                <motion.div 
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="w-full max-w-lg bg-white rounded-3xl sm:rounded-[36px] border border-slate-200/80 shadow-2xl p-6 sm:p-10 space-y-6"
-                >
+              <div className="flex-1 overflow-y-auto bg-[#F8F9FA] flex flex-col items-center justify-start sm:justify-center p-3.5 sm:p-6">
+                <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-8 space-y-5">
                   {/* Stepper Header Pill */}
                   <div className="flex items-center justify-between border-b border-slate-100 pb-5">
                     <div className="flex items-center gap-2.5">
@@ -2087,59 +2114,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       ← Cancelar y Volver al Salón
                     </button>
                   </div>
-                </motion.div>
+                </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
-                {/* HIGH-VISIBILITY ACCOUNT SELECTION BOARD */}
-                {!selectedTable.id.startsWith('delivery-') && (
-                  <div className="bg-slate-50 p-3 sm:p-4 border-b border-slate-100 shrink-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                        Cuentas / Personas en Mesa {selectedTable.number}
-                      </span>
-                      <span className="text-[8px] bg-indigo-50 text-indigo-700 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wide">
-                        Selecciona para ordenar
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(getSessionForTable(selectedTable.id)?.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }]).map((acc: any) => {
-                        const isActive = activeAccountId === acc.id;
-                        const isPaid = acc.status === 'paid';
-                        return (
-                          <button
-                            key={acc.id}
-                            disabled={isPaid}
-                            onClick={() => setActiveAccountId(acc.id)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 border shadow-sm ${
-                              isActive
-                                ? 'bg-black text-white border-black scale-[1.01]'
-                                : isPaid 
-                                  ? 'bg-slate-100 text-slate-400 border-slate-200/50 line-through cursor-not-allowed'
-                                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            <span className={`w-2 h-2 rounded-full ${isPaid ? 'bg-slate-300' : isActive ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-                            <span>{acc.name}</span>
-                            {isPaid && (
-                              <span className="text-[8px] bg-slate-200 text-slate-500 font-black px-1.5 py-0.5 rounded tracking-wider">
-                                PAGADO
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                      <button 
-                        onClick={() => setIsAddingAccount(true)}
-                        className="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100/50 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-all shadow-sm"
-                        title="Dividir cuenta / Agregar Persona"
-                      >
-                        <Plus size={14} /> + Persona
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="flex px-4 border-b border-slate-100 items-center justify-between shrink-0 bg-white">
                   <div className="flex gap-6">
                     <button 
@@ -2171,40 +2149,55 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <>
                     {/* Menu Browser with Search */}
                     <div className="p-2 sm:p-3 border-b border-slate-50 shrink-0 space-y-2 bg-slate-50/40">
-                      <div className="relative">
-                        <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
-                        <input
-                          type="text"
-                          placeholder="Buscar plato o bebida..."
-                          value={menuSearch}
-                          onChange={(e) => setMenuSearch(e.target.value)}
-                          className="w-full pl-9 pr-8 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-black placeholder-slate-400 font-medium"
-                        />
-                        {menuSearch && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 overflow-x-auto flex gap-2 pb-1 scrollbar-none items-center">
+                          {categories.map(cat => (
+                            <button 
+                              key={cat}
+                              onClick={() => setCategory(cat)}
+                              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                                category === cat ? 'bg-black text-white scale-[1.01]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                              }`}
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMenuSearch(!showMenuSearch)}
+                          className={`p-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer ${
+                            showMenuSearch || menuSearch ? 'bg-black text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                          title="Buscar plato"
+                        >
+                          <Search size={14} />
+                        </button>
+                      </div>
+
+                      {(showMenuSearch || menuSearch) && (
+                        <div className="relative pt-1">
+                          <Search size={14} className="absolute left-3 top-3.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar plato o bebida..."
+                            value={menuSearch}
+                            onChange={(e) => setMenuSearch(e.target.value)}
+                            autoFocus
+                            className="w-full pl-9 pr-8 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-black placeholder-slate-400 font-medium"
+                          />
                           <button 
-                            onClick={() => setMenuSearch('')}
-                            className="absolute right-2.5 top-2 text-slate-400 hover:text-black cursor-pointer"
+                            type="button"
+                            onClick={() => { setMenuSearch(''); setShowMenuSearch(false); }}
+                            className="absolute right-2.5 top-3 text-slate-400 hover:text-black cursor-pointer"
                           >
                             <X size={14} />
                           </button>
-                        )}
-                      </div>
-                      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                        {categories.map(cat => (
-                          <button 
-                            key={cat}
-                            onClick={() => setCategory(cat)}
-                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
-                              category === cat ? 'bg-black text-white scale-[1.01]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                            }`}
-                          >
-                            {cat}
-                          </button>
-                        ))}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 content-start pb-44 sm:pb-16">
+                    <div className="flex-1 overflow-y-auto min-h-0 p-2.5 sm:p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 content-start pb-6 sm:pb-6">
                       {filteredMenu.map(item => {
                         const stockAlert = getMenuItemStockAlert(item, ingredients);
                         const isOutOfStock = stockAlert.status === 'out_of_stock';
@@ -2285,17 +2278,17 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Cart / Order Summary */}
                     {cart.length > 0 && (
-                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-200 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1.75rem))] sm:pb-4">
-                        <div className="flex items-center justify-between mb-2">
+                      <div className="p-3 sm:p-4 bg-white border-t border-slate-200 shrink-0 z-20 shadow-[0_-8px_25px_rgba(0,0,0,0.08)] pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-3.5">
+                        <div className="flex items-center justify-between mb-1.5">
                           <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Nuevo Pedido</span>
                           <span className="text-[10px] bg-slate-900 text-white font-black px-2 py-0.5 rounded-full">{cart.length} {cart.length === 1 ? 'ítem' : 'ítems'}</span>
                         </div>
                         
-                        <div className="space-y-2 max-h-28 overflow-y-auto mb-3 border-b border-slate-100 pb-2.5">
+                        <div className="space-y-1.5 max-h-24 sm:max-h-32 overflow-y-auto mb-2 border-b border-slate-100 pb-2">
                           {cart.map((entry, index) => (
                             <div key={index} className="flex items-start justify-between text-xs group gap-2">
-                              <span className="text-slate-500 block">
-                                <span className="font-bold text-black">{entry.qty}x</span> {entry.item.name}
+                              <span className="text-slate-500 block min-w-0">
+                                <span className="font-bold text-black">{entry.qty}x</span> <span className="font-semibold text-slate-800">{entry.item.name}</span>
                                 
                                 {/* Selected Extras list */}
                                 {entry.selectedExtras && entry.selectedExtras.length > 0 && (
@@ -2325,9 +2318,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                   <span className="block text-[9px] text-amber-600 italic mt-0.5">"{entry.note}"</span>
                                 )}
                               </span>
-                              <div className="flex items-center gap-2.5 flex-shrink-0">
+                              <div className="flex items-center gap-2 flex-shrink-0">
                                 <span className="font-mono text-[11px] font-bold text-slate-900">${(getCartEntryPrice(entry) * entry.qty).toFixed(2)}</span>
                                 <button
+                                  type="button"
                                   onClick={() => setCart(cart.filter((_, i) => i !== index))}
                                   className="text-rose-400 hover:text-rose-600 p-1 rounded-lg transition-colors cursor-pointer"
                                   title="Eliminar"
@@ -2339,18 +2333,18 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           ))}
                         </div>
 
-                        <div className="flex items-center justify-between mb-3 pt-0.5">
+                        <div className="flex items-center justify-between mb-2.5 pt-0.5">
                           <span className="font-bold text-xs text-slate-700">Total a Enviar ({activeCurrency})</span>
                           <div className="text-right flex items-baseline gap-1.5">
-                            <span className="text-lg font-black text-slate-950">{formatPrice(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0))}</span>
-                            <span className="text-xs text-slate-400 font-bold">{formatBs(toBolivares(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0)))}</span>
+                            <span className="text-base sm:text-lg font-black text-slate-950">{formatPrice(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0))}</span>
+                            <span className="text-[11px] sm:text-xs text-slate-400 font-bold">{formatBs(toBolivares(cart.reduce((acc, c) => acc + getCartEntryPrice(c) * c.qty, 0)))}</span>
                           </div>
                         </div>
 
                         <button 
                           disabled={cart.length === 0 || isSendingOrder}
                           onClick={sendOrder}
-                          className={`w-full text-white py-3.5 px-4 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 ${
+                          className={`w-full text-white py-3 px-4 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 ${
                             cart.length > 0 && !isSendingOrder
                               ? 'bg-black hover:bg-slate-800 shadow-black/10' 
                               : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
@@ -2364,7 +2358,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                     {/* Quick navigation to bill when cart is empty but table has active consumption */}
                     {cart.length === 0 && activeOrders.length > 0 && (
-                      <div className="p-3.5 sm:p-4 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] z-20">
+                      <div className="p-3 sm:p-3.5 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] z-20 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                           <span className="text-xs font-bold text-slate-700 truncate">
@@ -2384,7 +2378,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   </>
                 ) : (
                   <div className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden min-h-0">
-                    <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0 pb-28 sm:pb-6">
+                    <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 min-h-0 pb-6 sm:pb-6">
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
                         <h4 className="font-bold text-xs sm:text-sm mb-3 flex items-center justify-between uppercase tracking-wider text-slate-800">
                           <div className="flex items-center gap-2">
@@ -2464,9 +2458,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                         ? 'bg-indigo-100 text-indigo-800'
                                         : order.status === 'delivered'
                                           ? 'bg-slate-100 text-slate-500'
-                                          : 'bg-slate-100 text-slate-600'
+                                          : order.status === 'enviado'
+                                            ? 'bg-amber-100 text-amber-900 font-extrabold border border-amber-200/80'
+                                            : 'bg-slate-100 text-slate-600'
                                   }`}>
-                                    {order.status === 'ready' ? 'Listo 🔔' : order.status === 'preparing' ? 'En cocina 🍳' : order.status === 'delivered' ? 'Entregado ✓' : 'Pendiente ⏳'}
+                                    {order.status === 'ready' ? 'Listo 🔔' : order.status === 'preparing' ? 'En cocina 🍳' : order.status === 'delivered' ? 'Entregado ✓' : order.status === 'enviado' ? 'Impreso / Enviado 🖨️' : 'Pendiente ⏳'}
                                   </span>
 
                                   {prepTime ? (
@@ -2485,24 +2481,47 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                                     </span>
                                   )}
 
-                                  {order.status === 'ready' && (
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          if (!selectedTable) return;
-                                          const tableSession = getSessionForTable(selectedTable.id);
-                                          if (!tableSession) return;
-                                          await updateDoc(doc(db, 'sessions', tableSession.id, 'accounts', activeAccountId, 'orders', order.id), {
-                                            status: 'delivered'
-                                          });
-                                        } catch (err) {
-                                          console.error("Error marking as delivered:", err);
-                                        }
-                                      }}
-                                      className="text-[8px] bg-emerald-600 hover:bg-emerald-700 text-white font-black px-1.5 py-0.5 rounded shadow-sm hover:scale-105 transition-all flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <Check size={9} /> Servido
-                                    </button>
+                                  {order.status !== 'delivered' && (
+                                    <div className="flex items-center gap-1">
+                                      {order.status !== 'ready' && (
+                                        <button
+                                          onClick={async () => {
+                                            try {
+                                              if (!selectedTable) return;
+                                              const tableSession = getSessionForTable(selectedTable.id);
+                                              if (!tableSession) return;
+                                              await updateDoc(doc(db, 'sessions', tableSession.id, 'accounts', activeAccountId, 'orders', order.id), {
+                                                status: 'ready'
+                                              });
+                                            } catch (err) {
+                                              console.error("Error marking as ready:", err);
+                                            }
+                                          }}
+                                          className="text-[8px] bg-blue-600 hover:bg-blue-700 text-white font-black px-1.5 py-0.5 rounded shadow-sm hover:scale-105 transition-all flex items-center gap-1 cursor-pointer"
+                                          title="Cambiar estado a Listo"
+                                        >
+                                          <Check size={9} /> Listo 🔔
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            if (!selectedTable) return;
+                                            const tableSession = getSessionForTable(selectedTable.id);
+                                            if (!tableSession) return;
+                                            await updateDoc(doc(db, 'sessions', tableSession.id, 'accounts', activeAccountId, 'orders', order.id), {
+                                              status: 'delivered'
+                                            });
+                                          } catch (err) {
+                                            console.error("Error marking as delivered:", err);
+                                          }
+                                        }}
+                                        className="text-[8px] bg-emerald-600 hover:bg-emerald-700 text-white font-black px-1.5 py-0.5 rounded shadow-sm hover:scale-105 transition-all flex items-center gap-1 cursor-pointer"
+                                        title="Cambiar estado a Servido"
+                                      >
+                                        <Check size={9} /> Servido
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -2549,7 +2568,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       </div>
                     </div>
 
-                    <div className="p-4 sm:p-5 bg-white border-t border-slate-200/80 flex flex-col gap-2.5 shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.08)]">
+                    <div className="p-3.5 sm:p-5 bg-white border-t border-slate-200/80 flex flex-col gap-2 shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-4">
                       {selectedTable.id.startsWith('delivery-') ? (
                         <>
                           {activeOrders.length > 0 ? (
@@ -2692,7 +2711,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Creating Delivery Modal */}
       <AnimatePresence>
         {isCreatingDelivery && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
+          <div className="absolute inset-0 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2957,7 +2976,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Editing Delivery Info Modal */}
       <AnimatePresence>
         {isEditingDeliveryInfo && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
+          <div className="absolute inset-0 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3244,7 +3263,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isAddingAccount && selectedTable && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col items-center justify-center p-6">
+          <div className="absolute inset-0 z-40 bg-[#F8F9FA] flex flex-col items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3301,7 +3320,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       <AnimatePresence>
         {isPaying && selectedTable && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
+          <div className="absolute inset-0 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3892,7 +3911,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         )}
 
         {viewingDeliveryInfo && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
+          <div className="absolute inset-0 z-40 bg-[#F8F9FA] flex flex-col overflow-y-auto">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -4058,11 +4077,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* WAITER: ITEM DETAIL/CUSTOMIZATION PANEL */}
       <AnimatePresence>
         {selectedItem && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
+          <div className="absolute inset-0 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.99 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.99 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               className="bg-[#F8F9FA] w-full h-full relative overflow-hidden z-10 flex flex-col"
             >
               {/* Sticky Header Bar */}
@@ -4405,7 +4424,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       {/* Modal for Itemized Split & Partial Payment by Consumption */}
       <AnimatePresence>
         {isPartialModalOpen && selectedTable && (
-          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 -mb-28 md:-mb-8 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
+          <div className="absolute inset-0 z-50 bg-[#F8F9FA] flex flex-col overflow-hidden">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

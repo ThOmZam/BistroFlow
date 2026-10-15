@@ -12,9 +12,10 @@ import { useBookmarks } from '../lib/bookmarks';
 import { useCurrency } from '../context/CurrencyContext';
 import CurrencySelector from '../components/CurrencySelector';
 import { getQRCodeUrl, getFallbackQRCodeUrl } from '../lib/qrUtils';
+import { clearAndSeedQSandwichMenu } from '../lib/seedQSandwich';
 
 export default function MenuSettingsView({ currentUser }: { currentUser?: any }) {
-  const { menu, tables, exchangeRate, settings, promotions, ingredients } = useRestaurantData();
+  const { menu = [], tables = [], exchangeRate, settings, promotions = [], ingredients = [] } = useRestaurantData() || {};
   const { activeCurrency, currentRateBs, currencySymbol, updateManualRate } = useCurrency();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [activeTab, setActiveTab] = useState<'menu' | 'tables' | 'general' | 'toast_pos' | 'promotions' | 'payments' | 'notifications'>('menu');
@@ -59,6 +60,32 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     extras: [] as ExtraOption[],
     preparationTime: '' as number | ''
   });
+
+  const [isCreatingCombo, setIsCreatingCombo] = useState(false);
+  const [comboData, setComboData] = useState({
+    name: '',
+    price: 0,
+    description: '',
+    image: '',
+    includedMenuItemIds: [] as string[]
+  });
+  const [selectedMenuIdToAdd, setSelectedMenuIdToAdd] = useState('');
+  const [isSeedingQSandwich, setIsSeedingQSandwich] = useState(false);
+
+  const handleSeedQSandwich = async () => {
+    if (!confirm('¿Estás seguro de borrar todo el menú actual e inventario para cargar el menú oficial de Q\' Sandwich basado en las imágenes del cliente?')) return;
+    setIsSeedingQSandwich(true);
+    try {
+      await clearAndSeedQSandwichMenu();
+      playSuccessSound();
+      alert('¡Menú oficial de Q\' Sandwich e inventario cargados exitosamente!');
+    } catch (err) {
+      playErrorSound();
+      alert('Error cargando el menú');
+    } finally {
+      setIsSeedingQSandwich(false);
+    }
+  };
 
   // Recipe form state inside modal
   const [modalRecipeIngId, setModalRecipeIngId] = useState('');
@@ -196,10 +223,18 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   const [coursePacingEnabledInput, setCoursePacingEnabledInput] = useState(true);
   const [seatOrderingEnabledInput, setSeatOrderingEnabledInput] = useState(true);
   const [feedbackEnabledInput, setFeedbackEnabledInput] = useState(true);
-  const [kitchenModeInput, setKitchenModeInput] = useState<'kds' | 'direct_print'>((settings as any)?.kitchenMode || 'kds');
+  const [kitchenModeInput, setKitchenModeInput] = useState<'kds' | 'direct_print'>(
+    (settings as any)?.kitchenMode || localStorage.getItem('kitchenMode') || 'kds'
+  );
   const [kitchenPaperWidthInput, setKitchenPaperWidthInput] = useState<'80mm' | '58mm'>((settings as any)?.kitchenPaperWidth || '80mm');
   const [autoPrintKitchenTicketInput, setAutoPrintKitchenTicketInput] = useState<boolean>(
     (settings as any)?.autoPrintKitchenTicket !== undefined ? (settings as any).autoPrintKitchenTicket : true
+  );
+  const [allowCashierPosInput, setAllowCashierPosInput] = useState<boolean>(
+    (settings as any)?.allowCashierPos !== undefined ? (settings as any).allowCashierPos : (localStorage.getItem('allowCashierPos') === 'false' ? false : true)
+  );
+  const [allowCashierCreditApprovalInput, setAllowCashierCreditApprovalInput] = useState<boolean>(
+    (settings as any)?.allowCashierCreditApproval !== undefined ? (settings as any).allowCashierCreditApproval : (localStorage.getItem('allowCashierCreditApproval') === 'false' ? false : true)
   );
 
   useEffect(() => {
@@ -254,6 +289,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setKitchenModeInput((settings as any)?.kitchenMode || 'kds');
     setKitchenPaperWidthInput((settings as any)?.kitchenPaperWidth || '80mm');
     setAutoPrintKitchenTicketInput((settings as any)?.autoPrintKitchenTicket !== undefined ? (settings as any).autoPrintKitchenTicket : true);
+    setAllowCashierPosInput((settings as any)?.allowCashierPos !== undefined ? (settings as any).allowCashierPos : true);
+    setAllowCashierCreditApprovalInput((settings as any)?.allowCashierCreditApproval !== undefined ? (settings as any).allowCashierCreditApproval : true);
     setCreditEnabledInput(settings?.creditEnabled !== undefined ? settings.creditEnabled : false);
     if (settings?.paymentMethodsList && Array.isArray(settings.paymentMethodsList) && settings.paymentMethodsList.length > 0) {
       setPaymentMethodsListInput(settings.paymentMethodsList);
@@ -262,6 +299,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
   const handleSaveOperationsSettings = async () => {
     try {
+      localStorage.setItem('kitchenMode', kitchenModeInput);
+      localStorage.setItem('allowCashierPos', String(allowCashierPosInput));
+      localStorage.setItem('allowCashierCreditApproval', String(allowCashierCreditApprovalInput));
+
       await setDoc(doc(db, 'settings', 'general'), {
         suggestedTipsEnabled: suggestedTipsEnabledInput,
         defaultTipPercent: Number(defaultTipPercentInput),
@@ -275,13 +316,19 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         feedbackEnabled: feedbackEnabledInput,
         kitchenMode: kitchenModeInput,
         kitchenPaperWidth: kitchenPaperWidthInput,
-        autoPrintKitchenTicket: autoPrintKitchenTicketInput
+        autoPrintKitchenTicket: autoPrintKitchenTicketInput,
+        allowCashierPos: allowCashierPosInput,
+        allowCashierCreditApproval: allowCashierCreditApprovalInput
       }, { merge: true });
 
-      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración de Operaciones & KDS', `Modo Cocina: ${kitchenModeInput === 'direct_print' ? 'Impresión Directa' : 'KDS Pantalla'} | Ancho Papel: ${kitchenPaperWidthInput}`);
+      window.dispatchEvent(new Event('settings_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      await logAction('system', currentUser?.name || 'Administrador', 'Actualizó configuración de Operaciones & KDS', `Modo Cocina: ${kitchenModeInput === 'direct_print' ? 'Impresión Directa' : 'KDS Pantalla'} | Cajero POS: ${allowCashierPosInput ? 'Habilitado' : 'Deshabilitado'} | Ancho Papel: ${kitchenPaperWidthInput}`);
       playSuccessSound();
       alert('⚡ Configuración de Operaciones & Cocina guardada correctamente');
     } catch (err) {
+      console.error(err);
       playErrorSound();
       alert('Error guardando configuración de Operaciones & Cocina');
     }
@@ -333,12 +380,77 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       setEditingItem(null); setIsCreatingMenu(false);
     } catch (err) { alert('Error guardando los cambios'); } finally { setIsSavingMenu(false); }
   };
+
+  const handleSaveCombo = async () => {
+    if (!comboData.name || comboData.price <= 0) {
+      alert('Por favor ingresa un nombre y un precio válido para el combo.');
+      return;
+    }
+    if (comboData.includedMenuItemIds.length === 0) {
+      alert('Por favor selecciona al menos un plato o bebida del menú que compone este combo.');
+      return;
+    }
+
+    try {
+      const aggregatedRecipe: { ingredientId: string; quantity: number }[] = [];
+      const itemNames: string[] = [];
+
+      comboData.includedMenuItemIds.forEach(id => {
+        const menuItem = menu.find(m => m.id === id);
+        if (menuItem) {
+          itemNames.push(menuItem.name);
+          if (menuItem.recipe && Array.isArray(menuItem.recipe)) {
+            menuItem.recipe.forEach(r => {
+              const existing = aggregatedRecipe.find(ar => ar.ingredientId === r.ingredientId);
+              if (existing) {
+                existing.quantity += r.quantity;
+              } else {
+                aggregatedRecipe.push({ ingredientId: r.ingredientId, quantity: r.quantity });
+              }
+            });
+          }
+        }
+      });
+
+      const payload = {
+        name: comboData.name,
+        price: Number(comboData.price),
+        category: 'Combos & Promos',
+        image: comboData.image || 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
+        description: comboData.description || `Combo compuesto por: ${itemNames.join(', ')}`,
+        recipe: aggregatedRecipe,
+        scheduleType: 'always',
+        alerts: itemNames,
+        preparationTime: 15
+      };
+
+      await addDoc(collection(db, 'menu'), payload);
+      await logAction('system', currentUser?.name || 'Administrador', 'Creó Combo de Menú', `Combo: ${payload.name} - Ítems: ${itemNames.join(', ')} - Precio: $${payload.price.toFixed(2)}`);
+      setIsCreatingCombo(false);
+      setComboData({ name: '', price: 0, description: '', image: '', includedMenuItemIds: [] });
+      setSelectedMenuIdToAdd('');
+      playSuccessSound();
+      alert('¡Combo creado con éxito vinculado al inventario y finanzas!');
+    } catch (err) {
+      console.error(err);
+      playErrorSound();
+      alert('Error al guardar el combo');
+    }
+  };
+
   const handleDeleteMenu = async (id: string) => {
     const item = menu.find(m => m.id === id);
     const itemName = item ? item.name : 'Desconocido';
-    if(confirm('¿Eliminar este plato?')) {
-      await deleteDoc(doc(db, 'menu', id));
-      await logAction('system', currentUser?.name || 'Administrador', 'Eliminó plato del menú', `Plato: ${itemName}`);
+    if(confirm('¿Estás seguro de eliminar este platillo del menú?')) {
+      try {
+        await deleteDoc(doc(db, 'menu', id));
+        await logAction('system', currentUser?.name || 'Administrador', 'Eliminó plato del menú', `Plato: ${itemName}`);
+        playSuccessSound();
+      } catch (err) {
+        console.error('Error deleting menu item:', err);
+        playErrorSound();
+        alert('Error al eliminar el platillo. Inténtalo de nuevo.');
+      }
     }
   };
 
@@ -671,13 +783,31 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Gestiona el menú, mesas, promociones, moneda y configuración general.</p>
         </div>
         {activeTab === 'menu' && (
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
             <button 
               onClick={() => { setIsCreatingMenu(true); setMenuData({ name: '', price: 0, category: 'Hamburguesas', image: '', scheduleType: 'always', availableFrom: '', availableTo: '', alerts: [], extras: [], preparationTime: '' }); }} 
-              className="flex items-center gap-2 px-5 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
             >
               <Plus size={16} />
               <span>Nuevo Platillo</span>
+            </button>
+            <button 
+              onClick={() => { 
+                setIsCreatingCombo(true); 
+                setComboData({ name: '', price: 0, description: '', image: '', includedItems: ['Hamburguesa', 'Papas Fritas', 'Refresco 350ml'] }); 
+              }} 
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
+            >
+              <Sparkles size={16} />
+              <span>Crear Combo Especial</span>
+            </button>
+            <button 
+              onClick={handleSeedQSandwich}
+              disabled={isSeedingQSandwich}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {isSeedingQSandwich ? <span className="animate-spin">⏳</span> : <span className="font-black">🥪</span>}
+              <span>{isSeedingQSandwich ? 'Cargando Menú...' : 'Cargar Menú Q\' Sandwich'}</span>
             </button>
           </div>
         )}
@@ -830,8 +960,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 })()}
 
                 <div className="flex gap-2 border-t border-slate-50 pt-4">
-                  <button onClick={() => handleEditMenu(item)} className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors">Editar</button>
-                  <button onClick={() => handleDeleteMenu(item.id)} className="w-12 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl transition-colors"><Trash2 size={16} /></button>
+                  <button type="button" onClick={() => handleEditMenu(item)} className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors cursor-pointer">Editar</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteMenu(item.id); }} className="w-12 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl transition-colors cursor-pointer" title="Eliminar"><Trash2 size={16} /></button>
                 </div>
               </div>
             );
@@ -1618,6 +1748,56 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       Imprimir comanda de cocina automáticamente al enviar pedido
                     </span>
                   </label>
+                </div>
+
+                {/* Acceso de Cajero al Terminal POS / Enviar Comandas */}
+                <div className="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl md:col-span-2 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black uppercase tracking-wider text-amber-400 block">
+                      Acceso de Cajero a Terminal POS & Envío de Comandas
+                    </label>
+                    <p className="text-[11px] text-slate-300 leading-tight">
+                      Permite que el cajero pueda acceder al Terminal POS para armar pedidos y enviar comandas directamente (recomendado si la cocina opera sin pantalla KDS o la caja toma pedidos).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAllowCashierPosInput(!allowCashierPosInput)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 ${
+                      allowCashierPosInput ? 'bg-amber-500' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        allowCashierPosInput ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Validación y Aprobación de Crédito por Cajero vs Administrador */}
+                <div className="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl md:col-span-2 flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black uppercase tracking-wider text-amber-400 block">
+                      Aprobación de Créditos (Fiado CRM) por Cajero
+                    </label>
+                    <p className="text-[11px] text-slate-300 leading-tight">
+                      Si está HABILITADO, el cajero puede aprobar o rechazar pedidos a crédito en Control de Caja. Si está DESACTIVADO, solo el Administrador puede autorizar créditos.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAllowCashierCreditApprovalInput(!allowCashierCreditApprovalInput)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 ${
+                      allowCashierCreditApprovalInput ? 'bg-amber-500' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        allowCashierCreditApprovalInput ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
             </div>
@@ -2982,6 +3162,88 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 </div>
               </div>
               <button onClick={handleSaveMenu} className="w-full bg-black text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0"><Save size={18}/> Guardar Cambios</button>
+            </motion.div>
+          </div>
+        )}
+
+        {isCreatingCombo && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-3xl sm:rounded-[40px] p-5 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col">
+              <button onClick={() => setIsCreatingCombo(false)} className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer"><X size={20} /></button>
+              <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6 pr-8 flex items-center gap-2">
+                <Sparkles className="text-amber-500" size={22} />
+                <span>Crear Combo / Promoción Especial</span>
+              </h3>
+              <div className="space-y-4 mb-4 sm:mb-6 max-h-[65vh] sm:max-h-[70vh] overflow-y-auto pr-1 sm:pr-2 scrollbar-thin">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Combo</label>
+                  <input type="text" placeholder="Ej: Combo Familiar Burger + 2 Refrescos + Papas" value={comboData.name} onChange={e => setComboData({...comboData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs sm:text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Precio del Combo ($)</label>
+                    <input type="number" placeholder="15.00" value={comboData.price} onChange={e => setComboData({...comboData, price: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-indigo-600 font-bold text-xs sm:text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Categoría</label>
+                    <input type="text" value="Combos & Promos" disabled className="w-full bg-slate-100 border border-slate-200 rounded-2xl p-4 text-slate-500 font-medium text-xs sm:text-sm" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Descripción o Qué incluye</label>
+                  <textarea rows={2} placeholder="Incluye hamburguesa doble, papas medianas y bebida..." value={comboData.description} onChange={e => setComboData({...comboData, description: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs"></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Platos y Bebidas del Menú Incluidos</label>
+                  <p className="text-[10px] text-slate-400 mb-3">Selecciona los platillos o bebidas registrados en el menú que componen este combo (para descontar inventario y finanzas automáticamente):</p>
+                  
+                  <div className="space-y-2 mb-3">
+                    {comboData.includedMenuItemIds.map((itemId, idx) => {
+                      const mItem = menu.find(m => m.id === itemId);
+                      return (
+                        <div key={idx} className="flex items-center justify-between bg-amber-50/60 border border-amber-200/60 rounded-xl px-3 py-2 text-xs font-bold text-amber-900">
+                          <span>🍔 {mItem ? mItem.name : 'Plato no encontrado'} <span className="text-[10px] text-slate-500">(${mItem?.price?.toFixed(2) || '0.00'})</span></span>
+                          <button type="button" onClick={() => {
+                            const updated = comboData.includedMenuItemIds.filter((_, i) => i !== idx);
+                            setComboData({...comboData, includedMenuItemIds: updated});
+                          }} className="text-rose-500 hover:text-rose-700 cursor-pointer"><Trash2 size={14} /></button>
+                        </div>
+                      );
+                    })}
+                    {comboData.includedMenuItemIds.length === 0 && (
+                      <p className="text-[10px] italic text-slate-400">Ningún plato o bebida seleccionado todavía.</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <select 
+                      value={selectedMenuIdToAdd}
+                      onChange={e => setSelectedMenuIdToAdd(e.target.value)}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs outline-none focus:border-black font-medium"
+                    >
+                      <option value="">-- Seleccionar Plato o Bebida del Menú --</option>
+                      {menu.map(m => (
+                        <option key={m.id} value={m.id}>{m.name} (${m.price.toFixed(2)} - {m.category})</option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={() => {
+                      if (selectedMenuIdToAdd) {
+                        if (!comboData.includedMenuItemIds.includes(selectedMenuIdToAdd)) {
+                          setComboData({...comboData, includedMenuItemIds: [...comboData.includedMenuItemIds, selectedMenuIdToAdd]});
+                          setSelectedMenuIdToAdd('');
+                        }
+                      }
+                    }} className="px-4 bg-black text-white rounded-xl text-xs font-black cursor-pointer"><Plus size={16} /></button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Imagen del Combo (URL o Subir)</label>
+                  <input type="text" placeholder="https://images.unsplash.com/..." value={comboData.image} onChange={e => setComboData({...comboData, image: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs" />
+                </div>
+              </div>
+              <button onClick={handleSaveCombo} className="w-full bg-amber-500 hover:bg-amber-600 text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0 shadow-lg cursor-pointer"><Sparkles size={18}/> Guardar y Publicar Combo en el Menú</button>
             </motion.div>
           </div>
         )}

@@ -512,7 +512,7 @@ export default function CRMView() {
   };
 
   return (
-    <div className="w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16" id="crm-enterprise-view">
+    <div className="w-full space-y-6 pb-16" id="crm-enterprise-view">
       
       {/* SECTION HEADER */}
       <div className="border-b border-slate-200/60 pb-5 shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
@@ -582,7 +582,7 @@ export default function CRMView() {
       ) : null}
 
       {/* MAIN LAYOUT */}
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="w-full">
         {!selectedClient ? (
           <>
             {/* SEARCH, SORTING & FILTERS CONTAINER */}
@@ -659,8 +659,8 @@ export default function CRMView() {
             </div>
 
             {/* CLIENTS TABLE */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-x-auto overflow-y-auto">
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden w-full">
+              <div className="overflow-x-auto w-full">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] font-black uppercase tracking-wider text-slate-400 select-none">

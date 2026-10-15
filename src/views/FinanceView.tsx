@@ -27,6 +27,7 @@ import {
   PlusCircle,
   FileText,
   Download,
+  FileCode,
   Trash2,
   Edit3,
   Percent,
@@ -42,7 +43,10 @@ import {
   User,
   MapPin,
   Phone,
-  Info
+  Info,
+  CreditCard,
+  Landmark,
+  Wallet
 } from 'lucide-react';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { useCurrency } from '../context/CurrencyContext';
@@ -60,7 +64,7 @@ import {
   Legend
 } from 'recharts';
 
-type FinanceTab = 'overview' | 'ledger' | 'payable' | 'fiscal' | 'pl';
+type FinanceTab = 'overview' | 'ledger' | 'receivables' | 'payable' | 'accounts' | 'fiscal' | 'pl';
 
 interface FinanceEntry {
   id?: string;
@@ -318,6 +322,97 @@ Referencia:  ${reference}
     return () => window.removeEventListener('set_finance_tab', handleSetFinanceTab);
   }, []);
   
+  // SENIAT FILE EXPORT HANDLERS (TXT & XML)
+  const handleExportSeniatTxt = () => {
+    const fiscalEntries = allEntries.filter(e => e.isFiscal);
+    if (fiscalEntries.length === 0) {
+      alert('⚠️ No hay facturas fiscales registradas para exportar.');
+      return;
+    }
+
+    const restName = settings?.restaurantName || 'BISTROFLOW';
+    const rif = settings?.pagoMovilId || 'J-123456789';
+    
+    let txtContent = `OPERACIONES FISCALES SENIAT - LIBRO DE VENTAS Y COMPRAS FISCALES\r\n`;
+    txtContent += `EMPRESA: ${restName} | RIF: ${rif} | FECHA EXPORTACION: ${new Date().toLocaleDateString()}\r\n`;
+    txtContent += `----------------------------------------------------------------------------------------------------\r\n`;
+    txtContent += `RIF|FECHA|NRO_FACTURA|NRO_CONTROL|TIPO_OPERACION|BASE_IMPONIBLE_VES|ALICUOTA_IVA|IVA_VES|IGTF_VES|TOTAL_VES\r\n`;
+
+    fiscalEntries.forEach((entry, idx) => {
+      const isIncome = entry.type === 'income';
+      const typeOp = isIncome ? 'VENTA' : 'COMPRA';
+      const dateStr = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString('es-VE') : new Date().toLocaleDateString('es-VE');
+      const invoiceNum = entry.fiscalInvoice || `FACT-${idx + 1001}`;
+      const controlNum = entry.fiscalControl || `00-${idx + 5001}`;
+      const rate = entry.taxRate || 16;
+      
+      const totalUSD = entry.amount || 0;
+      const totalVES = totalUSD * exchangeRate;
+      const baseVES = isIncome ? totalVES * (100 / (100 + rate)) : totalVES;
+      const ivaVES = totalVES - baseVES;
+      const igtfVES = entry.igtfAmount ? entry.igtfAmount * exchangeRate : 0;
+
+      txtContent += `${rif}|${dateStr}|${invoiceNum}|${controlNum}|${typeOp}|${baseVES.toFixed(2)}|${rate}%|${ivaVES.toFixed(2)}|${igtfVES.toFixed(2)}|${totalVES.toFixed(2)}\r\n`;
+    });
+
+    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `LIBRO_SENIAT_${new Date().toISOString().slice(0, 10)}.txt`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportSeniatXml = () => {
+    const fiscalEntries = allEntries.filter(e => e.isFiscal);
+    if (fiscalEntries.length === 0) {
+      alert('⚠️ No hay facturas fiscales registradas para exportar.');
+      return;
+    }
+
+    const restName = settings?.restaurantName || 'BISTROFLOW';
+    const rif = settings?.pagoMovilId || 'J-123456789';
+
+    let xmlContent = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xmlContent += `<LibroVentasComprasSeniat Periodo="${new Date().toISOString().slice(0, 7)}" RifEmpresa="${rif}" NombreEmpresa="${restName}">\n`;
+
+    fiscalEntries.forEach((entry, idx) => {
+      const isIncome = entry.type === 'income';
+      const dateStr = entry.timestamp ? new Date(entry.timestamp).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const invoiceNum = entry.fiscalInvoice || `FACT-${idx + 1001}`;
+      const controlNum = entry.fiscalControl || `00-${idx + 5001}`;
+      const rate = entry.taxRate || 16;
+      
+      const totalUSD = entry.amount || 0;
+      const totalVES = totalUSD * exchangeRate;
+      const baseVES = isIncome ? totalVES * (100 / (100 + rate)) : totalVES;
+      const ivaVES = totalVES - baseVES;
+
+      xmlContent += `  <Factura Tipo="${isIncome ? 'VENTA' : 'COMPRA'}">\n`;
+      xmlContent += `    <Fecha>${dateStr}</Fecha>\n`;
+      xmlContent += `    <NumeroFactura>${invoiceNum}</NumeroFactura>\n`;
+      xmlContent += `    <NumeroControl>${controlNum}</NumeroControl>\n`;
+      xmlContent += `    <BaseImponibleVes>${baseVES.toFixed(2)}</BaseImponibleVes>\n`;
+      xmlContent += `    <AlicuotaIva>${rate}</AlicuotaIva>\n`;
+      xmlContent += `    <MontoIvaVes>${ivaVES.toFixed(2)}</MontoIvaVes>\n`;
+      xmlContent += `    <MontoTotalVes>${totalVES.toFixed(2)}</MontoTotalVes>\n`;
+      xmlContent += `  </Factura>\n`;
+    });
+
+    xmlContent += `</LibroVentasComprasSeniat>`;
+
+    const blob = new Blob([xmlContent], { type: 'text/xml;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `LIBRO_SENIAT_${new Date().toISOString().slice(0, 10)}.xml`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Modals state
   const [isAddingEntry, setIsAddingEntry] = useState(false);
   const [editingEntry, setEditingEntry] = useState<FinanceEntry | null>(null);
@@ -1068,145 +1163,104 @@ Referencia:  ${reference}
         </div>
       </header>
 
-      {/* Main Stats KPIs Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        {/* Total Incomes */}
-        <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start">
-              <span className="text-[9px] uppercase tracking-widest text-slate-400 font-extrabold">Ingresos Totales (USD)</span>
-              <span className="p-1.5 bg-emerald-50 rounded-lg text-emerald-600"><TrendingUp size={14} /></span>
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-2">${stats.totalIncomes.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div className="text-xs text-slate-500 font-semibold font-mono mt-0.5">
-              Bs. {(stats.totalIncomes * exchangeRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-50 text-[10px] text-slate-400">
-            Sincronizado con Caja en tiempo real
-          </div>
-        </div>
-
-        {/* Total Expenses */}
-        <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start">
-              <span className="text-[9px] uppercase tracking-widest text-slate-400 font-extrabold">Egresos Operacionales</span>
-              <span className="p-1.5 bg-rose-50 rounded-lg text-rose-600"><TrendingDown size={14} /></span>
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-2">${stats.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div className="text-xs text-slate-500 font-semibold font-mono mt-0.5">
-              Bs. {(stats.totalExpenses * exchangeRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-50 text-[10px] text-slate-400 flex justify-between">
-            <span>Incluye nómina y compras</span>
-            {stats.simulatedFoodCost > 0 && <span className="text-amber-500 font-semibold">Costo Alim. Sim.</span>}
-          </div>
-        </div>
-
-        {/* Net Profit Margin */}
-        <div className={`p-6 rounded-[28px] shadow-sm relative overflow-hidden flex flex-col justify-between ${stats.netProfit >= 0 ? 'bg-slate-900 text-white' : 'bg-rose-950 text-white'}`}>
-          <div>
-            <div className="flex justify-between items-start">
-              <span className="text-[9px] uppercase tracking-widest text-slate-400 font-extrabold">Utilidad Neta del Ejercicio</span>
-              <span className={`p-1.5 rounded-lg ${stats.netProfit >= 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
-                {stats.netProfit >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-              </span>
-            </div>
-            <div className={`text-2xl font-black mt-2 ${stats.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${stats.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div className="text-xs text-slate-400 font-mono mt-0.5">
-              Bs. {(stats.netProfit * exchangeRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-800 text-[10px] flex justify-between items-center text-slate-400">
-            <span>Margen de Utilidad:</span>
-            <span className={`font-bold ${stats.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {stats.netMargin.toFixed(1)}%
-            </span>
-          </div>
-        </div>
-
-        {/* Fiscal & Supplier Liabilities */}
-        <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-start">
-              <span className="text-[9px] uppercase tracking-widest text-slate-400 font-extrabold">Pasivos a Corto Plazo (USD)</span>
-              <span className="p-1.5 bg-indigo-50 rounded-lg text-indigo-600"><Briefcase size={14} /></span>
-            </div>
-            <div className="text-2xl font-black text-slate-900 mt-2">
-              ${(stats.totalPendingPayable + stats.ivaToPay).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div className="text-xs text-slate-500 font-semibold font-mono mt-0.5">
-              Bs. {((stats.totalPendingPayable + stats.ivaToPay) * exchangeRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-50 text-[10px] text-slate-500 flex flex-col gap-1">
-            <div className="flex justify-between">
-              <span>Deuda Proveedores:</span>
-              <span className="font-bold text-slate-900">${stats.totalPendingPayable.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Impuestos por Declarar (IVA):</span>
-              <span className="font-bold text-rose-600">${stats.ivaToPay.toFixed(2)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs Menu Navigation */}
-      <div className="flex border-b border-slate-200 mb-8 overflow-x-auto gap-4 scrollbar-none">
+      {/* TABS MENU NAVIGATION BAR - GUARANTEED FULL HEIGHT TABS */}
+      <div className="w-full flex items-center gap-3 overflow-x-auto scrollbar-none py-3 mb-8 min-h-[64px] border-b border-slate-200/80 pb-4 shrink-0">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`pb-4 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'overview' ? 'border-black text-black font-black' : 'border-transparent text-slate-400 hover:text-slate-600'
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'overview'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
           }`}
         >
-          <TrendingUp size={16} />
-          Flujo de Caja y Métricas
+          <TrendingUp size={16} className={activeTab === 'overview' ? 'text-emerald-400' : 'text-slate-400'} />
+          <span>Flujo de Caja</span>
         </button>
+
         <button
-          onClick={() => setActiveTab('ledger')}
-          className={`pb-4 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'ledger' ? 'border-black text-black font-black' : 'border-transparent text-slate-400 hover:text-slate-600'
+          onClick={() => setActiveTab('receivables')}
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'receivables'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
           }`}
         >
-          <BookOpen size={16} />
-          Libro de Diario (Ledger)
+          <CreditCard size={16} className={activeTab === 'receivables' ? 'text-emerald-400' : 'text-slate-400'} />
+          <span>Cuentas por Cobrar (CxC)</span>
+          {clients.filter(c => (c.debt || 0) > 0).length > 0 && (
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+              activeTab === 'receivables' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-100 text-emerald-800'
+            }`}>
+              {clients.filter(c => (c.debt || 0) > 0).length}
+            </span>
+          )}
         </button>
+
         <button
           onClick={() => setActiveTab('payable')}
-          className={`pb-4 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'payable' ? 'border-black text-black font-black' : 'border-transparent text-slate-400 hover:text-slate-600'
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'payable'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
           }`}
         >
-          <Briefcase size={16} />
-          Cuentas por Pagar (Proveedores)
+          <Briefcase size={16} className={activeTab === 'payable' ? 'text-rose-400' : 'text-slate-400'} />
+          <span>Cuentas por Pagar (CxP)</span>
           {supplierBills.filter(b => b.status === 'pending').length > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none">
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+              activeTab === 'payable' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-rose-100 text-rose-800'
+            }`}>
               {supplierBills.filter(b => b.status === 'pending').length}
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => setActiveTab('accounts')}
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'accounts'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <Landmark size={16} className={activeTab === 'accounts' ? 'text-indigo-400' : 'text-slate-400'} />
+          <span>Cuentas & Bancos</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ledger')}
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'ledger'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <BookOpen size={16} className={activeTab === 'ledger' ? 'text-indigo-400' : 'text-slate-400'} />
+          <span>Libro Diario</span>
+        </button>
+
         <button
           onClick={() => setActiveTab('fiscal')}
-          className={`pb-4 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'fiscal' ? 'border-black text-black font-black' : 'border-transparent text-slate-400 hover:text-slate-600'
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'fiscal'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
           }`}
         >
-          <FileText size={16} />
-          Control Fiscal e Impuestos
+          <FileText size={16} className={activeTab === 'fiscal' ? 'text-purple-400' : 'text-slate-400'} />
+          <span>Fiscal Tributario</span>
         </button>
+
         <button
           onClick={() => setActiveTab('pl')}
-          className={`pb-4 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all shrink-0 cursor-pointer ${
-            activeTab === 'pl' ? 'border-black text-black font-black' : 'border-transparent text-slate-400 hover:text-slate-600'
+          className={`flex items-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs transition-all shrink-0 cursor-pointer h-11 whitespace-nowrap ${
+            activeTab === 'pl'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
           }`}
         >
-          <Calculator size={16} />
-          Estado de Pérdidas y Ganancias (P&L)
+          <Calculator size={16} className={activeTab === 'pl' ? 'text-amber-400' : 'text-slate-400'} />
+          <span>Estado P&L</span>
         </button>
       </div>
 
@@ -1619,6 +1673,115 @@ Referencia:  ${reference}
             </div>
           )}
 
+          {/* TAB: CUENTAS POR COBRAR (CxC - CRÉDITOS A CLIENTES) */}
+          {activeTab === 'receivables' && (
+            <div className="space-y-6">
+              {/* Top Banner KPI */}
+              <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-black text-white p-6 sm:p-8 rounded-[32px] shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border border-emerald-800/40">
+                <div>
+                  <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full inline-block mb-2 border border-emerald-500/30">
+                    Cuentas por Cobrar (CxC)
+                  </span>
+                  <h3 className="text-2xl font-black">Control de Créditos a Clientes</h3>
+                  <p className="text-xs text-slate-300 mt-1">Saldos activos acumulados por ventas a crédito. Registre cobros para abonar las deudas.</p>
+                </div>
+                <div className="flex items-baseline gap-4 shrink-0 bg-white/10 px-6 py-4 rounded-2xl border border-white/10">
+                  <div>
+                    <span className="text-[10px] text-slate-300 uppercase font-extrabold block">Deuda Total por Cobrar</span>
+                    <span className="text-2xl font-black text-emerald-400">
+                      ${clients.reduce((sum, c) => sum + (c.debt || 0), 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="border-l border-white/20 pl-4">
+                    <span className="text-[10px] text-slate-300 uppercase font-extrabold block">Equivalente VES</span>
+                    <span className="text-sm font-bold text-white font-mono">
+                      Bs. {(clients.reduce((sum, c) => sum + (c.debt || 0), 0) * exchangeRate).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table of Debtors */}
+              <div className="bg-white rounded-[28px] border border-slate-100 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div>
+                    <h4 className="font-extrabold text-base text-slate-900">Clientes con Cartera de Crédito Activa</h4>
+                    <p className="text-xs text-slate-400">Listado extraído automáticamente del módulo CRM</p>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-3 py-1 rounded-full">
+                    {clients.filter(c => (c.debt || 0) > 0).length} clientes con saldo
+                  </span>
+                </div>
+
+                {clients.filter(c => (c.debt || 0) > 0).length === 0 ? (
+                  <div className="text-center py-16 text-slate-400 text-xs">
+                    🎉 Excelente: No existen clientes con saldo deudor o crédito pendiente por cobrar.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[10px] text-slate-400 font-extrabold uppercase">
+                          <th className="pb-3">Cliente (CRM)</th>
+                          <th className="pb-3">Cédula / RIF</th>
+                          <th className="pb-3">Teléfono</th>
+                          <th className="pb-3 text-right">Monto Deuda ($ USD)</th>
+                          <th className="pb-3 text-right">Monto Deuda (Bs)</th>
+                          <th className="pb-3 text-center">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {clients.filter(c => (c.debt || 0) > 0).map(client => (
+                          <tr key={client.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-3.5 font-extrabold text-slate-900 flex items-center gap-2">
+                              <span className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-black flex items-center justify-center text-xs">
+                                {client.name.substring(0, 2).toUpperCase()}
+                              </span>
+                              <span>{client.name}</span>
+                            </td>
+                            <td className="py-3.5 font-mono text-slate-600 font-bold">{client.cedula || 'N/A'}</td>
+                            <td className="py-3.5 text-slate-600">{client.phone || 'N/A'}</td>
+                            <td className="py-3.5 font-black text-rose-600 text-right text-sm">
+                              ${(client.debt || 0).toFixed(2)}
+                            </td>
+                            <td className="py-3.5 font-bold font-mono text-slate-500 text-right">
+                              Bs. {((client.debt || 0) * exchangeRate).toFixed(2)}
+                            </td>
+                            <td className="py-3.5 text-center">
+                              <button
+                                onClick={() => {
+                                  setSelectedDebtClientId(client.id);
+                                  setFormData({
+                                    type: 'income',
+                                    category: 'Cobro de Crédito',
+                                    amount: client.debt || 0,
+                                    description: `Abono/Pago de crédito de ${client.name} (CI: ${client.cedula || 'N/A'})`,
+                                    timestamp: new Date().toISOString().substring(0, 16),
+                                    isFiscal: false,
+                                    fiscalInvoice: '',
+                                    taxRate: 16,
+                                    taxAmount: 0,
+                                    withholdingRate: 0,
+                                    withholdingAmount: 0,
+                                    paymentMethod: 'cash'
+                                  });
+                                  setIsAddingEntry(true);
+                                }}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-[11px] shadow-md transition-all cursor-pointer"
+                              >
+                                💰 Registrar Cobro
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* TAB: ACCOUNTS PAYABLE (CUENTAS POR PAGAR) */}
           {activeTab === 'payable' && (
             <div className="space-y-6">
@@ -1852,6 +2015,195 @@ Referencia:  ${reference}
             </div>
           )}
 
+          {/* TAB: CUENTAS Y BANCOS / ARQUEOS */}
+          {activeTab === 'accounts' && (
+            <div className="space-y-6">
+              {/* Header Card */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-[32px] shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border border-indigo-900/40">
+                <div>
+                  <span className="bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full inline-block mb-2 border border-indigo-500/30">
+                    Saldos por Cuenta & Arqueo
+                  </span>
+                  <h3 className="text-2xl font-black">Consolidado de Bancos y Bóvedas de Efectivo</h3>
+                  <p className="text-xs text-slate-300 mt-1">Disponibilidad en tiempo real dividida por pasarelas de pago, cajas físicas y bancos nacionales/internacionales.</p>
+                </div>
+                <div className="flex items-baseline gap-4 shrink-0 bg-white/10 px-6 py-4 rounded-2xl border border-white/10">
+                  <div>
+                    <span className="text-[10px] text-slate-300 uppercase font-extrabold block">Liquidez Total Estimada</span>
+                    <span className="text-2xl font-black text-emerald-400">
+                      ${stats.totalIncomes >= stats.totalExpenses ? (stats.totalIncomes - stats.totalExpenses).toFixed(2) : '0.00'}
+                    </span>
+                  </div>
+                  <div className="border-l border-white/20 pl-4">
+                    <span className="text-[10px] text-slate-300 uppercase font-extrabold block">Tasa Oficial TCV/BCV</span>
+                    <span className="text-sm font-bold text-white font-mono">
+                      Bs. {exchangeRate.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Accounts Breakdown Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* 1. Caja Principal USD */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 font-bold">
+                        💵
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Caja Efectivo USD</h4>
+                        <p className="text-[10px] text-slate-400">Divisas en Bóveda / Caja Chica</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-black px-2.5 py-1 rounded-full border border-emerald-100">
+                      USD ($)
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-slate-900">
+                      ${allEntries.filter(e => e.paymentMethod === 'cash' || e.paymentMethod === 'divisa').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      Sincronizado con cierres de turno
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Pago Móvil / Banesco */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-sky-50 rounded-2xl text-sky-600 font-bold">
+                        📱
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Pago Móvil & Banco Banesco</h4>
+                        <p className="text-[10px] text-slate-400">Fondos acumulados en Bolívares</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-sky-50 text-sky-700 font-black px-2.5 py-1 rounded-full border border-sky-100">
+                      VES (Bs)
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-slate-900">
+                      Bs. {(allEntries.filter(e => e.paymentMethod === 'pagomovil' || e.paymentMethod === 'pago_movil').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0) * exchangeRate).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      Equivalente: ${allEntries.filter(e => e.paymentMethod === 'pagomovil' || e.paymentMethod === 'pago_movil').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0).toFixed(2)} USD
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. Zelle / Banco Exterior USA */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-purple-50 rounded-2xl text-purple-600 font-bold">
+                        🏛️
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Zelle / Banco USA</h4>
+                        <p className="text-[10px] text-slate-400">Transferencias internacionales activas</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-purple-50 text-purple-700 font-black px-2.5 py-1 rounded-full border border-purple-100">
+                      USD ($)
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-slate-900">
+                      ${allEntries.filter(e => e.paymentMethod === 'zelle').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      Verificación inmediata vía comprobante
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. Tarjetas / Punto de Venta */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 font-bold">
+                        💳
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Punto de Venta (Tarjetas)</h4>
+                        <p className="text-[10px] text-slate-400">Lote pendiente por abonar banco</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-indigo-50 text-indigo-700 font-black px-2.5 py-1 rounded-full border border-indigo-100">
+                      VES (Bs)
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-slate-900">
+                      Bs. {(allEntries.filter(e => e.paymentMethod === 'card' || e.paymentMethod === 'punto').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0) * exchangeRate).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      Equivalente: ${allEntries.filter(e => e.paymentMethod === 'card' || e.paymentMethod === 'punto').reduce((acc, e) => acc + (e.type === 'income' ? e.amount : -e.amount), 0).toFixed(2)} USD
+                    </span>
+                  </div>
+                </div>
+
+                {/* 5. Cuentas por Cobrar (Fiado CRM) */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-amber-50 rounded-2xl text-amber-600 font-bold">
+                        📜
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Cartera de Crédito (CxC)</h4>
+                        <p className="text-[10px] text-slate-400">Cuentas pendientes por cobrar CRM</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-amber-50 text-amber-700 font-black px-2.5 py-1 rounded-full border border-amber-100">
+                      Activo No Líquido
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-rose-600">
+                      ${clients.reduce((sum, c) => sum + (c.debt || 0), 0).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      {clients.filter(c => (c.debt || 0) > 0).length} clientes activos
+                    </span>
+                  </div>
+                </div>
+
+                {/* 6. Pasivos por Pagar (Proveedores) */}
+                <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-rose-50 rounded-2xl text-rose-600 font-bold">
+                        🏢
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-sm text-slate-900">Deudas Proveedores (CxP)</h4>
+                        <p className="text-[10px] text-slate-400">Cuentas pendientes por liquidar</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-rose-50 text-rose-700 font-black px-2.5 py-1 rounded-full border border-rose-100">
+                      Pasivo
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-2xl font-black text-rose-600">
+                      ${supplierBills.filter(b => b.status === 'pending').reduce((sum, b) => sum + b.amount, 0).toFixed(2)}
+                    </span>
+                    <span className="block text-xs text-slate-400 font-mono mt-0.5">
+                      {supplierBills.filter(b => b.status === 'pending').length} facturas pendientes
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 3: FISCAL & TAXES (CONTROL FISCAL) */}
           {activeTab === 'fiscal' && (
             <div className="space-y-6">
@@ -1912,8 +2264,32 @@ Referencia:  ${reference}
 
               {/* Fiscal Invoice Log Ledger */}
               <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-6 sm:p-8">
-                <h3 className="text-base font-extrabold text-slate-900 mb-2">Registro y Conciliación Tributaria de Facturas</h3>
-                <p className="text-xs text-slate-400 mb-6">Listado de transacciones con efecto tributario (con Factura Fiscal justificativa).</p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 mb-1">Registro y Conciliación Tributaria de Facturas</h3>
+                    <p className="text-xs text-slate-400">Listado de transacciones con efecto tributario (con Factura Fiscal justificativa).</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      onClick={handleExportSeniatTxt}
+                      className="px-4 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200/80 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                      title="Descargar Libro de Ventas y Compras Fiscales en formato plano TXT (SENIAT)"
+                    >
+                      <Download size={15} />
+                      <span>Exportar TXT (SENIAT)</span>
+                    </button>
+
+                    <button
+                      onClick={handleExportSeniatXml}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                      title="Descargar Estructura XML SENIAT"
+                    >
+                      <FileCode size={15} />
+                      <span>Exportar XML</span>
+                    </button>
+                  </div>
+                </div>
                 
                 {allEntries.filter(e => e.isFiscal).length === 0 ? (
                   <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">

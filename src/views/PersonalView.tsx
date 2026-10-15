@@ -734,7 +734,7 @@ export default function PersonalView() {
   };
 
   return (
-    <div className="w-full space-y-6 flex-1 flex flex-col min-h-0 pb-16" id="personal-dashboard-view">
+    <div className="w-full space-y-6 pb-20" id="personal-dashboard-view">
       
       {/* SECTION HEADER */}
       <div className="border-b border-slate-200/60 pb-5 shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
@@ -804,63 +804,63 @@ export default function PersonalView() {
       ) : null}
 
       {/* MAIN CONTENT WORKSPACE */}
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="w-full space-y-6">
         {!selectedEmployee ? (
           <>
-            {/* TOP-LEVEL NAVIGATION TABS */}
-            <div className="flex border-b border-slate-200 gap-1 mt-1 mb-5 shrink-0" id="top-level-tabs">
+            {/* TOP-LEVEL NAVIGATION TABS - STANDALONE ROOMY TAB BUTTONS */}
+            <div className="flex items-center gap-3 mb-6 overflow-x-auto whitespace-nowrap w-full scrollbar-none pb-1 shrink-0">
               <button
                 onClick={() => setTopLevelTab('employees')}
-                className={`px-5 py-3 text-xs font-black transition-all border-b-2 uppercase tracking-wider flex items-center gap-2 ${
+                className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
                   topLevelTab === 'employees'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                    ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
                 }`}
               >
-                <Users size={15} />
-                Colaboradores
+                <Users size={16} className={topLevelTab === 'employees' ? 'text-indigo-400' : 'text-slate-400'} />
+                <span>Colaboradores &amp; Directorio</span>
               </button>
               
               <button
                 onClick={() => setTopLevelTab('schedules')}
-                className={`px-5 py-3 text-xs font-black transition-all border-b-2 uppercase tracking-wider flex items-center gap-2 ${
+                className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
                   topLevelTab === 'schedules'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                    ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
                 }`}
               >
-                <Clock size={15} />
-                Gestión de Horarios
+                <Clock size={16} className={topLevelTab === 'schedules' ? 'text-amber-400' : 'text-slate-400'} />
+                <span>Gestión de Horarios</span>
               </button>
               
               <button
                 onClick={() => setTopLevelTab('attendance')}
-                className={`px-5 py-3 text-xs font-black transition-all border-b-2 uppercase tracking-wider flex items-center gap-2 ${
+                className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
                   topLevelTab === 'attendance'
-                    ? 'border-black text-black'
-                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                    ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
                 }`}
               >
-                <Calendar size={15} />
-                Reloj Marcador & Asistencia
+                <Calendar size={16} className={topLevelTab === 'attendance' ? 'text-emerald-400' : 'text-slate-400'} />
+                <span>Reloj Marcador &amp; Asistencia</span>
               </button>
             </div>
 
             {topLevelTab === 'employees' && (
               <>
                 {/* SEARCH AND FILTERING PANEL */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 mb-6 shrink-0">
+            <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-xs space-y-4 mb-6 shrink-0">
               <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
                 
                 {/* Search Bar */}
                 <div className="relative w-full md:max-w-md">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
                     type="text"
                     placeholder="Buscar colaborador por nombre, rol, teléfono..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200/60 focus:border-black outline-none rounded-xl text-xs font-semibold placeholder:text-slate-400 transition-colors"
+                    className="w-full pl-11 pr-10 py-3 bg-slate-50/80 border border-slate-200/80 focus:border-black outline-none rounded-2xl text-xs sm:text-sm font-semibold placeholder:text-slate-400 transition-colors"
                   />
                   {searchQuery && (
                     <button 
@@ -873,13 +873,13 @@ export default function PersonalView() {
                 </div>
 
                 {/* Sort dropdown */}
-                <div className="flex items-center gap-1.5 self-end md:self-auto text-xs font-bold text-slate-500">
-                  <ArrowUpDown size={13} className="text-slate-400" />
-                  <span className="text-slate-400">Ordenar por:</span>
+                <div className="flex items-center gap-2 self-end md:self-auto text-xs font-bold text-slate-600">
+                  <ArrowUpDown size={15} className="text-slate-400" />
+                  <span className="text-slate-500">Ordenar por:</span>
                   <select
                     value={orderByField}
                     onChange={e => setOrderByField(e.target.value as any)}
-                    className="bg-slate-50 px-3 py-1.5 border border-slate-200/60 rounded-xl text-slate-700 outline-none cursor-pointer hover:text-black font-extrabold text-xs"
+                    className="bg-slate-50 px-3.5 py-2 border border-slate-200/80 rounded-xl text-slate-800 outline-none cursor-pointer hover:border-slate-300 font-extrabold text-xs"
                   >
                     <option value="name">Nombre A-Z</option>
                     <option value="salary">Sueldo Base Mensual</option>
@@ -890,10 +890,10 @@ export default function PersonalView() {
               </div>
 
               {/* Filtering tabs */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-100/60">
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide text-xs">
                   {[
-                    { id: 'all', label: 'Todos' },
+                    { id: 'all', label: 'Todos los Colaboradores' },
                     { id: 'active', label: '🟢 Activos' },
                     { id: 'inactive', label: '🔴 Inactivos' },
                     { id: 'waiter', label: '🛒 Meseros' },
@@ -904,10 +904,10 @@ export default function PersonalView() {
                     <button
                       key={tab.id}
                       onClick={() => setActiveFilter(tab.id as any)}
-                      className={`px-4 py-2 rounded-full font-black border uppercase tracking-wider whitespace-nowrap transition-all text-[10px] ${
+                      className={`px-4 py-2 rounded-xl font-extrabold border tracking-wide whitespace-nowrap transition-all text-xs cursor-pointer ${
                         activeFilter === tab.id
-                          ? 'bg-black text-white border-black shadow-sm'
-                          : 'bg-slate-50 text-slate-500 border-slate-200/50 hover:bg-slate-100 hover:text-slate-700'
+                          ? 'bg-slate-950 text-white border-slate-950 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900'
                       }`}
                     >
                       {tab.label}
@@ -915,25 +915,25 @@ export default function PersonalView() {
                   ))}
                 </div>
 
-                <span className="text-xs font-black text-slate-400">
+                <span className="text-xs font-black text-slate-500">
                   {filteredEmployees.length} {filteredEmployees.length === 1 ? 'colaborador encontrado' : 'colaboradores encontrados'}
                 </span>
               </div>
             </div>
 
-            {/* DIRECTORY LIST TABLE */}
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-x-auto overflow-y-auto">
-                <table className="w-full text-left border-collapse">
+            {/* DIRECTORY LIST TABLE - BALANCED & ELEGANT */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden w-full flex flex-col mb-8">
+              <div className="overflow-x-auto scrollbar-thin">
+                <table className="w-full text-left border-collapse min-w-[900px]">
                   <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] font-black uppercase tracking-wider text-slate-400 select-none">
-                      <th className="py-4 px-6">Colaborador</th>
-                      <th className="py-4 px-6">Cargo / Rol</th>
-                      <th className="py-4 px-6">Horario de Trabajo</th>
-                      <th className="py-4 px-6 text-right">Sueldo Base</th>
-                      <th className="py-4 px-6 text-center">PIN de Acceso</th>
-                      <th className="py-4 px-6 text-center">Estado de Acceso</th>
-                      <th className="py-4 px-6 text-center">Acciones</th>
+                    <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[11px] font-black uppercase tracking-wider text-slate-400 select-none">
+                      <th className="py-3.5 px-5">Colaborador</th>
+                      <th className="py-3.5 px-5">Cargo / Rol</th>
+                      <th className="py-3.5 px-5">Horario de Trabajo</th>
+                      <th className="py-3.5 px-5 text-right">Sueldo Base</th>
+                      <th className="py-3.5 px-5 text-center">PIN de Acceso</th>
+                      <th className="py-3.5 px-5 text-center">Estado de Acceso</th>
+                      <th className="py-3.5 px-5 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -948,10 +948,10 @@ export default function PersonalView() {
                             setIsEditing(false);
                             setRevealPin(false);
                           }}
-                          className="hover:bg-slate-50/50 cursor-pointer transition-colors group"
+                          className="hover:bg-slate-50/80 cursor-pointer transition-colors group"
                         >
                           {/* Colaborador Avatar & Info */}
-                          <td className="py-4 px-6">
+                          <td className="py-3.5 px-5">
                             <div className="flex items-center gap-3">
                               <button
                                 onClick={(e) => {
@@ -972,78 +972,78 @@ export default function PersonalView() {
                               >
                                 <Star size={14} className={isStarred ? "fill-amber-400 text-amber-500" : ""} />
                               </button>
-                              <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs border ${getAvatarColor(emp.name)}`}>
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs border shadow-2xs shrink-0 ${getAvatarColor(emp.name)}`}>
                                 {initials}
                               </div>
                               <div>
-                                <span className="font-extrabold text-slate-900 block group-hover:text-indigo-600 transition-colors">{emp.name}</span>
-                                <span className="text-[10px] text-slate-400 font-medium block">{emp.phone || 'Sin número registrado'}</span>
+                                <span className="font-extrabold text-slate-900 text-xs sm:text-sm block group-hover:text-indigo-600 transition-colors">{emp.name}</span>
+                                <span className="text-[11px] text-slate-400 font-medium block">{emp.phone || 'Sin número registrado'}</span>
                               </div>
                             </div>
                           </td>
 
                           {/* Role Pill */}
-                          <td className="py-4 px-6">
-                            <span className={`px-3 py-1 rounded-full text-[8.5px] font-black uppercase tracking-wider inline-block ${
-                              emp.role === 'admin' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
-                              emp.role === 'cook' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
-                              emp.role === 'finance' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'bg-sky-50 text-sky-700 border border-sky-100'
+                          <td className="py-3.5 px-5">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider inline-block ${
+                              emp.role === 'admin' ? 'bg-amber-50 text-amber-800 border border-amber-200/60' :
+                              emp.role === 'cook' ? 'bg-rose-50 text-rose-800 border border-rose-200/60' :
+                              emp.role === 'finance' ? 'bg-indigo-50 text-indigo-800 border border-indigo-200/60' : 'bg-sky-50 text-sky-800 border border-sky-200/60'
                             }`}>
                               {getRoleLabel(emp.role)}
                             </span>
                           </td>
 
                           {/* Schedule */}
-                          <td className="py-4 px-6 font-semibold text-slate-600">
+                          <td className="py-3.5 px-5 font-bold text-slate-600">
                             <div className="flex items-center gap-1.5">
-                              <Clock size={13} className="text-slate-400" />
-                              <span>{emp.schedule || 'No definido'}</span>
+                              <Clock size={13} className="text-slate-400 shrink-0" />
+                              <span className="text-xs">{emp.schedule || 'No definido'}</span>
                             </div>
                           </td>
 
                           {/* Base Salary */}
-                          <td className="py-4 px-6 text-right font-bold text-slate-900 text-sm">
+                          <td className="py-3.5 px-5 text-right font-black text-slate-900 text-xs sm:text-sm">
                             ${(emp.salary || 0).toFixed(2)}
                           </td>
 
                           {/* Pin Code */}
-                          <td className="py-4 px-6 text-center">
-                            <span className="font-mono bg-slate-100 text-slate-800 font-bold px-3 py-1 rounded-lg text-xs select-none">
+                          <td className="py-3.5 px-5 text-center">
+                            <span className="font-mono bg-slate-100 text-slate-800 font-extrabold px-2.5 py-1 rounded-lg text-xs select-none border border-slate-200/60 inline-block">
                               ••••
                             </span>
                           </td>
 
                           {/* Status */}
-                          <td className="py-4 px-6 text-center">
-                            <span className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase ${
+                          <td className="py-3.5 px-5 text-center">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide inline-block ${
                               emp.status === 'active' 
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
-                                : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/60' 
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
                             }`}>
                               {emp.status === 'active' ? 'Acceso Activo' : 'Revocado'}
                             </span>
                           </td>
 
                           {/* Action quick buttons */}
-                          <td className="py-4 px-6 text-center" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-3.5 px-5 text-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1.5">
                               <button 
                                 onClick={() => toggleEmployeeStatus(emp)}
-                                className={`p-1.5 rounded-xl border transition-colors ${
+                                className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                                   emp.status === 'active'
-                                    ? 'bg-amber-50 border-amber-100 text-amber-600 hover:bg-amber-100/50'
-                                    : 'bg-emerald-50 border-emerald-100 text-emerald-600 hover:bg-emerald-100/50'
+                                    ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                    : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
                                 }`}
                                 title={emp.status === 'active' ? 'Suspender Acceso' : 'Habilitar Acceso'}
                               >
-                                {emp.status === 'active' ? <Lock size={13} /> : <Unlock size={13} />}
+                                {emp.status === 'active' ? <Lock size={14} /> : <Unlock size={14} />}
                               </button>
                               <button 
                                 onClick={() => handleDeleteEmployee(emp.id)}
-                                className="p-1.5 rounded-xl bg-slate-50 hover:bg-rose-50 border border-slate-100 hover:border-rose-100 text-slate-400 hover:text-rose-600 transition-colors"
+                                className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
                                 title="Dar de Baja"
                               >
-                                <Trash2 size={13} />
+                                <Trash2 size={14} />
                               </button>
                             </div>
                           </td>
@@ -1217,27 +1217,27 @@ export default function PersonalView() {
                 </div>
 
                 {/* Attendance Log Table */}
-                <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <div className="bg-white rounded-[32px] border border-slate-200/80 shadow-xs overflow-hidden flex flex-col mb-8">
+                  <div className="p-6 border-b border-slate-200/80 flex justify-between items-center bg-slate-50/70">
                     <div>
-                      <h4 className="text-sm font-black text-slate-900">Historial de Marcajes y Auditoría</h4>
-                      <p className="text-slate-400 text-xs mt-0.5">Control de entradas, salidas, horas calculadas y verificación fotográfica anti-fraude.</p>
+                      <h4 className="text-base font-black text-slate-900">Historial de Marcajes y Auditoría</h4>
+                      <p className="text-slate-500 text-xs mt-0.5">Control de entradas, salidas, horas calculadas y verificación fotográfica anti-fraude.</p>
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                  <div className="overflow-x-auto scrollbar-thin">
+                    <table className="w-full text-left border-collapse min-w-[850px]">
                       <thead>
-                        <tr className="border-b border-slate-100 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/20">
-                          <th className="py-3 px-6">Colaborador</th>
-                          <th className="py-3 px-4">Fecha</th>
-                          <th className="py-3 px-4">Entrada</th>
-                          <th className="py-3 px-4">Salida</th>
-                          <th className="py-3 px-4 text-center">Fotos de Seguridad</th>
-                          <th className="py-3 px-6 text-right">Duración</th>
+                        <tr className="border-b border-slate-200/80 text-xs font-black uppercase tracking-wider text-slate-500 bg-slate-100/80">
+                          <th className="py-4.5 px-6">Colaborador</th>
+                          <th className="py-4.5 px-5">Fecha</th>
+                          <th className="py-4.5 px-5">Entrada</th>
+                          <th className="py-4.5 px-5">Salida</th>
+                          <th className="py-4.5 px-5 text-center">Fotos de Seguridad</th>
+                          <th className="py-4.5 px-6 text-right">Duración</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                      <tbody className="divide-y divide-slate-100 text-sm font-semibold text-slate-700">
                         {attendanceLogs.length > 0 ? (
                           [...attendanceLogs].sort((a,b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime()).map((log) => {
                             const checkInTime = new Date(log.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1245,56 +1245,56 @@ export default function PersonalView() {
                               ? new Date(log.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                               : null;
                             return (
-                              <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="py-4 px-6">
-                                  <span className="font-extrabold text-slate-900 block">{log.employeeName}</span>
-                                  <span className="text-[9px] text-slate-400 uppercase tracking-wide block">{getRoleLabel(log.employeeRole)}</span>
+                              <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="py-4.5 px-6">
+                                  <span className="font-extrabold text-slate-900 text-sm block">{log.employeeName}</span>
+                                  <span className="text-xs text-slate-400 font-bold uppercase tracking-wide block mt-0.5">{getRoleLabel(log.employeeRole)}</span>
                                 </td>
-                                <td className="py-4 px-4 font-mono text-slate-500">
+                                <td className="py-4.5 px-5 font-mono text-slate-600 text-xs sm:text-sm font-bold">
                                   {log.date}
                                 </td>
-                                <td className="py-4 px-4 text-slate-800">
+                                <td className="py-4.5 px-5 text-slate-900 font-bold text-xs sm:text-sm">
                                   🟢 {checkInTime}
                                 </td>
-                                <td className="py-4 px-4">
+                                <td className="py-4.5 px-5">
                                   {checkOutTime ? (
-                                    <span className="text-slate-600">🔴 {checkOutTime}</span>
+                                    <span className="text-slate-700 font-bold text-xs sm:text-sm">🔴 {checkOutTime}</span>
                                   ) : (
-                                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-black rounded-md tracking-wider inline-block">
+                                    <span className="px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black rounded-lg tracking-wider inline-block">
                                       EN TURNO
                                     </span>
                                   )}
                                 </td>
-                                <td className="py-4 px-4">
+                                <td className="py-4.5 px-5">
                                   <div className="flex items-center justify-center gap-2">
                                     {log.photoIn ? (
                                       <button 
                                         onClick={() => setAdminPreviewPhoto({ url: log.photoIn, title: `Foto Entrada - ${log.employeeName} (${log.date} ${checkInTime})` })}
-                                        className="py-1 px-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg border border-indigo-100/60 transition-all flex items-center gap-1.5 text-[10px] font-extrabold"
+                                        className="py-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200/80 transition-all flex items-center gap-1.5 text-xs font-extrabold cursor-pointer"
                                         title="Ver foto tomada en entrada"
                                       >
-                                        <Camera size={12} />
+                                        <Camera size={14} />
                                         <span>Entrada</span>
                                       </button>
                                     ) : (
-                                      <span className="text-[10px] text-slate-300">Sin foto entrada</span>
+                                      <span className="text-xs text-slate-400 font-medium">Sin foto entrada</span>
                                     )}
                                     
                                     {log.photoOut ? (
                                       <button 
                                         onClick={() => setAdminPreviewPhoto({ url: log.photoOut, title: `Foto Salida - ${log.employeeName} (${log.date} ${checkOutTime})` })}
-                                        className="py-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-100/60 transition-all flex items-center gap-1.5 text-[10px] font-extrabold"
+                                        className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200/80 transition-all flex items-center gap-1.5 text-xs font-extrabold cursor-pointer"
                                         title="Ver foto tomada en salida"
                                       >
-                                        <Camera size={12} />
+                                        <Camera size={14} />
                                         <span>Salida</span>
                                       </button>
                                     ) : log.checkOut ? (
-                                      <span className="text-[10px] text-slate-300">Sin foto salida</span>
+                                      <span className="text-xs text-slate-400 font-medium">Sin foto salida</span>
                                     ) : null}
                                   </div>
                                 </td>
-                                <td className="py-4 px-6 text-right font-bold text-slate-900 font-mono">
+                                <td className="py-4.5 px-6 text-right font-black text-slate-900 font-mono text-sm">
                                   {log.hoursWorked ? `${log.hoursWorked.toFixed(1)} hrs` : '-'}
                                 </td>
                               </tr>
@@ -1304,8 +1304,8 @@ export default function PersonalView() {
                           <tr>
                             <td colSpan={6} className="py-16 text-center text-slate-400">
                               <Clock size={36} className="mx-auto text-slate-200 mb-2" />
-                              <span className="font-bold text-xs block text-slate-500">Sin registros de asistencia</span>
-                              <span className="text-[10px] text-slate-400 font-medium">Las marcas registradas por los colaboradores se verán aquí.</span>
+                              <span className="font-bold text-sm block text-slate-600">Sin registros de asistencia</span>
+                              <span className="text-xs text-slate-400 font-medium mt-0.5 block">Las marcas registradas por los colaboradores se verán aquí.</span>
                             </td>
                           </tr>
                         )}

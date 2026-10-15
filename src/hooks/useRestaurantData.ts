@@ -212,9 +212,11 @@ export function useRestaurantData() {
     kdsCriticalMinutes: 15,
     kdsWarningColor: 'amber', // 'amber' | 'yellow' | 'orange' | 'purple'
     kdsCriticalColor: 'rose', // 'rose' | 'red' | 'crimson'
-    kitchenMode: 'kds', // 'kds' | 'direct_print'
+    kitchenMode: localStorage.getItem('kitchenMode') || 'kds', // 'kds' | 'direct_print'
     kitchenPaperWidth: '80mm', // '80mm' | '58mm'
     autoPrintKitchenTicket: true,
+    allowCashierPos: localStorage.getItem('allowCashierPos') === 'false' ? false : true,
+    allowCashierCreditApproval: localStorage.getItem('allowCashierCreditApproval') === 'false' ? false : true,
     auto86Enabled: true,
     coursePacingEnabled: true,
     seatOrderingEnabled: true,
@@ -319,6 +321,11 @@ export function useRestaurantData() {
           kdsCriticalMinutes: data.kdsCriticalMinutes !== undefined ? data.kdsCriticalMinutes : 15,
           kdsWarningColor: data.kdsWarningColor || 'amber',
           kdsCriticalColor: data.kdsCriticalColor || 'rose',
+          kitchenMode: data.kitchenMode || localStorage.getItem('kitchenMode') || 'kds',
+          kitchenPaperWidth: data.kitchenPaperWidth || '80mm',
+          autoPrintKitchenTicket: data.autoPrintKitchenTicket !== undefined ? data.autoPrintKitchenTicket : true,
+          allowCashierPos: data.allowCashierPos !== undefined ? data.allowCashierPos : (localStorage.getItem('allowCashierPos') === 'false' ? false : true),
+          allowCashierCreditApproval: data.allowCashierCreditApproval !== undefined ? data.allowCashierCreditApproval : (localStorage.getItem('allowCashierCreditApproval') === 'false' ? false : true),
           auto86Enabled: data.auto86Enabled !== undefined ? data.auto86Enabled : true,
           coursePacingEnabled: data.coursePacingEnabled !== undefined ? data.coursePacingEnabled : true,
           seatOrderingEnabled: data.seatOrderingEnabled !== undefined ? data.seatOrderingEnabled : true,

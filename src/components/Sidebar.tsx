@@ -31,6 +31,7 @@ import { collection, onSnapshot, query, where, collectionGroup } from 'firebase/
 import { db } from '../lib/firebase';
 import { Role } from '../types';
 import { playSuccessSound } from '../lib/audio';
+import { useRestaurantData } from '../hooks/useRestaurantData';
 
 interface SidebarProps {
   role: Role;
@@ -61,6 +62,17 @@ export default function Sidebar({
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('notif_sound_enabled') !== 'false';
   });
+
+  const [isInsideTable, setIsInsideTable] = useState(false);
+
+  // Hide mobile bottom navigation bar when inside a table comanda modal
+  useEffect(() => {
+    const handleTableModal = (e: any) => {
+      setIsInsideTable(!!e.detail?.isOpen);
+    };
+    window.addEventListener('table_modal_state', handleTableModal);
+    return () => window.removeEventListener('table_modal_state', handleTableModal);
+  }, []);
 
   // Alert Badge states
   const [tableWaitingBillCount, setTableWaitingBillCount] = useState(0);
@@ -146,13 +158,34 @@ export default function Sidebar({
     }
   };
 
+  const [, setSettingsTick] = useState(0);
+
+  useEffect(() => {
+    const handleSettingsUpdate = () => setSettingsTick(t => t + 1);
+    window.addEventListener('settings_updated', handleSettingsUpdate);
+    window.addEventListener('storage', handleSettingsUpdate);
+    return () => {
+      window.removeEventListener('settings_updated', handleSettingsUpdate);
+      window.removeEventListener('storage', handleSettingsUpdate);
+    };
+  }, []);
+
+  const { settings } = useRestaurantData();
+  const localKitchenMode = localStorage.getItem('kitchenMode');
+  const isDirectPrint = localKitchenMode ? localKitchenMode === 'direct_print' : (settings as any)?.kitchenMode === 'direct_print';
+
+  const localAllowCashier = localStorage.getItem('allowCashierPos');
+  const allowCashierPos = localAllowCashier !== null ? localAllowCashier === 'true' : ((settings as any)?.allowCashierPos !== undefined ? (settings as any).allowCashierPos : true);
+
+  const waiterRoles = ['admin', 'waiter', ...(allowCashierPos ? ['finance'] : [])];
+
   // Structured menu divided by sections matching the user's design reference
   const menuSections = [
     {
       category: 'OPERACIÓN & VENTAS',
       items: [
         { id: 'dashboard', label: 'Panel General', icon: LayoutDashboard, roles: ['admin', 'waiter', 'cook', 'finance'], badge: 0 },
-        { id: 'waiter', label: 'Terminal POS', icon: Store, roles: ['admin', 'waiter'], badge: tableWaitingBillCount },
+        { id: 'waiter', label: 'Terminal POS', icon: Store, roles: waiterRoles, badge: tableWaitingBillCount },
         { id: 'kitchen', label: 'Cocina (KDS)', icon: ChefHat, roles: ['admin', 'cook'], badge: kitchenActiveCount },
         { id: 'inventory', label: 'Inventario & Stock', icon: Package, roles: ['admin'], badge: 0 },
         { id: 'crm', label: 'Clientes & Fiado', icon: Users, roles: ['admin'], badge: 0 },
@@ -179,11 +212,14 @@ export default function Sidebar({
     }
   ];
 
-  // Filter sections and items based on active user role
+  // Filter sections and items based on active user role & kitchen mode
   const visibleSections = menuSections
     .map(section => ({
       ...section,
-      items: section.items.filter(item => item.roles.includes(role))
+      items: section.items.filter(item => {
+        if (item.id === 'kitchen' && isDirectPrint) return false;
+        return item.roles.includes(role);
+      })
     }))
     .filter(section => section.items.length > 0);
 
@@ -400,70 +436,72 @@ export default function Sidebar({
         </div>
       </motion.aside>
 
-      {/* Mobile Bottom Navigation Bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg">
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1 px-2 w-full justify-start select-none touch-pan-x -webkit-overflow-scrolling-touch">
-          {allVisibleItems.map((item) => {
-            const isSelected = activeView === item.id;
-            const hasBadge = !!item.badge;
-            const isDot = item.badge === '•';
-            const IconComponent = item.icon;
+      {/* Mobile Bottom Navigation Bar - hidden when inside table modal to provide full height for orders */}
+      {!isInsideTable && (
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1 px-2 w-full justify-start select-none touch-pan-x -webkit-overflow-scrolling-touch">
+            {allVisibleItems.map((item) => {
+              const isSelected = activeView === item.id;
+              const hasBadge = !!item.badge;
+              const isDot = item.badge === '•';
+              const IconComponent = item.icon;
 
-            return (
-              <button
-                key={item.id}
-                onClick={() => onViewChange(item.id)}
-                className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all shrink-0 min-w-[70px] ${
-                  isSelected 
-                    ? 'text-blue-600 font-bold scale-[1.02] bg-blue-50/60' 
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                <div className="relative mb-0.5">
-                  <IconComponent 
-                    size={18} 
-                    className={isSelected ? 'text-blue-600 stroke-[2.5]' : 'text-slate-400 stroke-[1.8]'} 
-                  />
-                  {hasBadge && (
-                    <span className={`absolute -top-1 -right-1.5 rounded-full flex items-center justify-center font-black leading-none ${
-                      isDot 
-                        ? 'w-1.5 h-1.5 bg-emerald-500 ring-1 ring-white' 
-                        : 'text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white ring-1 ring-white'
-                    }`}>
-                      {!isDot && item.badge}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[9px] tracking-tight truncate w-[66px] text-center font-semibold">
-                  {item.label}
-                </span>
-              </button>
-            );
-          })}
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onViewChange(item.id)}
+                  className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all shrink-0 min-w-[70px] ${
+                    isSelected 
+                      ? 'text-blue-600 font-bold scale-[1.02] bg-blue-50/60' 
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <div className="relative mb-0.5">
+                    <IconComponent 
+                      size={18} 
+                      className={isSelected ? 'text-blue-600 stroke-[2.5]' : 'text-slate-400 stroke-[1.8]'} 
+                    />
+                    {hasBadge && (
+                      <span className={`absolute -top-1 -right-1.5 rounded-full flex items-center justify-center font-black leading-none ${
+                        isDot 
+                          ? 'w-1.5 h-1.5 bg-emerald-500 ring-1 ring-white' 
+                          : 'text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white ring-1 ring-white'
+                      }`}>
+                        {!isDot && item.badge}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[9px] tracking-tight truncate w-[66px] text-center font-semibold">
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
 
-          {/* Mobile Sound Toggle */}
-          <button
-            onClick={toggleSound}
-            className="flex flex-col items-center justify-center p-2 rounded-xl text-emerald-600 hover:text-emerald-700 transition-colors shrink-0 min-w-[65px]"
-          >
-            {soundEnabled ? (
-              <Volume2 size={18} className="mb-0.5 text-emerald-500" />
-            ) : (
-              <VolumeX size={18} className="mb-0.5 text-slate-400" />
-            )}
-            <span className="text-[9px] font-semibold text-slate-600">Audio</span>
-          </button>
+            {/* Mobile Sound Toggle */}
+            <button
+              onClick={toggleSound}
+              className="flex flex-col items-center justify-center p-2 rounded-xl text-emerald-600 hover:text-emerald-700 transition-colors shrink-0 min-w-[65px]"
+            >
+              {soundEnabled ? (
+                <Volume2 size={18} className="mb-0.5 text-emerald-500" />
+              ) : (
+                <VolumeX size={18} className="mb-0.5 text-slate-400" />
+              )}
+              <span className="text-[9px] font-semibold text-slate-600">Audio</span>
+            </button>
 
-          {/* Mobile Logout */}
-          <button
-            onClick={onLogout}
-            className="flex flex-col items-center justify-center p-2 rounded-xl text-rose-500 hover:text-rose-600 transition-colors shrink-0 min-w-[65px]"
-          >
-            <LogOut size={18} className="mb-0.5 text-rose-500" />
-            <span className="text-[9px] font-bold text-rose-600">Salir</span>
-          </button>
-        </div>
-      </nav>
+            {/* Mobile Logout */}
+            <button
+              onClick={onLogout}
+              className="flex flex-col items-center justify-center p-2 rounded-xl text-rose-500 hover:text-rose-600 transition-colors shrink-0 min-w-[65px]"
+            >
+              <LogOut size={18} className="mb-0.5 text-rose-500" />
+              <span className="text-[9px] font-bold text-rose-600">Salir</span>
+            </button>
+          </div>
+        </nav>
+      )}
     </>
   );
 }

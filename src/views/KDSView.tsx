@@ -224,65 +224,73 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
   };
 
   return (
-    <div className="h-full flex flex-col w-full flex-1 min-h-full pb-16">
+    <div className="h-full flex flex-col w-full flex-1 min-h-full pb-2">
       
-      {/* SECTION HEADER */}
-      <header className="mb-6 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
-        <div>
-          <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100 inline-block mb-1.5">
-            Módulo Operativo de Cocina & Bar
-          </span>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-            Pantalla de Cocina (KDS)
-          </h1>
-          <p className="text-slate-500 text-xs sm:text-sm mt-0.5">
-            Chef de Guardia: <strong className="text-emerald-600 font-extrabold">{currentUser?.name || 'Cocinero'}</strong>
-          </p>
+      {/* SECTION HEADER: Ultra-compact on mobile to maximize kitchen card space */}
+      <header className="mb-2 sm:mb-4 pb-2 sm:pb-3 border-b border-slate-200/80 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+            <ChefHat size={16} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-xs sm:text-lg font-black tracking-tight text-slate-900 leading-none truncate">
+                Cocina (KDS)
+              </h1>
+              <span className="hidden sm:inline-block text-[9px] uppercase font-black tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                Operativo
+              </span>
+            </div>
+            <p className="text-slate-500 text-[9px] sm:text-xs mt-0.5 truncate">
+              Chef: <strong className="text-emerald-700 font-extrabold">{currentUser?.name || 'Cocinero'}</strong>
+            </p>
+          </div>
         </div>
 
-        {/* Controls: AutoPrint + Tabs */}
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+        {/* Controls: Tabs + AutoPrint */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Tabs */}
-          <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
+          <div className="bg-slate-100 p-0.5 sm:p-1 rounded-xl flex items-center gap-0.5 sm:gap-1 border border-slate-200">
             <button
               onClick={() => setActiveTab('pending')}
-              className={`px-3.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'pending'
-                  ? 'bg-white text-slate-900 shadow-sm'
+                  ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <span>Pendientes</span>
               {groupedTickets.length > 0 && (
-                <span className="bg-amber-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                <span className="bg-amber-500 text-white font-extrabold text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full min-w-[16px] text-center">
                   {groupedTickets.length}
                 </span>
               )}
             </button>
             <button
               onClick={() => setActiveTab('history')}
-              className={`px-3.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+              className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg font-bold text-[11px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer ${
                 activeTab === 'history'
-                  ? 'bg-white text-slate-900 shadow-sm'
+                  ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
+              title="Historial de pedidos listos"
             >
-              <RotateCcw size={13} />
-              <span>Historial (Deshacer)</span>
+              <RotateCcw size={11} />
+              <span className="hidden xs:inline">Historial</span>
             </button>
           </div>
 
           <button
             onClick={toggleAutoPrint}
-            className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all border cursor-pointer ${
+            className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl font-bold text-[11px] sm:text-xs flex items-center gap-1 transition-all border cursor-pointer ${
               autoPrintEnabled 
-                ? 'bg-amber-500 text-white border-amber-600 shadow-sm' 
+                ? 'bg-amber-500 text-white border-amber-600 shadow-xs' 
                 : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
             }`}
             title="Auto-imprimir ticket al recibir nuevo pedido en cocina"
           >
-            <Printer size={14} className={autoPrintEnabled ? 'animate-bounce' : ''} />
-            <span className="hidden sm:inline">Auto-Impresión:</span>
+            <Printer size={12} className={autoPrintEnabled ? 'animate-bounce' : ''} />
+            <span className="hidden sm:inline">Auto:</span>
             <strong>{autoPrintEnabled ? 'ON' : 'OFF'}</strong>
           </button>
         </div>
@@ -322,7 +330,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
               <p className="text-sm text-slate-500 mt-1">La cocina está al día. Las nuevas comandas aparecerán aquí en tiempo real.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4">
               {groupedTickets.map((ticket: any) => {
                 const elapsedMins = getElapsedMinutes(ticket.timestamp);
                 const warningMins = settings?.kdsWarningMinutes ?? 8;
@@ -348,7 +356,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                     key={ticket.id}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className={`bg-white rounded-[24px] border shadow-sm overflow-hidden flex flex-col transition-all ${
+                    className={`bg-white rounded-2xl sm:rounded-[24px] border shadow-xs overflow-hidden flex flex-col transition-all ${
                       isCritical 
                         ? criticalClass
                         : isWarning 
@@ -357,32 +365,32 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                     }`}
                   >
                     {/* Ticket Header */}
-                    <div className={`p-4 text-white flex justify-between items-start ${
+                    <div className={`p-2.5 sm:p-3.5 text-white flex justify-between items-start ${
                       isCritical ? 'bg-rose-950' : isWarning ? 'bg-amber-950' : 'bg-slate-900'
                     }`}>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-[10px] uppercase font-black tracking-wider text-amber-400 block">
-                            {ticket.isDelivery ? '📦 Delivery' : '🍽️ Comanda Mesa'}
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                          <span className="text-[10px] uppercase font-black tracking-wider text-amber-400 block shrink-0">
+                            {ticket.isDelivery ? '📦 Delivery' : '🍽️ Mesa'}
                           </span>
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1.5 ${
+                          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md flex items-center gap-1 ${
                             isCritical 
                               ? 'bg-rose-600 text-white animate-pulse' 
                               : isWarning 
                                 ? 'bg-amber-500 text-slate-950 font-extrabold' 
                                 : 'bg-emerald-500 text-white'
                           }`}>
-                            <Clock size={11} /> 
-                            <span>{elapsedMins} min</span>
-                            <span className="text-[9px] opacity-90 border-l border-white/20 pl-1">
-                              {isCritical ? '🚨 CRÍTICO (>15m)' : isWarning ? '🟡 ALERTA (8-15m)' : '🟢 OK (<8m)'}
+                            <Clock size={10} /> 
+                            <span>{elapsedMins}m</span>
+                            <span className="text-[9px] opacity-90 border-l border-white/20 pl-1 font-bold">
+                              {isCritical ? 'CRÍTICO' : isWarning ? 'ALERTA' : 'OK'}
                             </span>
                           </span>
                         </div>
-                        <h3 className="font-black text-xl text-white leading-tight">
+                        <h3 className="font-black text-base sm:text-xl text-white leading-tight truncate">
                           {ticket.tableName}
                         </h3>
-                        <div className="text-[10px] text-slate-300 font-mono mt-1 flex items-center gap-2">
+                        <div className="text-[10px] text-slate-300 font-mono mt-0.5 flex items-center gap-1.5 flex-wrap">
                           <span>
                             {new Date(ticket.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
@@ -397,28 +405,28 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                       {/* Print Sticker Button */}
                       <button
                         onClick={() => setSelectedTicketForPrint(ticket)}
-                        className="bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border border-white/10 shrink-0"
+                        className="bg-white/10 hover:bg-white/20 text-white font-bold text-[10px] sm:text-[11px] px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl flex items-center gap-1 transition-all cursor-pointer border border-white/10 shrink-0"
                         title="Imprimir sticker/ticket para empaque o cocina"
                       >
-                        <Printer size={13} className="text-amber-400" />
+                        <Printer size={12} className="text-amber-400" />
                         <span>Sticker</span>
                       </button>
                     </div>
 
                     {/* Optional Customer Info */}
                     {ticket.customerName && (
-                      <div className="bg-amber-50 border-b border-amber-200/80 px-4 py-2 text-xs font-bold text-amber-900 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 truncate">
-                          <span className="text-amber-700 font-extrabold shrink-0">👤 Cliente:</span>
-                          <span className="truncate">{ticket.customerName}</span>
+                      <div className="bg-amber-50 border-b border-amber-200/80 px-2.5 py-1 text-xs font-bold text-amber-900 flex items-center justify-between">
+                        <span className="flex items-center gap-1 truncate">
+                          <span className="text-amber-700 font-extrabold shrink-0 text-[10px]">👤 Cliente:</span>
+                          <span className="truncate text-[11px]">{ticket.customerName}</span>
                         </span>
-                        <Tag size={12} className="text-amber-600 shrink-0" />
+                        <Tag size={11} className="text-amber-600 shrink-0" />
                       </div>
                     )}
 
                     {/* Interactive Items List (Tap to Checkoff & Course Firing) */}
-                    <div className="p-4 flex-1 space-y-2.5">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    <div className="p-2.5 sm:p-3.5 flex-1 space-y-1.5 sm:space-y-2">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
                         Toca un plato para tacharlo al prepararlo:
                       </p>
                       {ticket.items.map((item: any) => {
@@ -544,20 +552,20 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                     </div>
 
                     {/* Action Button: 1-CLICK DIRECT COMPLETION */}
-                    <div className="p-3.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+                    <div className="p-2.5 sm:p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">
                       <button
                         onClick={() => setSelectedTicketForPrint(ticket)}
-                        className="p-3 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition-all cursor-pointer"
-                        title="Imprimir sticker de sticker"
+                        className="p-2 sm:p-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition-all cursor-pointer shrink-0"
+                        title="Imprimir sticker"
                       >
-                        <Printer size={16} />
+                        <Printer size={15} />
                       </button>
                       
                       <button
                         onClick={() => markTicketReady(ticket)}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl font-bold uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-95 cursor-pointer"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 sm:py-3 px-3 rounded-xl font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
                       >
-                        <CheckCircle2 size={18} />
+                        <CheckCircle2 size={16} />
                         <span>¡LISTO PARA SERVIR! 🍳</span>
                       </button>
                     </div>
@@ -579,9 +587,9 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
               <p className="text-sm text-slate-500 mt-1">Aquí podrás deshacer un pedido si lo completas por error.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4">
               {historyTickets.map((ticket: any) => (
-                <div key={ticket.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between">
+                <div key={ticket.id} className="bg-white rounded-2xl border border-slate-200 p-3 sm:p-5 shadow-xs flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-black text-lg text-slate-900">{ticket.tableName}</span>

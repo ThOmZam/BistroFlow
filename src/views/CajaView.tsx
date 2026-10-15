@@ -51,7 +51,7 @@ import CurrencySelector from '../components/CurrencySelector';
 import { playClickSound, playCashSound, playSuccessSound, playErrorSound } from '../lib/audio';
 import { printKitchenTicket } from '../lib/printer';
 
-export default function CajaView({ currentUser }: { currentUser?: any }) {
+export default function CajaView({ currentUser, onViewChange }: { currentUser?: any; onViewChange?: (view: string) => void }) {
   const { settings, tables } = useRestaurantData();
   const { 
     activeCurrency, 
@@ -87,13 +87,21 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   const [openingInitialCashBs, setOpeningInitialCashBs] = useState('0.00');
   const [openingNotes, setOpeningNotes] = useState('');
 
-  // Cash Movement Modal State (Entradas / Salidas de caja)
+  // Advanced Cash Movement Modal State (Full Finance Form)
   const [isCashMovementModalOpen, setIsCashMovementModalOpen] = useState(false);
   const [isSubmittingMovement, setIsSubmittingMovement] = useState(false);
   const [movementType, setMovementType] = useState<'in' | 'out'>('out');
+  const [movementCategory, setMovementCategory] = useState('Insumos');
   const [movementAmountUSD, setMovementAmountUSD] = useState('');
   const [movementAmountBs, setMovementAmountBs] = useState('');
   const [movementReason, setMovementReason] = useState('');
+  const [movementPaymentMethod, setMovementPaymentMethod] = useState('cash');
+  const [movementIsFiscal, setMovementIsFiscal] = useState(false);
+  const [movementFiscalInvoice, setMovementFiscalInvoice] = useState('');
+  const [movementTaxRate, setMovementTaxRate] = useState<number>(16);
+  const [movementWithholdingRate, setMovementWithholdingRate] = useState<number>(0);
+  const [movementSelectedClientId, setMovementSelectedClientId] = useState('');
+  const [clientsList, setClientsList] = useState<any[]>([]);
 
   // Close Shift & Arqueo Modal State
   const [isClosingShiftModalOpen, setIsClosingShiftModalOpen] = useState(false);
@@ -103,7 +111,105 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
   const [closingNotes, setClosingNotes] = useState('');
   const [viewingShiftDetails, setViewingShiftDetails] = useState<any | null>(null);
 
-  // Real-time listener for cashShifts & transactions
+  // Transfer / Merge Table Modal State
+  const [transferSession, setTransferSession] = useState<any | null>(null);
+  const [targetTableId, setTargetTableId] = useState<string>('');
+  const [transferActionType, setTransferActionType] = useState<'move' | 'merge'>('move');
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+  // Execute Table Transfer / Merge Handler
+  const handleExecuteTableTransfer = async () => {
+    if (!transferSession || !targetTableId) return;
+    const targetTable = tables.find(t => t.id === targetTableId);
+    if (!targetTable) return;
+
+    setIsTransferring(true);
+    try {
+      if (transferActionType === 'move') {
+        await updateDoc(doc(db, 'sessions', transferSession.id), {
+          tableId: targetTable.id,
+          tableNumber: targetTable.number
+        });
+        await logAction(
+          'sales',
+          currentUser?.name || 'Caja',
+          'Movió Mesa',
+          `Movió comanda de Mesa ${transferSession.tableNumber || transferSession.tableId} a Mesa ${targetTable.number}`
+        );
+        playSuccessSound();
+        alert(`⚡ Comanda movida exitosamente a la Mesa ${targetTable.number}.`);
+      } else {
+        const existingTargetSession = activeSessions.find(s => s.tableId === targetTable.id && s.id !== transferSession.id);
+        if (existingTargetSession) {
+          const mergedAccounts = [...(existingTargetSession.accounts || []), ...(transferSession.accounts || [])];
+          const newTotalAmount = (existingTargetSession.totalAmount || 0) + (transferSession.totalAmount || 0);
+          
+          await updateDoc(doc(db, 'sessions', existingTargetSession.id), {
+            accounts: mergedAccounts,
+            totalAmount: newTotalAmount
+          });
+          
+          await deleteDoc(doc(db, 'sessions', transferSession.id));
+
+          await logAction(
+            'sales',
+            currentUser?.name || 'Caja',
+            'Unió Mesas',
+            `Unió la cuenta de Mesa ${transferSession.tableNumber || transferSession.tableId} con la Mesa ${targetTable.number}`
+          );
+          playSuccessSound();
+          alert(`⚡ Cuentas unidas exitosamente en la Mesa ${targetTable.number}. Total consolidado: $${newTotalAmount.toFixed(2)} USD.`);
+        } else {
+          await updateDoc(doc(db, 'sessions', transferSession.id), {
+            tableId: targetTable.id,
+            tableNumber: targetTable.number
+          });
+          playSuccessSound();
+          alert(`⚡ Comanda movida a la Mesa ${targetTable.number}.`);
+        }
+      }
+      setTransferSession(null);
+    } catch (err) {
+      console.error(err);
+      playErrorSound();
+      alert('Error ejecutando transferencia o unión de mesas.');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  // Keyboard Shortcuts Handler (F2: Cash, F4: Pago Movil, F8: Punto, F9: Zelle, ESC: Close)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        setMovementPaymentMethod('cash');
+        if (!isCashMovementModalOpen) setIsCashMovementModalOpen(true);
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        setMovementPaymentMethod('pago_movil');
+        if (!isCashMovementModalOpen) setIsCashMovementModalOpen(true);
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        setMovementPaymentMethod('punto');
+        if (!isCashMovementModalOpen) setIsCashMovementModalOpen(true);
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        setMovementPaymentMethod('zelle');
+        if (!isCashMovementModalOpen) setIsCashMovementModalOpen(true);
+      } else if (e.key === 'Escape') {
+        setIsCashMovementModalOpen(false);
+        setTransferSession(null);
+        setIsOpeningShiftModalOpen(false);
+        setIsClosingShiftModalOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCashMovementModalOpen]);
+
+  // Real-time listener for cashShifts, transactions & clients
   useEffect(() => {
     const unsubShifts = onSnapshot(collection(db, 'cashShifts'), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -115,9 +221,14 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
       setAllTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    const unsubClients = onSnapshot(collection(db, 'clients'), (snap) => {
+      setClientsList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     return () => {
       unsubShifts();
       unsubTx();
+      unsubClients();
     };
   }, []);
 
@@ -238,24 +349,39 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
     if (isSubmittingMovement || !activeShift) return;
     const usd = Number(movementAmountUSD) || 0;
     const bs = Number(movementAmountBs) || 0;
-    if (usd <= 0 && bs <= 0) {
-      alert('Ingresa un monto válido en USD o Bs');
+    const totalUSD = usd > 0 ? usd : (bs > 0 ? bs / exchangeRate : 0);
+
+    if (totalUSD <= 0) {
+      alert('Por favor ingresa un monto válido mayor a 0 en USD o Bs.');
       return;
     }
     if (!movementReason.trim()) {
-      alert('Por favor indica el motivo o concepto del movimiento.');
+      alert('Por favor indica la descripción o motivo del movimiento.');
+      return;
+    }
+    if (movementType === 'in' && movementCategory === 'Cobro de Crédito' && !movementSelectedClientId) {
+      alert('Por favor selecciona el cliente de crédito que realiza el pago.');
       return;
     }
 
     setIsSubmittingMovement(true);
     try {
       const cashier = currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja';
+      const calculatedTax = movementIsFiscal ? Number((totalUSD * (movementTaxRate / (100 + movementTaxRate))).toFixed(2)) : 0;
+      const calculatedWithholding = (movementType === 'out' && movementIsFiscal && movementWithholdingRate > 0)
+        ? Number((totalUSD * (movementWithholdingRate / 100)).toFixed(2))
+        : 0;
+
       const newMovement = {
         id: `mov_${Date.now()}`,
         type: movementType,
-        amountUSD: usd,
-        amountBs: bs,
+        category: movementCategory,
+        amountUSD: totalUSD,
+        amountBs: bs > 0 ? bs : totalUSD * exchangeRate,
         reason: movementReason.trim(),
+        paymentMethod: movementPaymentMethod,
+        isFiscal: movementIsFiscal,
+        fiscalInvoice: movementFiscalInvoice,
         timestamp: new Date().toISOString(),
         registeredBy: cashier
       };
@@ -265,13 +391,46 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         cashMovements: updatedMovements
       });
 
-      await logAction('finance', cashier, `Movimiento de Caja (${movementType === 'in' ? 'Ingreso' : 'Egreso'})`, `USD: $${usd} - Bs: ${bs} - Motivo: ${movementReason}`);
+      // Post to finance_entries for full P&L, ledger, and fiscal sync
+      await addDoc(collection(db, 'finance_entries'), {
+        type: movementType === 'in' ? 'income' : 'expense',
+        category: movementCategory,
+        amount: totalUSD,
+        description: `[Caja - ${activeShift.shiftName}] ${movementReason.trim()}`,
+        timestamp: new Date().toISOString(),
+        isFiscal: movementIsFiscal,
+        fiscalInvoice: movementFiscalInvoice || '',
+        taxRate: movementTaxRate,
+        taxAmount: calculatedTax,
+        withholdingRate: movementWithholdingRate,
+        withholdingAmount: calculatedWithholding,
+        paymentMethod: movementPaymentMethod,
+        registeredBy: cashier,
+        shiftId: activeShift.id
+      });
+
+      // Reduce debt in CRM client profile if Cobro de Crédito
+      if (movementType === 'in' && movementCategory === 'Cobro de Crédito' && movementSelectedClientId) {
+        const clientRef = doc(db, 'clients', movementSelectedClientId);
+        const clientSnap = await getDoc(clientRef);
+        if (clientSnap.exists()) {
+          const currentDebt = clientSnap.data().debt || 0;
+          await updateDoc(clientRef, {
+            debt: Math.max(0, currentDebt - totalUSD)
+          });
+        }
+      }
+
+      await logAction('finance', cashier, `Movimiento de Caja (${movementType === 'in' ? 'Ingreso' : 'Egreso'})`, `USD: $${totalUSD.toFixed(2)} - Cat: ${movementCategory} - Motivo: ${movementReason}`);
       playCashSound();
-      showToast(`✅ ${movementType === 'in' ? 'Ingreso' : 'Egreso'} de caja registrado.`);
+      showToast(`✅ ${movementType === 'in' ? 'Ingreso' : 'Egreso'} registrado y sincronizado con Finanzas.`);
       setIsCashMovementModalOpen(false);
       setMovementAmountUSD('');
       setMovementAmountBs('');
       setMovementReason('');
+      setMovementIsFiscal(false);
+      setMovementFiscalInvoice('');
+      setMovementSelectedClientId('');
     } catch (err) {
       console.error('Error saving cash movement:', err);
       playErrorSound();
@@ -434,6 +593,10 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
     const isCredit = s.payment?.method === 'credito' || s.paymentMethod === 'credito';
     if (isCredit) return acc;
     return acc + (s.totalAmount || s.pendingPayment?.totalUSD || 0);
+  }, 0);
+
+  const totalOpenBalanceUSD = activeSessions.reduce((acc, s) => {
+    return acc + (s.totalAmount || 0);
   }, 0);
 
   // Real-time listener for ALL active sessions
@@ -839,7 +1002,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
 
   return (
     <div className="relative w-full flex-1 flex flex-col space-y-6 pb-16 min-h-full">
-      <header className="mb-8 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
+      <header className="mb-6 border-b border-slate-200/60 pb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:pr-40">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-black text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 inline-block mb-1.5">
             Módulo de Punto de Venta & Facturación
@@ -849,10 +1012,19 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
             Cajero(a) activo: <strong className="text-indigo-600 font-extrabold">{currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja'}</strong>
           </p>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="bg-amber-50 text-amber-700 border border-amber-200/80 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+          {onViewChange && (
+            <button
+              onClick={() => onViewChange('waiter')}
+              className="bg-slate-900 hover:bg-black text-white px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-md transition-all cursor-pointer"
+            >
+              <ShoppingBag size={15} className="text-amber-400" />
+              <span>Terminal POS / Venta</span>
+            </button>
+          )}
+          <div className="bg-amber-50 text-amber-800 border border-amber-200/80 px-3.5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2">
             <span className="w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse"></span>
-            Recepción & Verificación Activa
+            <span>Recepción Activa</span>
           </div>
         </div>
       </header>
@@ -903,7 +1075,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
               <div className="flex flex-wrap gap-2.5 w-full md:w-auto shrink-0">
                 <button
                   onClick={() => setIsCashMovementModalOpen(true)}
-                  className="flex-1 md:flex-none px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-white/10 transition-all"
+                  className="flex-1 md:flex-none px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-white/10 transition-all cursor-pointer"
                 >
                   <PlusCircle size={15} className="text-emerald-400" />
                   <span>Entrada / Salida</span>
@@ -915,7 +1087,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                     setClosingCountedTarjetaBs('');
                     setIsClosingShiftModalOpen(true);
                   }}
-                  className="flex-1 md:flex-none px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
+                  className="flex-1 md:flex-none px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
                 >
                   <Lock size={15} />
                   <span>Cierre & Arqueo Z</span>
@@ -944,7 +1116,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
             </div>
             <button
               onClick={() => setIsOpeningShiftModalOpen(true)}
-              className="w-full sm:w-auto px-6 py-3.5 bg-slate-900 hover:bg-black text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shrink-0 transition-all"
+              className="w-full sm:w-auto px-6 py-3.5 bg-slate-900 hover:bg-black text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shrink-0 transition-all cursor-pointer"
             >
               <Key size={16} className="text-amber-400" />
               <span>Abrir Turno de Caja</span>
@@ -953,54 +1125,63 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </div>
 
-      {/* TASA DE CAMBIO BAR & CURRENCY SELECTOR - READ ONLY */}
-      <div className="mb-6">
-        <CurrencySelector variant="bar" editable={false} />
-      </div>
-
       {/* METRIC CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm flex flex-col justify-between">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div>
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block mb-1">Total Conciliado Hoy ({activeCurrency})</span>
-            <div className="text-3xl font-black text-slate-900">{formatPrice(totalReconciled)}</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                Total Conciliado Hoy
+              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              {formatPrice(totalReconciled)}
+            </div>
           </div>
-          <div className="text-xs text-rose-600 font-bold mt-2">
-            {formatBs(toBolivares(totalReconciled))}
+          <div className="text-xs text-slate-500 font-medium mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+            <span>Pagos procesados y validados</span>
+            <span className="text-emerald-600 font-bold">✓ Al día</span>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm flex flex-col justify-between">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div>
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block mb-1">Pagos Pendientes</span>
-            <div className="text-3xl font-black text-indigo-600 flex items-center gap-2">
-              {pendingSessions.length}
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                Por Validar (Digitales)
+              </span>
               {pendingSessions.length > 0 && (
                 <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-ping" />
               )}
             </div>
+            <div className="text-2xl sm:text-3xl font-black text-indigo-600 tracking-tight flex items-center gap-2">
+              {pendingSessions.length}
+              <span className="text-xs text-slate-400 font-bold">transacciones</span>
+            </div>
           </div>
-          <p className="text-xs text-slate-400 mt-2 font-medium">Bancos / Móvil / Zelle esperando confirmación.</p>
+          <p className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 font-medium">
+            Pago Móvil / Zelle / Punto esperando confirmación.
+          </p>
         </div>
 
-        <div className="bg-slate-900 text-white p-6 rounded-[28px] shadow-xl flex flex-col justify-between">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block">
-                Tasa Activa ({activeCurrency})
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                Por Cobrar (Sala / Delivery)
               </span>
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full">
-                {currentRate.source}
+              <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md">
+                {dineInSessions.length + deliveryPickupSessions.length} cuentas
               </span>
             </div>
-            <div className="text-3xl font-black font-mono">
-              Bs. {currentRateBs.toFixed(2)}
-              <span className="text-xs text-slate-400 font-medium ml-1">/{currencySymbol}</span>
+            <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              ${totalOpenBalanceUSD.toFixed(2)}
             </div>
           </div>
-          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-medium">1 {currencySymbol} = {currentRateBs.toFixed(2)} Bs.</span>
-            <CurrencySelector variant="compact" showSyncButton={false} editable={false} />
+          <div className="text-xs text-slate-500 font-medium mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+            <span>Cuentas abiertas en atención</span>
+            <span className="text-amber-600 font-bold">En consumo</span>
           </div>
         </div>
       </div>
@@ -1018,7 +1199,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Facturación Bloqueada</span>
               </div>
               <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                Por normativa de arqueo y trazabilidad contable, es <strong>obligatorio aperturar un turno de caja</strong> antes de validar pagos, liberar mesas o facturar consumos.
+                Por normativa de arqueo y trazabilidad contable, es <strong>obligatorio aperturar un turno de caja</strong> antes de tomar comandas, validar pagos o cerrar cuentas.
               </p>
             </div>
           </div>
@@ -1032,55 +1213,91 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         </div>
       )}
 
-      {/* Navigation tabs */}
-      <div className="flex gap-6 border-b border-slate-100 mb-8 pb-4 overflow-x-auto whitespace-nowrap w-full scrollbar-none">
+      {/* Navigation tabs - Standalone Roomy Tab Buttons */}
+      <div className="flex items-center gap-3 mb-6 overflow-x-auto whitespace-nowrap w-full scrollbar-none pb-1 shrink-0">
         <button 
           onClick={() => setActiveTab('validation')}
-          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative ${activeTab === 'validation' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
+            activeTab === 'validation'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
         >
-          Validación de Pagos ({pendingSessions.length})
-          {activeTab === 'validation' && (
-            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
-          )}
+          <ShieldCheck size={16} className={activeTab === 'validation' ? 'text-indigo-400' : 'text-slate-400'} />
+          <span>Validación de Pagos</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            activeTab === 'validation' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-slate-100 text-slate-700'
+          }`}>
+            {pendingSessions.length}
+          </span>
         </button>
+
         <button 
           onClick={() => setActiveTab('tables')}
-          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative ${activeTab === 'tables' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
+            activeTab === 'tables'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
         >
-          Mesas & Cuentas de Sala ({dineInSessions.length})
-          {activeTab === 'tables' && (
-            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
-          )}
+          <Receipt size={16} className={activeTab === 'tables' ? 'text-indigo-400' : 'text-slate-400'} />
+          <span>Mesas & Cuentas de Sala</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            activeTab === 'tables' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-slate-100 text-slate-700'
+          }`}>
+            {dineInSessions.length}
+          </span>
         </button>
+
         <button 
           onClick={() => setActiveTab('delivery_pickup')}
-          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative ${activeTab === 'delivery_pickup' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
+            activeTab === 'delivery_pickup'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
         >
-          Delivery & Pickup ({deliveryPickupSessions.length})
-          {activeTab === 'delivery_pickup' && (
-            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
-          )}
+          <ShoppingBag size={16} className={activeTab === 'delivery_pickup' ? 'text-amber-400' : 'text-slate-400'} />
+          <span>Delivery & Pickup</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            activeTab === 'delivery_pickup' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-100 text-slate-700'
+          }`}>
+            {deliveryPickupSessions.length}
+          </span>
         </button>
+
         <button 
           onClick={() => setActiveTab('credits')}
-          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative ${activeTab === 'credits' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
+            activeTab === 'credits'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
         >
-          Aprobación de Créditos ({creditSessions.length})
-          {activeTab === 'credits' && (
-            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
-          )}
+          <CreditCard size={16} className={activeTab === 'credits' ? 'text-rose-400' : 'text-slate-400'} />
+          <span>Aprobación de Créditos (CxC)</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            activeTab === 'credits' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-slate-100 text-slate-700'
+          }`}>
+            {creditSessions.length}
+          </span>
         </button>
+
         <button 
           onClick={() => setActiveTab('shifts')}
-          className={`pb-2 px-1 font-bold text-sm tracking-wide transition-colors relative flex items-center gap-1.5 ${activeTab === 'shifts' ? 'text-black font-black' : 'text-slate-400 hover:text-black'}`}
+          className={`px-5 py-3 rounded-2xl text-xs font-black transition-all flex items-center gap-2.5 cursor-pointer shrink-0 ${
+            activeTab === 'shifts'
+              ? 'bg-slate-950 text-white shadow-md scale-[1.01]'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/80 shadow-xs'
+          }`}
         >
-          <span>Turnos & Cierres</span>
-          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${activeShift ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+          <Lock size={16} className={activeTab === 'shifts' ? 'text-emerald-400' : 'text-slate-400'} />
+          <span>Turnos & Arqueo Z</span>
+          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+            activeShift ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-100 text-slate-700'
+          }`}>
             {activeShift ? '🟢 Abierto' : '🔒 Cerrado'}
           </span>
-          {activeTab === 'shifts' && (
-            <motion.div layoutId="activeTabIndicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-black" />
-          )}
         </button>
       </div>
 
@@ -1361,6 +1578,11 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                       tables={tables} 
                       exchangeRate={exchangeRate} 
                       onViewDelivery={(s) => setViewingDeliveryOrder(s)}
+                      onOpenTransfer={(s) => {
+                        setTransferSession(s);
+                        setTargetTableId('');
+                        setTransferActionType('move');
+                      }}
                     />
                   ))}
                 </div>
@@ -1377,6 +1599,18 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                 </span>
               </h3>
 
+              {(settings as any)?.allowCashierCreditApproval === false && (
+                <div className="bg-amber-50 border border-amber-200/90 p-4 rounded-2xl flex items-start gap-3 text-amber-900 text-xs shadow-xs">
+                  <Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-extrabold block text-amber-950">Aprobación por Cajero Desactivada en Ajustes</span>
+                    <p className="text-amber-800 leading-snug">
+                      La validación de crédito por el cajero está actualmente <strong className="text-amber-950">desactivada</strong>. Las solicitudes solo pueden ser aprobadas por un Administrador. Puedes cambiar este comportamiento en <em>Ajustes &gt; Operaciones &amp; KDS</em>.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {creditSessions.length === 0 ? (
                 <div className="bg-white rounded-[32px] p-12 text-center border border-slate-100 shadow-sm">
                   <CheckCircle2 size={48} className="mx-auto text-emerald-500 mb-4" />
@@ -1391,6 +1625,7 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
                         key={session.id} 
                         session={session} 
                         exchangeRate={exchangeRate}
+                        currentUser={currentUser}
                         onApprove={() => setConfirmingSession({ session, type: 'approve' })}
                         onReject={() => {
                           setConfirmingSession({ session, type: 'reject' });
@@ -2247,102 +2482,267 @@ export default function CajaView({ currentUser }: { currentUser?: any }) {
         )}
       </AnimatePresence>
 
-      {/* CASH MOVEMENT MODAL */}
+      {/* ADVANCED CASH & FINANCE MOVEMENT MODAL */}
       <AnimatePresence>
         {isCashMovementModalOpen && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-[32px] max-w-md w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col"
+              className="bg-white rounded-[36px] max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col my-auto max-h-[90vh]"
             >
-              <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+              <div className="p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${movementType === 'in' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
-                    {movementType === 'in' ? <PlusCircle size={20} /> : <MinusCircle size={20} />}
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md ${movementType === 'in' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                    {movementType === 'in' ? <PlusCircle size={22} /> : <MinusCircle size={22} />}
                   </div>
                   <div>
-                    <h3 className="font-black text-lg">Movimiento de Caja Chica</h3>
-                    <p className="text-xs text-slate-400">Registra ingresos o retiros durante el turno</p>
+                    <h3 className="font-black text-lg">Registrar Movimiento Financiero</h3>
+                    <p className="text-xs text-slate-400">Sincronización instantánea con Caja Turno y Finanzas</p>
                   </div>
                 </div>
-                <button onClick={() => setIsCashMovementModalOpen(false)} className="text-slate-400 hover:text-white p-2">
+                <button onClick={() => setIsCashMovementModalOpen(false)} className="text-slate-400 hover:text-white p-2 rounded-xl transition-colors cursor-pointer">
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1">
+                {/* Type toggle */}
+                <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-100 rounded-2xl">
                   <button
-                    onClick={() => setMovementType('in')}
-                    className={`py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
-                      movementType === 'in' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-black'
-                    }`}
-                  >
-                    + Ingreso / Inyección
-                  </button>
-                  <button
-                    onClick={() => setMovementType('out')}
-                    className={`py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+                    type="button"
+                    onClick={() => {
+                      setMovementType('out');
+                      setMovementCategory('Insumos');
+                    }}
+                    className={`py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                       movementType === 'out' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-600 hover:text-black'
                     }`}
                   >
-                    - Egreso / Retiro
+                    🔴 Egreso / Retiro / Gasto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMovementType('in');
+                      setMovementCategory('Otros Ingresos');
+                    }}
+                    className={`py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                      movementType === 'in' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    🟢 Ingreso / Inyección
                   </button>
                 </div>
 
+                {/* Amounts Dual */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Monto en $ USD</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={movementAmountUSD}
-                      onChange={e => setMovementAmountUSD(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
-                    />
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Monto en USD ($) *</label>
+                    <div className="relative">
+                      <DollarSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={movementAmountUSD}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setMovementAmountUSD(val);
+                          const num = Number(val);
+                          if (num > 0) setMovementAmountBs((num * exchangeRate).toFixed(2));
+                          else setMovementAmountBs('');
+                        }}
+                        placeholder="0.00"
+                        className="w-full pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900 focus:border-black outline-none font-mono"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Monto en Bs.</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Monto en Bs. (VES)</label>
                     <input
                       type="number"
                       step="0.01"
                       value={movementAmountBs}
-                      onChange={e => setMovementAmountBs(e.target.value)}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setMovementAmountBs(val);
+                        const num = Number(val);
+                        if (num > 0) setMovementAmountUSD((num / exchangeRate).toFixed(2));
+                        else setMovementAmountUSD('');
+                      }}
                       placeholder="0.00"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-900"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900 focus:border-black outline-none font-mono"
                     />
                   </div>
                 </div>
 
+                {/* Category selection */}
                 <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Motivo / Concepto *</label>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Categoría Contable</label>
+                  <select
+                    value={movementCategory}
+                    onChange={e => setMovementCategory(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:border-black outline-none cursor-pointer"
+                  >
+                    {movementType === 'out' ? (
+                      <>
+                        <option value="Insumos">Insumos e Ingredientes (Compra de Alimentos/Bebidas)</option>
+                        <option value="Servicios">Servicios Públicos (Luz, Agua, Gas, Internet)</option>
+                        <option value="Nómina">Nómina, Salarios y Propinas de Personal</option>
+                        <option value="Alquiler">Alquiler de Local / Establecimiento</option>
+                        <option value="Marketing">Marketing y Publicidad</option>
+                        <option value="Impuestos">Impuestos / SENIAT / Tasa Municipal</option>
+                        <option value="Mantenimiento">Mantenimiento y Reparación de Equipos</option>
+                        <option value="Otros Egresos">Otros Egresos Administrativos / Caja Chica</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="Otros Ingresos">Ingreso Vario / Inyección de Caja</option>
+                        <option value="Cobro de Crédito">Cobro de Crédito / Abonar Deuda de Cliente</option>
+                        <option value="Aporte de Capital">Aporte de Capital de Socios</option>
+                        <option value="Eventos Especiales">Ingresos por Evento Especial / Alquiler</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                {/* Conditional CRM Debt Client Selector */}
+                {movementType === 'in' && movementCategory === 'Cobro de Crédito' && (
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cliente de Crédito (CRM) *</label>
+                    <select
+                      value={movementSelectedClientId}
+                      onChange={e => {
+                        const cid = e.target.value;
+                        setMovementSelectedClientId(cid);
+                        const client = clientsList.find(c => c.id === cid);
+                        if (client) {
+                          setMovementReason(`Cobro de crédito de ${client.name} (CI: ${client.cedula || 'N/A'})`);
+                          setMovementAmountUSD(String(client.debt || 0));
+                          setMovementAmountBs(((client.debt || 0) * exchangeRate).toFixed(2));
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:border-black outline-none cursor-pointer"
+                    >
+                      <option value="">-- Seleccionar cliente con deuda --</option>
+                      {clientsList.map(c => (
+                        <option key={c.id} value={c.id}>
+                          👤 {c.name} {c.cedula ? `(CI: ${c.cedula})` : ''} - Deuda: ${c.debt || 0} USD
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Description Reason */}
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Descripción / Concepto / Proveedor *</label>
                   <input
                     type="text"
                     value={movementReason}
                     onChange={e => setMovementReason(e.target.value)}
-                    placeholder="Ej. Pago de hielo a proveedor, cambio de billetes, etc."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-900"
+                    placeholder="Ej. Compra de hielo e insumos urgentes a Distribuidora Los Andes"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-900 focus:border-black outline-none"
                   />
+                </div>
+
+                {/* Payment Method */}
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vía de Pago / Medio</label>
+                  <select
+                    value={movementPaymentMethod}
+                    onChange={e => setMovementPaymentMethod(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:border-black outline-none cursor-pointer"
+                  >
+                    <option value="cash">💵 Efectivo ($ USD / Bs)</option>
+                    <option value="pagomovil">📱 Pago Móvil</option>
+                    <option value="zelle">📧 Zelle</option>
+                    <option value="card">💳 Tarjeta (Punto de Venta)</option>
+                    <option value="bank_transfer">🏦 Transferencia Bancaria</option>
+                  </select>
+                </div>
+
+                {/* Fiscal Toggle & Details */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={movementIsFiscal}
+                      onChange={e => setMovementIsFiscal(e.target.checked)}
+                      className="w-4 h-4 rounded text-black border-slate-300"
+                    />
+                    <span className="text-xs font-bold text-slate-800 select-none">🧾 Movimiento respalda Factura Fiscal (SENIAT)</span>
+                  </label>
+
+                  {movementIsFiscal && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="space-y-3 pt-2 border-t border-slate-200 overflow-hidden"
+                    >
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[9px] font-black uppercase text-slate-400 block mb-0.5">Nro. Factura / Control</label>
+                          <input
+                            type="text"
+                            value={movementFiscalInvoice}
+                            onChange={e => setMovementFiscalInvoice(e.target.value)}
+                            placeholder="F-00123"
+                            className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold font-mono text-slate-900 focus:border-black outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black uppercase text-slate-400 block mb-0.5">Alícuota IVA (%)</label>
+                          <select
+                            value={movementTaxRate}
+                            onChange={e => setMovementTaxRate(Number(e.target.value))}
+                            className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:border-black outline-none cursor-pointer"
+                          >
+                            <option value="16">16% (General)</option>
+                            <option value="8">8% (Reducido)</option>
+                            <option value="0">Exento (0%)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {movementType === 'out' && (
+                        <div>
+                          <label className="text-[9px] font-black uppercase text-slate-400 block mb-0.5">Retención ISLR / IVA (%)</label>
+                          <select
+                            value={movementWithholdingRate}
+                            onChange={e => setMovementWithholdingRate(Number(e.target.value))}
+                            className="w-full p-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:border-black outline-none cursor-pointer"
+                          >
+                            <option value="0">Sin retención (0%)</option>
+                            <option value="1">1% (Servicios Generales)</option>
+                            <option value="2">2% (Honorarios Profesionales)</option>
+                            <option value="3">3% (Arrendamiento)</option>
+                          </select>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
                 </div>
               </div>
 
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <div className="p-5 bg-slate-50 border-t border-slate-100 flex gap-3 shrink-0">
                 <button
+                  type="button"
                   onClick={() => setIsCashMovementModalOpen(false)}
-                  className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider"
+                  className="flex-1 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider cursor-pointer transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
+                  type="button"
                   onClick={handleSaveCashMovement}
-                  className={`flex-1 py-3 px-4 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg transition-all ${
+                  disabled={isSubmittingMovement}
+                  className={`flex-1 py-3 px-4 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-lg transition-all cursor-pointer ${
                     movementType === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
                   }`}
                 >
-                  Guardar Movimiento
+                  {isSubmittingMovement ? 'Procesando...' : 'Guardar y Sincronizar'}
                 </button>
               </div>
             </motion.div>
@@ -2830,7 +3230,7 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
   );
 }
 
-function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery }: { key?: any; session: any; tables: any[]; exchangeRate: number; onViewDelivery?: (session: any) => void }) {
+function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery, onOpenTransfer }: { key?: any; session: any; tables: any[]; exchangeRate: number; onViewDelivery?: (session: any) => void; onOpenTransfer?: (session: any) => void }) {
   const isDelivery = session.type === 'delivery' || session.tableId?.startsWith('delivery');
   const [orders, setOrders] = useState<any[]>([]);
 
@@ -2938,9 +3338,19 @@ function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery }:
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
-          <Clock size={12} />
-          <span>Inició: {new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+            <Clock size={12} />
+            <span>Inició: {new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <button
+            onClick={() => onOpenTransfer?.(session)}
+            className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/60"
+            title="Mover de mesa o unir cuentas"
+          >
+            <RotateCcw size={13} className="rotate-90 text-indigo-500" />
+            <span>Mover / Unir Mesa</span>
+          </button>
         </div>
       </div>
 
@@ -3012,16 +3422,21 @@ function CajaAccountRow({ sessionId, account, exchangeRate }: { key?: any; sessi
   );
 }
 
-function CreditApprovalCard({ session, exchangeRate, onApprove, onReject }: { 
+function CreditApprovalCard({ session, exchangeRate, currentUser, onApprove, onReject }: { 
   key?: any;
   session: any; 
   exchangeRate: number; 
+  currentUser?: any;
   onApprove: () => void; 
   onReject: () => void; 
 }) {
-  const { tables } = useRestaurantData();
+  const { tables, settings } = useRestaurantData();
   const client = session.pendingPayment?.creditClient || {};
   const totalAmount = session.pendingPayment?.totalUSD || session.totalAmount || 0;
+
+  const isCashierApprovalAllowed = (settings as any)?.allowCashierCreditApproval !== false;
+  const isAdmin = currentUser?.role === 'admin' || localStorage.getItem('user_role') === 'admin' || currentUser?.role === 'administrador';
+  const isBlockedForCashier = !isCashierApprovalAllowed && !isAdmin;
 
   return (
     <motion.div 
@@ -3095,17 +3510,30 @@ function CreditApprovalCard({ session, exchangeRate, onApprove, onReject }: {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-200">
-            <div className="flex gap-2 items-center text-[10px] text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-100/50">
-              <AlertCircle size={14} className="text-amber-600 shrink-0" />
-              <span>Esta solicitud requiere validación y aprobación de caja antes de ser registrada.</span>
-            </div>
+            {isBlockedForCashier ? (
+              <div className="flex gap-2 items-center text-[10px] text-rose-800 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                <Lock size={14} className="text-rose-600 shrink-0" />
+                <span>Solo Administradores pueden autorizar créditos (Desactivado para Cajeros en Ajustes).</span>
+              </div>
+            ) : (
+              <div className="flex gap-2 items-center text-[10px] text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-100/50">
+                <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                <span>Esta solicitud requiere validación y aprobación antes de ser registrada.</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 pt-6 sm:justify-end">
         <button 
-          onClick={onReject}
+          onClick={() => {
+            if (isBlockedForCashier) {
+              alert('⚠️ La aprobación/denegación de crédito por el cajero está desactivada en Ajustes. Solicita autorización a un Administrador.');
+              return;
+            }
+            onReject();
+          }}
           className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-100 hover:border-rose-100 hover:bg-rose-50 text-rose-500 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
         >
           <X size={14} />
@@ -3113,11 +3541,22 @@ function CreditApprovalCard({ session, exchangeRate, onApprove, onReject }: {
         </button>
 
         <button 
-          onClick={onApprove}
-          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-black hover:bg-emerald-600 hover:scale-[1.01] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-black/10"
+          onClick={() => {
+            if (isBlockedForCashier) {
+              alert('⚠️ La aprobación de crédito por el cajero está desactivada en Ajustes. Solicita autorización a un Administrador.');
+              return;
+            }
+            onApprove();
+          }}
+          className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+            isBlockedForCashier
+              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+              : 'bg-black hover:bg-emerald-600 hover:scale-[1.01] text-white shadow-lg shadow-black/10 cursor-pointer'
+          }`}
+          title={isBlockedForCashier ? 'Requiere aprobación de un Administrador (desactivado para Cajero en Ajustes)' : 'Aprobar Crédito'}
         >
-          <Check size={14} />
-          Aprobar Crédito
+          {isBlockedForCashier ? <Lock size={14} /> : <Check size={14} />}
+          {isBlockedForCashier ? 'Requiere Administrador' : 'Aprobar Crédito'}
         </button>
       </div>
     </motion.div>
