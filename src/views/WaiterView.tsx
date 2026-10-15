@@ -46,6 +46,7 @@ import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
 import { printKitchenTicket, KitchenTicketItem } from '../lib/printer';
 import CurrencySelector from '../components/CurrencySelector';
+import { DivisaCashCalculator } from '../components/DivisaCashCalculator';
 
 export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const { tables, menu, ingredients, activeSessions, settings, coupons } = useRestaurantData();
@@ -156,7 +157,57 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     if (tableId.startsWith('delivery-')) {
       return activeSessions.find(s => s.id === tableId.replace('delivery-', ''));
     }
-    return activeSessions.find(s => s.tableId === tableId);
+    const targetTbl = tables.find(t => t.id === tableId || String(t.number) === String(tableId));
+    const tblNum = targetTbl ? targetTbl.number : (parseInt(tableId.replace(/\D/g, '')) || null);
+
+    return activeSessions.find(s => 
+      s.tableId === tableId || 
+      (tblNum !== null && (
+        String(s.tableNumber) === String(tblNum) || 
+        s.tableId === String(tblNum) || 
+        s.tableId === `table-${tblNum}` || 
+        s.tableId === `Mesa ${tblNum}` ||
+        s.tableId === `mesa-${tblNum}`
+      ))
+    );
+  };
+
+  const handleFreeTable = async (tableToFree: Table) => {
+    const tblNum = tableToFree.number;
+    const tblId = tableToFree.id;
+
+    // 1. Find ALL active sessions associated with this table number or ID
+    const matchingSessions = activeSessions.filter(s => 
+      s.tableId === tblId || 
+      String(s.tableNumber) === String(tblNum) || 
+      s.tableId === String(tblNum) || 
+      s.tableId === `table-${tblNum}` || 
+      s.tableId === `Mesa ${tblNum}` ||
+      s.tableId === `mesa-${tblNum}`
+    );
+
+    // 2. Mark all matching sessions as completed
+    for (const s of matchingSessions) {
+      await updateDoc(doc(db, 'sessions', s.id), { 
+        status: 'completed',
+        paymentStatus: 'validated'
+      }).catch(console.error);
+    }
+
+    // 3. Mark all matching table documents in 'tables' collection as free
+    const matchingTables = tables.filter(t => t.id === tblId || String(t.number) === String(tblNum));
+    for (const mt of matchingTables) {
+      await updateDoc(doc(db, 'tables', mt.id), { status: 'free' }).catch(console.error);
+    }
+    await updateDoc(doc(db, 'tables', tblId), { status: 'free' }).catch(() => {});
+
+    // Write audit log
+    const waiterName = currentUser?.name || localStorage.getItem('demo_user_name') || 'Mesero';
+    await logAction('order', waiterName, 'Liberó y cerró mesa', `Mesa ${tblNum}`);
+
+    playSuccessSound();
+    setSelectedTable(null);
+    alert(`⚡ Mesa ${tblNum} liberada y cerrada exitosamente.`);
   };
 
   React.useEffect(() => {
@@ -621,6 +672,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [currentMixedAmount, setCurrentMixedAmount] = useState('');
   const [includeTip, setIncludeTip] = useState(true);
 
+  // Divisa / Cash Calculator State
+  const [cashReceivedUSD, setCashReceivedUSD] = useState<number>(0);
+  const [changeCurrency, setChangeCurrency] = useState<'USD' | 'Bs'>('USD');
+  const [changeMethod, setChangeMethod] = useState<'efectivo_usd' | 'efectivo_bs' | 'pago_movil_vuelto'>('efectivo_usd');
+  const [vueltoPhone, setVueltoPhone] = useState('');
+  const [vueltoBank, setVueltoBank] = useState('Banesco');
+  const [vueltoIdNumber, setVueltoIdNumber] = useState('');
+  const [vueltoRef, setVueltoRef] = useState('');
+
   // Waiter Coupon / Marketing Discount State
   const [appliedWaiterCoupon, setAppliedWaiterCoupon] = useState<Coupon | null>(null);
   const [waiterCouponCode, setWaiterCouponCode] = useState('');
@@ -964,7 +1024,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       }
 
       // Enforce reference & receipt image for all electronic payment methods (online and on-site)
-      if (paymentMethod !== 'efectivo' && paymentMethod !== 'credito' && paymentMethod !== 'mixto') {
+      const isCashMethod = ['efectivo', 'divisa', 'cash', 'efectivo_usd'].includes(paymentMethod.toLowerCase()) || availablePaymentMethods.find(m => m.id === paymentMethod)?.requiresReference === false;
+
+      if (!isCashMethod && paymentMethod !== 'credito' && paymentMethod !== 'mixto') {
         if (!paymentRef.trim()) {
           alert('Por favor, ingresa el número de referencia del pago.');
           return;
@@ -1089,14 +1151,15 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
       // Instant approval (Cash, Card, Admin-approved Credit, or digital payments when auto-close is enabled)
       const closeDineInOnReport = !isDelivery && settings?.closeDineInOnPaymentReport === true;
-      let instantApproved = paymentMethod === 'divisa' || 
+      const isCashType = ['efectivo', 'divisa', 'cash', 'efectivo_usd'].includes(paymentMethod.toLowerCase());
+      let instantApproved = isCashType || 
                               paymentMethod === 'punto' || 
                               (paymentMethod === 'credito' && isAdminPinValid) ||
                               (closeDineInOnReport && (paymentMethod === 'pago_movil' || paymentMethod === 'zelle'));
       
       if (paymentMethod === 'mixto') {
          instantApproved = mixedPayments.every(p => 
-           p.method === 'divisa' || p.method === 'punto' || (closeDineInOnReport && (p.method === 'pago_movil' || p.method === 'zelle'))
+           ['efectivo', 'divisa', 'cash', 'efectivo_usd'].includes(p.method.toLowerCase()) || p.method === 'punto' || (closeDineInOnReport && (p.method === 'pago_movil' || p.method === 'zelle'))
          );
       }
 
@@ -2741,6 +2804,21 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           </button>
                         )
                       )}
+
+                      {!selectedTable.id.startsWith('delivery-') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`¿Estás seguro de forzar el cierre y liberar la Mesa ${selectedTable.number}?`)) {
+                              handleFreeTable(selectedTable);
+                            }
+                          }}
+                          className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 p-3.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer mt-2 border border-slate-200"
+                        >
+                          <Trash2 size={15} className="text-rose-500" />
+                          <span>🧹 Forzar Cierre y Liberar Mesa {selectedTable.number}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3702,6 +3780,28 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           </div>
                         </div>
                       </div>
+                    )}
+
+                    {/* Divisa & Cash Calculator Card */}
+                    {['divisa', 'efectivo', 'cash', 'efectivo_usd'].includes(paymentMethod.toLowerCase()) && (
+                      <DivisaCashCalculator
+                        totalUSD={finalTotal}
+                        currentRateBs={exchangeRate}
+                        cashReceivedUSD={cashReceivedUSD}
+                        onChangeCashReceivedUSD={setCashReceivedUSD}
+                        changeCurrency={changeCurrency}
+                        onChangeCurrency={setChangeCurrency}
+                        changeMethod={changeMethod}
+                        onChangeMethod={setChangeMethod}
+                        vueltoPhone={vueltoPhone}
+                        onChangeVueltoPhone={setVueltoPhone}
+                        vueltoBank={vueltoBank}
+                        onChangeVueltoBank={setVueltoBank}
+                        vueltoIdNumber={vueltoIdNumber}
+                        onChangeVueltoIdNumber={setVueltoIdNumber}
+                        vueltoRef={vueltoRef}
+                        onChangeVueltoRef={setVueltoRef}
+                      />
                     )}
 
                     {/* Reference & File Receipt Uploader Card */}

@@ -43,6 +43,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES } from '../hooks/useRestaurantData';
 import { logAction } from '../lib/logger';
 import { MenuItem, ExtraOption, Coupon, FlashDeal } from '../types';
+import { DivisaCashCalculator } from '../components/DivisaCashCalculator';
 import PromotionsBanner from '../components/PromotionsBanner';
 import FlashDealsBanner from '../components/FlashDealsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
@@ -150,6 +151,15 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const [paymentReference, setPaymentReference] = useState('');
   const [paymentReceiptImage, setPaymentReceiptImage] = useState<string | null>(null);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+
+  // Divisa / Cash Calculator State
+  const [cashReceivedUSD, setCashReceivedUSD] = useState<number>(0);
+  const [changeCurrency, setChangeCurrency] = useState<'USD' | 'Bs'>('USD');
+  const [changeMethod, setChangeMethod] = useState<'efectivo_usd' | 'efectivo_bs' | 'pago_movil_vuelto'>('efectivo_usd');
+  const [vueltoPhone, setVueltoPhone] = useState('');
+  const [vueltoBank, setVueltoBank] = useState('Banesco');
+  const [vueltoIdNumber, setVueltoIdNumber] = useState('');
+  const [vueltoRef, setVueltoRef] = useState('');
 
   // Coupon & Marketing State
   const [couponCodeInput, setCouponCodeInput] = useState('');
@@ -768,9 +778,31 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         customerAddress: isDelivery ? customerAddress : 'Retiro en Local (Pick Up)',
         paymentStatus: 'pending_validation',
         paymentMethod,
-        paymentReference: paymentMethod === 'cash' ? '' : paymentReference.trim(),
+        paymentReference: paymentMethod === 'cash' ? (cashReceivedUSD ? `EFECTIVO ($${cashReceivedUSD.toFixed(2)})` : 'EFECTIVO') : paymentReference.trim(),
         paymentReceiptImage: paymentMethod === 'cash' ? null : paymentReceiptImage,
-        pendingPayment: paymentMethod === 'cash' ? null : {
+        cashReceivedUSD: paymentMethod === 'cash' ? (cashReceivedUSD || grandTotalUSD) : null,
+        changeGivenUSD: paymentMethod === 'cash' ? Math.max(0, (cashReceivedUSD || grandTotalUSD) - grandTotalUSD) : 0,
+        changeGivenBs: paymentMethod === 'cash' ? Math.max(0, (cashReceivedUSD || grandTotalUSD) - grandTotalUSD) * currentRateBs : 0,
+        changeCurrency: paymentMethod === 'cash' ? changeCurrency : null,
+        changeMethod: paymentMethod === 'cash' ? changeMethod : null,
+        vueltoPagoMovilDetails: (paymentMethod === 'cash' && changeMethod === 'pago_movil_vuelto') ? {
+          phone: vueltoPhone,
+          bank: vueltoBank,
+          idNumber: vueltoIdNumber,
+          reference: vueltoRef
+        } : null,
+        pendingPayment: paymentMethod === 'cash' ? {
+          method: 'cash',
+          reference: cashReceivedUSD ? `EFECTIVO ($${cashReceivedUSD.toFixed(2)})` : 'EFECTIVO',
+          receiptImage: null,
+          totalUSD: grandTotalUSD,
+          cashReceivedUSD: cashReceivedUSD || grandTotalUSD,
+          changeGivenUSD: Math.max(0, (cashReceivedUSD || grandTotalUSD) - grandTotalUSD),
+          changeGivenBs: Math.max(0, (cashReceivedUSD || grandTotalUSD) - grandTotalUSD) * currentRateBs,
+          changeCurrency,
+          changeMethod,
+          currency: 'USD'
+        } : {
           method: paymentMethod,
           reference: paymentReference.trim(),
           receiptImage: paymentReceiptImage,
@@ -2416,6 +2448,27 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                         )}
                       </div>
                     </div>
+
+                    {paymentMethod === 'cash' && (
+                      <DivisaCashCalculator
+                        totalUSD={grandTotalUSD}
+                        currentRateBs={currentRateBs}
+                        cashReceivedUSD={cashReceivedUSD}
+                        onChangeCashReceivedUSD={setCashReceivedUSD}
+                        changeCurrency={changeCurrency}
+                        onChangeCurrency={setChangeCurrency}
+                        changeMethod={changeMethod}
+                        onChangeMethod={setChangeMethod}
+                        vueltoPhone={vueltoPhone}
+                        onChangeVueltoPhone={setVueltoPhone}
+                        vueltoBank={vueltoBank}
+                        onChangeVueltoBank={setVueltoBank}
+                        vueltoIdNumber={vueltoIdNumber}
+                        onChangeVueltoIdNumber={setVueltoIdNumber}
+                        vueltoRef={vueltoRef}
+                        onChangeVueltoRef={setVueltoRef}
+                      />
+                    )}
 
                     {/* Reference Code & Receipt Upload for Digital Payments */}
                     {paymentMethod !== 'cash' && (

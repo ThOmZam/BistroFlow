@@ -121,16 +121,30 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
   // Execute Table Transfer / Merge Handler
   const handleExecuteTableTransfer = async () => {
     if (!transferSession || !targetTableId) return;
-    const targetTable = tables.find(t => t.id === targetTableId);
+    const targetTable = tables.find(t => t.id === targetTableId || String(t.number) === String(targetTableId));
     if (!targetTable) return;
+
+    const sourceTableId = transferSession.tableId;
+    const sourceTable = tables.find(t => t.id === sourceTableId || String(t.number) === String(sourceTableId) || String(t.number) === String(transferSession.tableNumber));
 
     setIsTransferring(true);
     try {
       if (transferActionType === 'move') {
+        // 1. Update session table assignment
         await updateDoc(doc(db, 'sessions', transferSession.id), {
           tableId: targetTable.id,
           tableNumber: targetTable.number
         });
+
+        // 2. Mark target table occupied in Firestore
+        await updateDoc(doc(db, 'tables', targetTable.id), { status: 'occupied' }).catch(() => {});
+
+        // 3. Mark source table free if no other active sessions remain on source table
+        const otherSessionsOnSource = activeSessions.filter(s => s.id !== transferSession.id && (s.tableId === sourceTableId || String(s.tableNumber) === String(sourceTable?.number)));
+        if (otherSessionsOnSource.length === 0 && sourceTable) {
+          await updateDoc(doc(db, 'tables', sourceTable.id), { status: 'free' }).catch(() => {});
+        }
+
         await logAction(
           'order',
           currentUser?.name || 'Caja',
@@ -140,17 +154,55 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
         playSuccessSound();
         alert(`⚡ Comanda movida exitosamente a la Mesa ${targetTable.number}.`);
       } else {
-        const existingTargetSession = activeSessions.find(s => s.tableId === targetTable.id && s.id !== transferSession.id);
+        // Merge Action
+        const existingTargetSession = activeSessions.find(s => s.id !== transferSession.id && (s.tableId === targetTable.id || String(s.tableNumber) === String(targetTable.number)));
+
         if (existingTargetSession) {
-          const mergedAccounts = [...(existingTargetSession.accounts || []), ...(transferSession.accounts || [])];
+          const sourceAccounts = transferSession.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
+          const targetAccounts = existingTargetSession.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
+
+          // Migrate all orders from source session's accounts to target session's accounts
+          for (const sAcc of sourceAccounts) {
+            const sourceOrdersSnap = await getDocs(collection(db, 'sessions', transferSession.id, 'accounts', sAcc.id, 'orders'));
+            let targetAccId = targetAccounts.find(ta => ta.name === sAcc.name)?.id || targetAccounts[0]?.id || 'default';
+
+            for (const orderDoc of sourceOrdersSnap.docs) {
+              const orderData = orderDoc.data();
+              await addDoc(collection(db, 'sessions', existingTargetSession.id, 'accounts', targetAccId, 'orders'), {
+                ...orderData,
+                transferredFromSessionId: transferSession.id
+              });
+              await deleteDoc(doc(db, 'sessions', transferSession.id, 'accounts', sAcc.id, 'orders')).catch(() => {});
+            }
+          }
+
+          // Combine accounts
+          const mergedAccounts = [...targetAccounts];
+          for (const sAcc of sourceAccounts) {
+            if (!mergedAccounts.some(ta => ta.id === sAcc.id || ta.name === sAcc.name)) {
+              mergedAccounts.push(sAcc);
+            }
+          }
+
           const newTotalAmount = (existingTargetSession.totalAmount || 0) + (transferSession.totalAmount || 0);
-          
+
           await updateDoc(doc(db, 'sessions', existingTargetSession.id), {
             accounts: mergedAccounts,
             totalAmount: newTotalAmount
           });
-          
+
           await deleteDoc(doc(db, 'sessions', transferSession.id));
+
+          // Set source table free
+          if (sourceTable) {
+            const otherOnSource = activeSessions.filter(s => s.id !== transferSession.id && (s.tableId === sourceTableId || String(s.tableNumber) === String(sourceTable?.number)));
+            if (otherOnSource.length <= 1) {
+              await updateDoc(doc(db, 'tables', sourceTable.id), { status: 'free' }).catch(() => {});
+            }
+          }
+
+          // Ensure target table is occupied
+          await updateDoc(doc(db, 'tables', targetTable.id), { status: 'occupied' }).catch(() => {});
 
           await logAction(
             'order',
@@ -159,12 +211,22 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
             `Unió la cuenta de Mesa ${transferSession.tableNumber || transferSession.tableId} con la Mesa ${targetTable.number}`
           );
           playSuccessSound();
-          alert(`⚡ Cuentas unidas exitosamente en la Mesa ${targetTable.number}. Total consolidado: $${newTotalAmount.toFixed(2)} USD.`);
+          alert(`⚡ Cuentas y pedidos unidos exitosamente en la Mesa ${targetTable.number}. Total consolidado: $${newTotalAmount.toFixed(2)} USD.`);
         } else {
+          // Fallback to move if no active session on target
           await updateDoc(doc(db, 'sessions', transferSession.id), {
             tableId: targetTable.id,
             tableNumber: targetTable.number
           });
+          await updateDoc(doc(db, 'tables', targetTable.id), { status: 'occupied' }).catch(() => {});
+
+          if (sourceTable) {
+            const otherOnSource = activeSessions.filter(s => s.id !== transferSession.id && (s.tableId === sourceTableId || String(s.tableNumber) === String(sourceTable?.number)));
+            if (otherOnSource.length === 0) {
+              await updateDoc(doc(db, 'tables', sourceTable.id), { status: 'free' }).catch(() => {});
+            }
+          }
+
           playSuccessSound();
           alert(`⚡ Comanda movida a la Mesa ${targetTable.number}.`);
         }
@@ -760,13 +822,15 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
       const isDelivery = session.type === 'delivery' || session.tableId === 'delivery';
       
       const accounts = session.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
-      const accountId = session.pendingPayment?.accountId || 'default';
+      const accountId = session.pendingPayment?.accountId || accounts[0]?.id || 'default';
       const paymentMethod = session.pendingPayment?.method || session.paymentMethod || 'pago_movil';
       const paymentRef = session.pendingPayment?.reference || session.paymentReference || 'N/A';
       const totalAmount = session.pendingPayment?.totalUSD || session.totalAmount || 0;
       const receiptImage = session.pendingPayment?.receiptImage || session.paymentReceiptImage || null;
 
-      const updatedAccounts = accounts.map((acc: any) => acc.id === accountId ? { ...acc, status: 'paid' } : acc);
+      // Mark account as paid. If single account or full session payment, mark all accounts paid
+      const isSingleOrFullPayment = accounts.length <= 1 || !session.pendingPayment?.accountId || Math.abs((session.totalAmount || totalAmount) - totalAmount) < 0.05;
+      const updatedAccounts = accounts.map((acc: any) => (isSingleOrFullPayment || acc.id === accountId) ? { ...acc, status: 'paid' } : acc);
       const allPaid = updatedAccounts.every((acc: any) => acc.status === 'paid');
 
       // Write audit log
@@ -874,7 +938,11 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
 
         // Free table if dine-in
         if (session.tableId && session.tableId !== 'delivery' && !session.tableId?.startsWith('delivery')) {
-          await updateDoc(doc(db, 'tables', session.tableId), { status: 'free' });
+          const matchingTable = tables.find(t => t.id === session.tableId || String(t.number) === String(session.tableId) || String(t.number) === String(session.tableNumber));
+          if (matchingTable) {
+            await updateDoc(doc(db, 'tables', matchingTable.id), { status: 'free' }).catch(() => {});
+          }
+          await updateDoc(doc(db, 'tables', session.tableId), { status: 'free' }).catch(() => {});
         }
       } else {
         // Splitting bills, some accounts still active
@@ -3086,13 +3154,21 @@ function PendingPaymentCard({ session, exchangeRate, onShowReceipt, onApprove, o
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`text-xs font-black uppercase tracking-widest px-2.5 py-1 rounded-full ${
-              paymentMethod === 'zelle' ? 'bg-indigo-50 text-indigo-700' : 'bg-emerald-50 text-emerald-700'
+              paymentMethod === 'zelle' ? 'bg-indigo-50 text-indigo-700' : 
+              ['cash', 'efectivo', 'divisa', 'efectivo_usd'].includes(paymentMethod.toLowerCase()) ? 'bg-emerald-100 text-emerald-800' :
+              'bg-emerald-50 text-emerald-700'
             }`}>
-              {paymentMethod === 'zelle' ? '📧 Zelle' : paymentMethod === 'mixto' ? '🔄 Mixto' : '📱 Pago Móvil'}
+              {paymentMethod === 'zelle' ? '📧 Zelle' : 
+               ['cash', 'efectivo', 'divisa', 'efectivo_usd'].includes(paymentMethod.toLowerCase()) ? '💵 Divisa / Efectivo $' :
+               paymentMethod === 'mixto' ? '🔄 Mixto' : '📱 Pago Móvil'}
             </span>
             {paymentMethod === 'mixto' ? (
               <span className="text-[10px] text-slate-400 font-mono">
                 {session.pendingPayment?.mixedPayments?.length || 0} métodos
+              </span>
+            ) : ['cash', 'efectivo', 'divisa', 'efectivo_usd'].includes(paymentMethod.toLowerCase()) ? (
+              <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
+                Sin Ref Obligatoria
               </span>
             ) : (
               <span className="text-[10px] text-slate-400 font-mono">
@@ -3344,14 +3420,55 @@ function CajaTableSessionCard({ session, tables, exchangeRate, onViewDelivery, o
             <Clock size={12} />
             <span>Inició: {new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
-          <button
-            onClick={() => onOpenTransfer?.(session)}
-            className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/60"
-            title="Mover de mesa o unir cuentas"
-          >
-            <RotateCcw size={13} className="rotate-90 text-indigo-500" />
-            <span>Mover / Unir Mesa</span>
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <button
+              onClick={() => onOpenTransfer?.(session)}
+              className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/60"
+              title="Mover de mesa o unir cuentas"
+            >
+              <RotateCcw size={13} className="rotate-90 text-indigo-500" />
+              <span>Mover / Unir</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                const tblNum = session.tableNumber || session.tableId;
+                if (!confirm(`¿Estás seguro de forzar el cierre y liberar la Mesa ${tblNum}?`)) return;
+
+                const activeSnap = await getDocs(query(collection(db, 'sessions'), where('status', '==', 'active')));
+                const activeList = activeSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                const matchingSessions = activeList.filter((s: any) => 
+                  s.tableId === session.tableId || 
+                  String(s.tableNumber) === String(session.tableNumber) || 
+                  s.tableId === String(session.tableNumber) || 
+                  s.tableId === `table-${session.tableNumber}` || 
+                  s.tableId === `Mesa ${session.tableNumber}`
+                );
+
+                for (const s of matchingSessions) {
+                  await updateDoc(doc(db, 'sessions', s.id), { status: 'completed', paymentStatus: 'validated' }).catch(() => {});
+                }
+
+                const matchingTables = tables.filter(t => t.id === session.tableId || String(t.number) === String(session.tableNumber));
+                for (const mt of matchingTables) {
+                  await updateDoc(doc(db, 'tables', mt.id), { status: 'free' }).catch(() => {});
+                }
+                await updateDoc(doc(db, 'tables', session.tableId), { status: 'free' }).catch(() => {});
+
+                const reviewerName = localStorage.getItem('demo_user_name') || 'Caja';
+                await logAction('finance', reviewerName, 'Liberó mesa manualmente', `Mesa ${tblNum}`);
+
+                playSuccessSound();
+                alert(`⚡ Mesa ${tblNum} liberada y cerrada exitosamente.`);
+              }}
+              className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-extrabold text-xs flex items-center gap-1 transition-colors cursor-pointer border border-rose-200/60"
+              title="Forzar liberación de esta mesa"
+            >
+              <X size={13} className="text-rose-600" />
+              <span>Liberar Mesa</span>
+            </button>
+          </div>
         </div>
       </div>
 

@@ -3,7 +3,7 @@ import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/
 import { db } from '../lib/firebase';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
 import { MenuItem, MenuItemVariant, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock, ArrowLeft, Clock, Image as ImageIcon } from 'lucide-react';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock, ArrowLeft, Clock, Image as ImageIcon, Palette } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
@@ -187,12 +187,15 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     notes: ''
   });
 
-  // Restaurant General Info State
+  // Restaurant General Info & Theme Personalization State
   const [restaurantNameInput, setRestaurantNameInput] = useState(settings?.restaurantName || 'BistroFlow');
   const [logoUrlInput, setLogoUrlInput] = useState((settings as any)?.logoUrl || '');
   const [sloganInput, setSloganInput] = useState((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
   const [restaurantPhoneInput, setRestaurantPhoneInput] = useState(settings?.restaurantPhone || '+584121234567');
   const [restaurantAddressInput, setRestaurantAddressInput] = useState(settings?.restaurantAddress || 'Caracas, Venezuela');
+  const [brandColorInput, setBrandColorInput] = useState<string>((settings as any)?.brandColor || '#2563eb');
+  const [sidebarThemeInput, setSidebarThemeInput] = useState<'minimalist' | 'brand' | 'dark'>((settings as any)?.sidebarTheme || 'minimalist');
+  const [bgThemeInput, setBgThemeInput] = useState<'kinetic' | 'warm_silk' | 'pure_white' | 'dark_luxury'>((settings as any)?.bgTheme || 'kinetic');
   const [deliveryEnabledInput, setDeliveryEnabledInput] = useState(true);
   const [minDeliveryOrderEnabledInput, setMinDeliveryOrderEnabledInput] = useState<boolean>(
     (settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false
@@ -276,6 +279,9 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setSloganInput((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
     setRestaurantPhoneInput(settings?.restaurantPhone || '+584121234567');
     setRestaurantAddressInput(settings?.restaurantAddress || 'Caracas, Venezuela');
+    if ((settings as any)?.brandColor) setBrandColorInput((settings as any).brandColor);
+    if ((settings as any)?.sidebarTheme) setSidebarThemeInput((settings as any).sidebarTheme);
+    if ((settings as any)?.bgTheme) setBgThemeInput((settings as any).bgTheme);
     setDeliveryEnabledInput(settings?.deliveryEnabled !== undefined ? settings?.deliveryEnabled : true);
     setMinDeliveryOrderEnabledInput((settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false);
     setMinDeliveryOrderAmountInput((settings as any)?.minDeliveryOrderAmount !== undefined ? Number((settings as any).minDeliveryOrderAmount) : 10);
@@ -643,6 +649,9 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         slogan: sloganInput,
         restaurantPhone: restaurantPhoneInput,
         restaurantAddress: restaurantAddressInput,
+        brandColor: brandColorInput,
+        sidebarTheme: sidebarThemeInput,
+        bgTheme: bgThemeInput,
         deliveryEnabled: deliveryEnabledInput,
         minDeliveryOrderEnabled: minDeliveryOrderEnabledInput,
         minDeliveryOrderAmount: Number(minDeliveryOrderAmountInput) || 0,
@@ -1262,6 +1271,192 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
                   placeholder="Ej. Las Mercedes, Caracas"
                 />
+              </div>
+            </div>
+
+            {/* PERSONALIZACIÓN VISUAL & MARCA DE LA TIENDA */}
+            <div className="pt-8 border-t border-slate-100 space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Palette size={20} className="text-blue-600" />
+                  <h3 className="font-black text-base text-slate-900">Personalización Visual & Marca de la Tienda</h3>
+                </div>
+                <span className="text-[10px] font-black uppercase px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 self-start sm:self-center">
+                  Se aplica a todos los visitantes
+                </span>
+              </div>
+
+              {/* 1. COLOR DE MARCA & ACENTOS PRINCIPALES */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">
+                    COLOR DE MARCA & ACENTOS PRINCIPALES
+                  </label>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Selecciona la identidad de color para tus botones, badges, promociones y detalles de navegación.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {[
+                    { name: 'Rosa', hex: '#ec4899', colorClass: 'bg-[#ec4899]' },
+                    { name: 'Rosa Fucsia', hex: '#f43f5e', colorClass: 'bg-[#f43f5e]' },
+                    { name: 'Magenta', hex: '#d946ef', colorClass: 'bg-[#d946ef]' },
+                    { name: 'Naranja Cobrizo', hex: '#ea580c', colorClass: 'bg-[#ea580c]' },
+                    { name: 'Naranja', hex: '#f97316', colorClass: 'bg-[#f97316]' },
+                    { name: 'Azul', hex: '#2563eb', colorClass: 'bg-[#2563eb]' },
+                    { name: 'Verde', hex: '#10b981', colorClass: 'bg-[#10b981]' },
+                    { name: 'Púrpura', hex: '#8b5cf6', colorClass: 'bg-[#8b5cf6]' },
+                    { name: 'Dorado', hex: '#d97706', colorClass: 'bg-[#d97706]' },
+                    { name: 'Negro', hex: '#111827', colorClass: 'bg-[#111827]' }
+                  ].map(c => {
+                    const isSelected = brandColorInput.toLowerCase() === c.hex.toLowerCase();
+                    return (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => setBrandColorInput(c.hex)}
+                        className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/60 border-blue-600 ring-2 ring-blue-600/20 shadow-2xs font-extrabold'
+                            : 'bg-white border-slate-200/80 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className={`w-6 h-6 rounded-full ${c.colorClass} shrink-0 flex items-center justify-center text-white shadow-2xs`}>
+                          {isSelected && <Check size={14} strokeWidth={3} />}
+                        </div>
+                        <span className="text-xs font-bold text-slate-800 truncate">{c.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Hex Color Box */}
+                <div className="bg-slate-50/80 border border-slate-200/70 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                      COLOR HEXADECIMAL PERSONALIZADO
+                    </span>
+                    <span className="text-sm font-mono font-black text-slate-900">{brandColorInput}</span>
+                  </div>
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <input
+                      type="color"
+                      value={brandColorInput.startsWith('#') ? brandColorInput : '#2563eb'}
+                      onChange={e => setBrandColorInput(e.target.value)}
+                      className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer p-0 bg-transparent shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={brandColorInput}
+                      onChange={e => setBrandColorInput(e.target.value)}
+                      placeholder="#2563eb"
+                      className="w-32 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. ESTILO VISUAL DEL MENÚ LATERAL (SIDEBAR) */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">
+                    ESTILO VISUAL DEL MENÚ LATERAL (SIDEBAR)
+                  </label>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Define la apariencia del menú lateral y barra de navegación.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    {
+                      id: 'minimalist',
+                      title: 'Minimalist Light',
+                      sub: 'Blanco / Gris neutro con acentos sutiles'
+                    },
+                    {
+                      id: 'brand',
+                      title: 'Color de Marca',
+                      sub: 'Barra lateral tintada con tu color de tienda'
+                    },
+                    {
+                      id: 'dark',
+                      title: 'Dark Luxury',
+                      sub: 'Kinetic Negro Profundo de alto contraste'
+                    }
+                  ].map(item => {
+                    const isSelected = sidebarThemeInput === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setSidebarThemeInput(item.id as any);
+                          if (item.id === 'dark') setBgThemeInput('dark_luxury');
+                          else if (bgThemeInput === 'dark_luxury') setBgThemeInput('kinetic');
+                        }}
+                        className={`p-4 rounded-2xl border text-left space-y-1 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/60 border-blue-600 ring-2 ring-blue-600/20 shadow-2xs'
+                            : 'bg-white border-slate-200/80 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="font-extrabold text-xs text-slate-900 block">{item.title}</span>
+                        <span className="text-[11px] text-slate-400 font-medium block leading-snug">{item.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. TONO DE FONDO DE LA TIENDA */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">
+                    TONO DE FONDO DE LA TIENDA
+                  </label>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Elige el estilo ambiental de fondo para la tienda web de clientes.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    {
+                      id: 'kinetic',
+                      title: 'Kinetic Suave (#f9f9f9)',
+                      sub: 'Estilo insignia moderno y equilibrado'
+                    },
+                    {
+                      id: 'warm_silk',
+                      title: 'Seda Cálida (#faf7f2)',
+                      sub: 'Tono beige suave para belleza y moda'
+                    },
+                    {
+                      id: 'pure_white',
+                      title: 'Blanco Puro (#ffffff)',
+                      sub: 'Máximo contraste inmaculado'
+                    }
+                  ].map(item => {
+                    const isSelected = bgThemeInput === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setBgThemeInput(item.id as any)}
+                        className={`p-4 rounded-2xl border text-left space-y-1 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/60 border-blue-600 ring-2 ring-blue-600/20 shadow-2xs'
+                            : 'bg-white border-slate-200/80 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="font-extrabold text-xs text-slate-900 block">{item.title}</span>
+                        <span className="text-[11px] text-slate-400 font-medium block leading-snug">{item.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
