@@ -40,7 +40,7 @@ import { logAction } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { useRestaurantData, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
 import { playClickSound, playSuccessSound, playErrorSound } from '../lib/audio';
-import { Table, MenuItem, Session, CourseType, CourseStatus, ExtraOption, PaymentMethodItem, Coupon } from '../types';
+import { Table, MenuItem, MenuItemVariant, Session, CourseType, CourseStatus, ExtraOption, PaymentMethodItem, Coupon } from '../types';
 import { useBookmarks } from '../lib/bookmarks';
 import { getMenuItemStockAlert, isMenuItem86ed } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
@@ -96,8 +96,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     courseStatus?: CourseStatus;
     seatNumber?: number;
     selectedExtras?: ExtraOption[];
+    selectedVariant?: MenuItemVariant;
   }[]>([]);
   const [selectedExtras, setSelectedExtras] = useState<ExtraOption[]>([]);
+  const [selectedVariant, setSelectedVariant] = useState<MenuItemVariant | null>(null);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [modalQty, setModalQty] = useState(1);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
@@ -410,9 +412,10 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
   const [selectedCourseStatus, setSelectedCourseStatus] = useState<CourseStatus>('fired');
   const [selectedSeatNumber, setSelectedSeatNumber] = useState<number>(1);
 
-  const getCartEntryPrice = (entry: { item: MenuItem; selectedExtras?: ExtraOption[] }) => {
+  const getCartEntryPrice = (entry: { item: MenuItem; selectedExtras?: ExtraOption[]; selectedVariant?: MenuItemVariant }) => {
+    const basePrice = entry.selectedVariant ? entry.selectedVariant.price : entry.item.price;
     const extrasTotal = (entry.selectedExtras || []).reduce((sum, ext) => sum + ext.price, 0);
-    return entry.item.price + extrasTotal;
+    return basePrice + extrasTotal;
   };
 
   const addToCart = (
@@ -423,7 +426,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     course: CourseType = 'main',
     courseStatus: CourseStatus = 'fired',
     seatNumber: number = 1,
-    selectedExtras: ExtraOption[] = []
+    selectedExtras: ExtraOption[] = [],
+    variant?: MenuItemVariant | null
   ) => {
     playClickSound();
     setCart(prev => {
@@ -433,6 +437,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
         i.course === course &&
         i.courseStatus === courseStatus &&
         i.seatNumber === seatNumber &&
+        (i.selectedVariant?.id || null) === (variant?.id || null) &&
         JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
         JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras)
       );
@@ -443,13 +448,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
            i.course === course &&
            i.courseStatus === courseStatus &&
            i.seatNumber === seatNumber &&
+           (i.selectedVariant?.id || null) === (variant?.id || null) &&
            JSON.stringify(i.excludedIngredientIds || []) === JSON.stringify(excludedIngredientIds) &&
            JSON.stringify(i.selectedExtras || []) === JSON.stringify(selectedExtras))
             ? { ...i, qty: i.qty + qty }
             : i
         );
       }
-      return [...prev, { item, qty, note, excludedIngredientIds, course, courseStatus, seatNumber, selectedExtras }];
+      return [...prev, { item, qty, note, excludedIngredientIds, course, courseStatus, seatNumber, selectedExtras, selectedVariant: variant || undefined }];
     });
   };
 
@@ -486,8 +492,13 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
           return ing ? ing.name : id;
         });
 
+        const displayItemName = entry.selectedVariant 
+          ? `${entry.item.name} (${entry.selectedVariant.name})`
+          : entry.item.name;
+
         printedItems.push({
           itemName: entry.item.name,
+          variantName: entry.selectedVariant?.name,
           quantity: entry.qty,
           note: entry.note || '',
           course: entry.course || entry.item.course || 'main',
@@ -498,7 +509,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
         await addDoc(ordersRef, {
           menuItemId: entry.item.id,
-          itemName: entry.item.name,
+          itemName: displayItemName,
+          rawItemName: entry.item.name,
+          variantId: entry.selectedVariant?.id || null,
+          variantName: entry.selectedVariant?.name || null,
+          variantPrice: entry.selectedVariant?.price || null,
           price: itemPrice,
           quantity: entry.qty,
           status: initialStatus,
@@ -553,7 +568,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
       });
 
       return {
-        itemName: o.itemName,
+        itemName: o.rawItemName || o.itemName,
+        variantName: o.variantName || undefined,
         quantity: o.quantity || 1,
         note: o.note || '',
         course: o.course,
@@ -2205,7 +2221,14 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                           <button
                             key={item.id}
                             disabled={isOutOfStock}
-                            onClick={() => { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); setSelectedExtras([]); }}
+                            onClick={() => { 
+                              setSelectedItem(item); 
+                              setSelectedVariant(item.variants && item.variants.length > 0 ? item.variants[0] : null); 
+                              setModalQty(1); 
+                              setExcludedIds([]); 
+                              setExtraNote(''); 
+                              setSelectedExtras([]); 
+                            }}
                             className={`group border border-slate-100 hover:border-black rounded-2xl p-2 sm:p-3 text-left transition-all duration-200 flex flex-col hover:shadow-md bg-white relative ${
                               isOutOfStock ? 'opacity-55 cursor-not-allowed' : ''
                             }`}
@@ -2267,10 +2290,24 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             )}
                             
                             <h5 className="font-extrabold text-xs sm:text-sm text-slate-900 tracking-tight leading-tight line-clamp-2 w-full mb-1 min-h-[2rem] flex items-center">{item.name}</h5>
-                            <div className="flex items-baseline justify-between gap-1 mt-auto w-full pt-1 border-t border-slate-50">
-                              <span className="text-xs sm:text-sm text-slate-950 font-black">{formatPrice(item.price)}</span>
-                              <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(item.price))}</span>
-                            </div>
+                            
+                            {item.variants && item.variants.length > 0 ? (
+                              <div className="flex flex-col w-full mt-auto pt-1 border-t border-slate-50">
+                                <div className="flex items-center justify-between text-[9px] font-black text-indigo-700 bg-indigo-50/80 px-1.5 py-0.5 rounded-md mb-0.5">
+                                  <span>📏 {item.variants.length} Opciones</span>
+                                  <span>Desde {formatPrice(Math.min(...item.variants.map(v => v.price)))}</span>
+                                </div>
+                                <div className="flex items-baseline justify-between gap-1">
+                                  <span className="text-xs sm:text-sm text-slate-950 font-black">{formatPrice(Math.min(...item.variants.map(v => v.price)))}</span>
+                                  <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(Math.min(...item.variants.map(v => v.price))))}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-baseline justify-between gap-1 mt-auto w-full pt-1 border-t border-slate-50">
+                                <span className="text-xs sm:text-sm text-slate-950 font-black">{formatPrice(item.price)}</span>
+                                <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{formatBs(toBolivares(item.price))}</span>
+                              </div>
+                            )}
                           </button>
                         );
                       })}
@@ -2289,6 +2326,11 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                             <div key={index} className="flex items-start justify-between text-xs group gap-2">
                               <span className="text-slate-500 block min-w-0">
                                 <span className="font-bold text-black">{entry.qty}x</span> <span className="font-semibold text-slate-800">{entry.item.name}</span>
+                                {entry.selectedVariant && (
+                                  <span className="ml-1.5 inline-block text-[9px] bg-indigo-50 text-indigo-900 border border-indigo-200/80 font-black px-1.5 py-0.2 rounded-md uppercase tracking-wide">
+                                    {entry.selectedVariant.name}
+                                  </span>
+                                )}
                                 
                                 {/* Selected Extras list */}
                                 {entry.selectedExtras && entry.selectedExtras.length > 0 && (
@@ -4130,12 +4172,18 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                       <div className="p-4 bg-white flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Precio Unitario</span>
-                          <span className="text-xl font-black text-slate-950 font-mono">{formatPrice(selectedItem.price)}</span>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                            {selectedVariant ? `Precio (${selectedVariant.name})` : 'Precio Unitario'}
+                          </span>
+                          <span className="text-xl font-black text-slate-950 font-mono">
+                            {formatPrice(selectedVariant ? selectedVariant.price : selectedItem.price)}
+                          </span>
                         </div>
                         <div className="text-right">
                           <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">En Bolívares</span>
-                          <span className="text-sm font-black text-emerald-700 font-mono">{formatBs(toBolivares(selectedItem.price))}</span>
+                          <span className="text-sm font-black text-emerald-700 font-mono">
+                            {formatBs(toBolivares(selectedVariant ? selectedVariant.price : selectedItem.price))}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -4185,6 +4233,72 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                   {/* RIGHT COLUMN: INGREDIENT CUSTOMIZATION + EXTRAS + KDS TIMING */}
                   <div className="md:col-span-7 space-y-5">
+
+                    {/* SELECCIÓN DE VARIANTE (TAMAÑO / PROTEÍNA) */}
+                    {selectedItem.variants && selectedItem.variants.length > 0 && (
+                      <div className="bg-gradient-to-br from-indigo-50/90 to-purple-50/50 rounded-3xl border-2 border-indigo-200/80 p-5 shadow-2xs space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-indigo-100">
+                          <span className="font-black text-xs text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                            📏 Tamaño / Opción del Platillo
+                          </span>
+                          <span className="text-[10px] text-indigo-700 font-extrabold bg-indigo-100/90 px-2 py-0.5 rounded-full">
+                            {selectedItem.variants.length} Opciones
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-slate-600 font-medium">
+                          Selecciona el tamaño o tipo deseado para actualizar el precio y descontar el inventario exacto:
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {selectedItem.variants.map((v) => {
+                            const isSelected = selectedVariant?.id === v.id;
+                            return (
+                              <button
+                                key={v.id}
+                                type="button"
+                                onClick={() => setSelectedVariant(v)}
+                                className={`flex items-center justify-between p-3.5 rounded-2xl border-2 cursor-pointer text-left transition-all ${
+                                  isSelected
+                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-600/25 scale-[1.01]'
+                                    : 'bg-white border-indigo-100 text-slate-800 hover:border-indigo-300 hover:bg-indigo-50/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                                    isSelected ? 'border-white bg-white text-indigo-600' : 'border-slate-300 bg-white'
+                                  }`}>
+                                    {isSelected && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600" />}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className={`block text-xs font-black truncate ${isSelected ? 'text-white' : 'text-slate-900'}`}>
+                                      {v.name}
+                                    </span>
+                                    {v.recipe && v.recipe.length > 0 ? (
+                                      <span className={`text-[9px] font-bold block truncate ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                        📦 Insumos específicos ({v.recipe.length})
+                                      </span>
+                                    ) : (
+                                      <span className={`text-[9px] font-bold block truncate ${isSelected ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                                        ✓ Deducción automática
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className={`font-mono text-xs sm:text-sm font-black block ${isSelected ? 'text-white' : 'text-indigo-600'}`}>
+                                    {formatPrice(v.price)}
+                                  </span>
+                                  <span className={`font-mono text-[9px] font-bold block ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
+                                    {formatBs(toBolivares(v.price))}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Personalizar Ingredientes (Quitar) */}
                     {selectedItem.recipe && selectedItem.recipe.length > 0 && (
@@ -4404,15 +4518,17 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                       selectedCourse, 
                       selectedCourseStatus, 
                       selectedSeatNumber,
-                      selectedExtras
+                      selectedExtras,
+                      selectedVariant
                     );
                     setSelectedItem(null);
+                    setSelectedVariant(null);
                   }}
                   className="flex-1 bg-slate-900 hover:bg-black text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-3 transition-transform hover:scale-[1.01] shadow-lg shadow-slate-900/20 cursor-pointer"
                 >
                   <span>Agregar al Pedido</span>
                   <span className="opacity-40 font-normal">|</span>
-                  <span className="font-mono text-emerald-400 font-extrabold">{formatPrice(getCartEntryPrice({ item: selectedItem, selectedExtras }) * modalQty)}</span>
+                  <span className="font-mono text-emerald-400 font-extrabold">{formatPrice(getCartEntryPrice({ item: selectedItem, selectedExtras, selectedVariant: selectedVariant || undefined }) * modalQty)}</span>
                 </button>
               </div>
 

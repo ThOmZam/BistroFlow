@@ -242,6 +242,8 @@ export default function App() {
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           currentUser={currentUser}
           activeView={activeView}
+          restaurantName={settings?.restaurantName || 'Q\' Sandwich'}
+          logoUrl={(settings as any)?.logoUrl || ''}
         />
 
         <NotificationManager currentUser={currentUser} onViewChange={setActiveView} hideFloatingPill={true} />

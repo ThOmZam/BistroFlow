@@ -54,89 +54,49 @@ async function startServer() {
       return cachedRates;
     }
 
-    // 1. Fetch BCV USD & Paralelo
     try {
-      const dRes = await fetch('https://ve.dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(4000) });
-      if (dRes.ok) {
-        const dData: any = await dRes.json();
-        if (Array.isArray(dData)) {
-          const oficial = dData.find((d: any) => d.fuente === 'oficial') || dData[0];
-          if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
-            cachedRates.USD.rate = Math.round(oficial.promedio * 100) / 100;
-            cachedRates.USD.lastUpdated = oficial.fechaActualizacion || new Date().toISOString();
+      // Fetch official and parallel rates concurrently in parallel (fast: ~50-200ms)
+      const [dRes, eRes] = await Promise.allSettled([
+        fetch('https://ve.dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(2500) }),
+        fetch('https://ve.dolarapi.com/v1/euros', { signal: AbortSignal.timeout(2500) })
+      ]);
+
+      if (dRes.status === 'fulfilled' && dRes.value.ok) {
+        try {
+          const dData: any = await dRes.value.json();
+          if (Array.isArray(dData)) {
+            const oficial = dData.find((d: any) => d.fuente === 'oficial') || dData[0];
+            const paralelo = dData.find((d: any) => d.fuente === 'paralelo');
+            if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
+              cachedRates.USD.rate = Math.round(oficial.promedio * 100) / 100;
+              cachedRates.USD.lastUpdated = oficial.fechaActualizacion || new Date().toISOString();
+            }
+            if (paralelo && typeof paralelo.promedio === 'number' && paralelo.promedio > 0) {
+              cachedRates.USDT.rate = Math.round(paralelo.promedio * 100) / 100;
+              cachedRates.USDT.lastUpdated = paralelo.fechaActualizacion || new Date().toISOString();
+            }
           }
-        }
+        } catch {}
       }
+
+      if (eRes.status === 'fulfilled' && eRes.value.ok) {
+        try {
+          const eData: any = await eRes.value.json();
+          if (Array.isArray(eData)) {
+            const oficial = eData.find((e: any) => e.fuente === 'oficial') || eData[0];
+            if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
+              cachedRates.EUR.rate = Math.round(oficial.promedio * 100) / 100;
+              cachedRates.EUR.lastUpdated = oficial.fechaActualizacion || new Date().toISOString();
+            }
+          }
+        } catch {}
+      }
+
+      lastRatesFetchTime = Date.now();
     } catch (e: any) {
-      console.warn('Could not fetch USD rate from primary source:', e.message);
+      // In case of timeout or network glitch, smoothly retain cachedRates
     }
 
-    // 2. Fetch BCV EUR
-    try {
-      const eRes = await fetch('https://ve.dolarapi.com/v1/euros', { signal: AbortSignal.timeout(4000) });
-      if (eRes.ok) {
-        const eData: any = await eRes.json();
-        if (Array.isArray(eData)) {
-          const oficial = eData.find((e: any) => e.fuente === 'oficial') || eData[0];
-          if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
-            cachedRates.EUR.rate = Math.round(oficial.promedio * 100) / 100;
-            cachedRates.EUR.lastUpdated = oficial.fechaActualizacion || new Date().toISOString();
-          }
-        }
-      }
-    } catch (e: any) {
-      console.warn('Could not fetch EUR rate from primary source:', e.message);
-    }
-
-    // 3. Fetch Binance P2P USDT rate
-    try {
-      const bRes = await fetch('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fiat: 'VES', page: 1, rows: 5, tradeType: 'BUY', asset: 'USDT' }),
-        signal: AbortSignal.timeout(4000)
-      });
-      if (bRes.ok) {
-        const bData: any = await bRes.json();
-        const rawPrice = bData?.data?.[0]?.adv?.price;
-        const numPrice = Number(rawPrice);
-        if (numPrice && numPrice > 0) {
-          cachedRates.USDT.rate = Math.round(numPrice * 100) / 100;
-          cachedRates.USDT.lastUpdated = new Date().toISOString();
-        }
-      }
-    } catch (e: any) {
-      // Fallback: Use paralelo USD if Binance fails
-      try {
-        const dRes = await fetch('https://ve.dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(3000) });
-        if (dRes.ok) {
-          const dData: any = await dRes.json();
-          const paralelo = dData.find((d: any) => d.fuente === 'paralelo');
-          if (paralelo && typeof paralelo.promedio === 'number' && paralelo.promedio > 0) {
-            cachedRates.USDT.rate = Math.round(paralelo.promedio * 100) / 100;
-            cachedRates.USDT.lastUpdated = paralelo.fechaActualizacion || new Date().toISOString();
-          }
-        }
-      } catch {}
-    }
-
-    // 4. Try pyDolarVenezuela direct API if accessible
-    try {
-      const pyRes = await fetch('https://pydolarvenezuela-api.vercel.app/api/v1/dollar', { signal: AbortSignal.timeout(3000) });
-      if (pyRes.ok) {
-        const pyData: any = await pyRes.json();
-        if (pyData?.monitors) {
-          if (pyData.monitors.bcv?.price) {
-            cachedRates.USD.rate = Math.round(pyData.monitors.bcv.price * 100) / 100;
-          }
-          if (pyData.monitors.enparalelovzla?.price && !cachedRates.USDT.rate) {
-            cachedRates.USDT.rate = Math.round(pyData.monitors.enparalelovzla.price * 100) / 100;
-          }
-        }
-      }
-    } catch {}
-
-    lastRatesFetchTime = Date.now();
     return cachedRates;
   }
 
@@ -149,11 +109,11 @@ async function startServer() {
         rates,
         lastUpdated: new Date().toISOString()
       });
-    } catch (err: any) {
-      res.status(500).json({
-        success: false,
-        error: err.message || 'Error fetching exchange rates',
-        rates: cachedRates
+    } catch {
+      res.json({
+        success: true,
+        rates: cachedRates,
+        lastUpdated: cachedRates.USD.lastUpdated || new Date().toISOString()
       });
     }
   });
@@ -167,11 +127,11 @@ async function startServer() {
         rates,
         lastUpdated: new Date().toISOString()
       });
-    } catch (err: any) {
-      res.status(500).json({
-        success: false,
-        error: err.message || 'Error refreshing exchange rates',
-        rates: cachedRates
+    } catch {
+      res.json({
+        success: true,
+        rates: cachedRates,
+        lastUpdated: cachedRates.USD.lastUpdated || new Date().toISOString()
       });
     }
   });

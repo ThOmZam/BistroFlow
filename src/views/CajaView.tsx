@@ -9,7 +9,8 @@ import {
   updateDoc, 
   getDocs,
   addDoc,
-  getDoc
+  getDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { logAction } from '../lib/logger';
@@ -131,7 +132,7 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
           tableNumber: targetTable.number
         });
         await logAction(
-          'sales',
+          'order',
           currentUser?.name || 'Caja',
           'Movió Mesa',
           `Movió comanda de Mesa ${transferSession.tableNumber || transferSession.tableId} a Mesa ${targetTable.number}`
@@ -152,7 +153,7 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
           await deleteDoc(doc(db, 'sessions', transferSession.id));
 
           await logAction(
-            'sales',
+            'order',
             currentUser?.name || 'Caja',
             'Unió Mesas',
             `Unió la cuenta de Mesa ${transferSession.tableNumber || transferSession.tableId} con la Mesa ${targetTable.number}`

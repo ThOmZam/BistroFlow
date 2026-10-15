@@ -1,5 +1,6 @@
 export interface KitchenTicketItem {
   itemName: string;
+  variantName?: string;
   quantity: number;
   note?: string;
   course?: string;
@@ -173,7 +174,7 @@ export function printKitchenTicket(data: KitchenTicketData) {
             <div class="item-row">
               <div class="item-main">
                 <span class="qty">${item.quantity}x</span>
-                <span>${item.itemName}</span>
+                <span>${item.itemName}${item.variantName ? ` <span style="background: #000; color: #fff; padding: 1px 4px; border-radius: 2px; font-size: ${is58 ? '10px' : '12px'};">[${item.variantName.toUpperCase()}]</span>` : ''}</span>
               </div>
 
               ${(item.seatNumber || item.course) ? `

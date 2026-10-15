@@ -18,6 +18,10 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
   const getItemNotesAndExclusions = (item: any, ingredientsList: any[] = []) => {
     const details: string[] = [];
 
+    if (item.variantName && typeof item.variantName === 'string' && item.variantName.trim()) {
+      details.push(`📏 VARIANTE: ${item.variantName.trim()}`);
+    }
+
     if (item.note && typeof item.note === 'string' && item.note.trim()) {
       details.push(item.note.trim());
     }
@@ -170,7 +174,7 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
       const promises = ticket.items.map(async (item: any) => {
         const orderRef = doc(db, item.path);
         if (!item.inventoryDeducted) {
-          await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || [], item.extras || []);
+          await inventoryService.deductIngredients(item.menuItemId, item.quantity, item.excludedIngredientIds || [], item.extras || [], item.variantId);
           await updateDoc(orderRef, { 
             status: 'ready', 
             readyAt: new Date().toISOString(),
@@ -506,7 +510,14 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
                                   )}
                                 </div>
 
-                                <span className={isChecked ? 'text-slate-500' : 'text-slate-900 font-bold'}>{item.itemName}</span>
+                                <span className={isChecked ? 'text-slate-500' : 'text-slate-900 font-bold'}>
+                                  {item.itemName}
+                                </span>
+                                {item.variantName && (
+                                  <span className="ml-2 inline-block px-2 py-0.5 rounded-lg bg-indigo-100 text-indigo-950 font-black text-xs border border-indigo-200">
+                                    📏 {item.variantName}
+                                  </span>
+                                )}
                                 
                                 {/* Notes & Excluded Ingredients */}
                                 {notesAndExclusions.length > 0 && (

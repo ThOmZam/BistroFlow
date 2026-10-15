@@ -91,39 +91,117 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
-  // 2. Fetch live rates from server API on mount and populate
+  // 2. Fetch live rates with multi-layer fallback (Server Route -> Direct Public API -> Cached/Default)
   const refreshRates = async (saveToFirestore = false): Promise<boolean> => {
     setIsSyncing(true);
-    try {
-      const res = await fetch('/api/exchange-rates?force=true');
-      const data = await res.json();
-      if (data.success && data.rates) {
-        const newRates: AppCurrencyRates = {
-          USD: { ...DEFAULT_RATES.USD, ...data.rates.USD },
-          EUR: { ...DEFAULT_RATES.EUR, ...data.rates.EUR },
-          USDT: { ...DEFAULT_RATES.USDT, ...data.rates.USDT },
-        };
-        setRates(newRates);
-        setLastSynced(new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    let resolvedRates: AppCurrencyRates | null = null;
 
-        // Only save to Firestore if explicitly requested by Admin in Ajustes!
-        if (saveToFirestore) {
-          const activeRate = newRates[activeCurrency]?.rate || newRates.USD.rate;
+    // Strategy 1: Attempt to fetch from local server endpoint
+    try {
+      const url = saveToFirestore ? '/api/exchange-rates?force=true' : '/api/exchange-rates';
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(3500)
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data && data.success && data.rates) {
+          resolvedRates = {
+            USD: { ...DEFAULT_RATES.USD, ...data.rates.USD },
+            EUR: { ...DEFAULT_RATES.EUR, ...data.rates.EUR },
+            USDT: { ...DEFAULT_RATES.USDT, ...data.rates.USDT },
+          };
+        }
+      }
+    } catch {
+      // Server endpoint not ready, timed out, or unavailable; proceed to Strategy 2
+    }
+
+    // Strategy 2: Direct public CORS-enabled API fallback (ve.dolarapi.com)
+    if (!resolvedRates) {
+      try {
+        const [dRes, eRes] = await Promise.allSettled([
+          fetch('https://ve.dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(3000) }),
+          fetch('https://ve.dolarapi.com/v1/euros', { signal: AbortSignal.timeout(3000) })
+        ]);
+
+        let bcvUSD = DEFAULT_RATES.USD.rate;
+        let paraleloUSDT = DEFAULT_RATES.USDT.rate;
+        let bcvEUR = DEFAULT_RATES.EUR.rate;
+        let updatedTime = new Date().toISOString();
+
+        if (dRes.status === 'fulfilled' && dRes.value.ok) {
+          try {
+            const ct = dRes.value.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const dData = await dRes.value.json();
+              if (Array.isArray(dData)) {
+                const oficial = dData.find((d: any) => d.fuente === 'oficial') || dData[0];
+                const paralelo = dData.find((d: any) => d.fuente === 'paralelo');
+                if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
+                  bcvUSD = Math.round(oficial.promedio * 100) / 100;
+                  updatedTime = oficial.fechaActualizacion || updatedTime;
+                }
+                if (paralelo && typeof paralelo.promedio === 'number' && paralelo.promedio > 0) {
+                  paraleloUSDT = Math.round(paralelo.promedio * 100) / 100;
+                }
+              }
+            }
+          } catch {
+            // Ignore JSON parse error from third-party endpoint
+          }
+        }
+
+        if (eRes.status === 'fulfilled' && eRes.value.ok) {
+          try {
+            const ct = eRes.value.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const eData = await eRes.value.json();
+              if (Array.isArray(eData)) {
+                const oficial = eData.find((e: any) => e.fuente === 'oficial') || eData[0];
+                if (oficial && typeof oficial.promedio === 'number' && oficial.promedio > 0) {
+                  bcvEUR = Math.round(oficial.promedio * 100) / 100;
+                }
+              }
+            }
+          } catch {
+            // Ignore JSON parse error from third-party endpoint
+          }
+        }
+
+        resolvedRates = {
+          USD: { ...DEFAULT_RATES.USD, rate: bcvUSD, lastUpdated: updatedTime },
+          EUR: { ...DEFAULT_RATES.EUR, rate: bcvEUR, lastUpdated: updatedTime },
+          USDT: { ...DEFAULT_RATES.USDT, rate: paraleloUSDT, lastUpdated: updatedTime },
+        };
+      } catch {
+        // Fallback to existing or default rates
+      }
+    }
+
+    if (resolvedRates) {
+      setRates(resolvedRates);
+      setLastSynced(new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+      // Only save to Firestore if explicitly requested by Admin in Ajustes!
+      if (saveToFirestore) {
+        try {
+          const activeRate = resolvedRates[activeCurrency]?.rate || resolvedRates.USD.rate;
           await setDoc(doc(db, 'settings', 'general'), {
             activeCurrency,
             exchangeRate: activeRate,
-            currencyRates: newRates,
+            currencyRates: resolvedRates,
             ratesLastSynced: new Date().toISOString()
           }, { merge: true });
-        }
-
-        return true;
+        } catch {}
       }
-    } catch (err) {
-      console.error('Failed to sync exchange rates from API:', err);
-    } finally {
+
       setIsSyncing(false);
+      return true;
     }
+
+    setIsSyncing(false);
     return false;
   };
 

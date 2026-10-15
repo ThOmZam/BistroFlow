@@ -16,7 +16,8 @@ export const inventoryService = {
     menuItemId: string, 
     quantity: number, 
     excludedIngredientIds: string[] = [],
-    extras: ExtraOption[] = []
+    extras: ExtraOption[] = [],
+    variantId?: string
   ) {
     try {
       // Fetch all inventory items first to allow matching extras by ingredient name if ingredientId is unassigned
@@ -33,15 +34,51 @@ export const inventoryService = {
         const menuItem = menuItemDoc.data() as MenuItem;
         const deductionsMap = new Map<string, number>(); // ingredientId -> total quantity to deduct
 
-        // A) Process Base Recipe
-        if (menuItem.recipe && Array.isArray(menuItem.recipe)) {
-          for (const recipeItem of menuItem.recipe) {
+        // Look for selected variant if any
+        const matchedVariant = menuItem.variants?.find(v => v.id === variantId);
+
+        // A) Process Recipe (Use variant recipe if defined, otherwise base recipe)
+        const activeRecipe = (matchedVariant && matchedVariant.recipe && matchedVariant.recipe.length > 0)
+          ? matchedVariant.recipe
+          : menuItem.recipe;
+
+        if (activeRecipe && Array.isArray(activeRecipe)) {
+          for (const recipeItem of activeRecipe) {
             if (excludedIngredientIds.includes(recipeItem.ingredientId)) {
               // Skip stock deduction for this ingredient because it was deselected/excluded
               continue;
             }
             const currentQty = deductionsMap.get(recipeItem.ingredientId) || 0;
             deductionsMap.set(recipeItem.ingredientId, currentQty + (recipeItem.quantity * quantity));
+          }
+        }
+
+        // A.1) If variant name mentions a protein or ingredient (e.g. "Camarón", "Cangrejo") and not yet deducted
+        if (matchedVariant && matchedVariant.name) {
+          const vNameLower = matchedVariant.name.toLowerCase();
+          const matchedIng = allIngredients.find(ing => 
+            vNameLower.includes(ing.name.toLowerCase()) || 
+            ing.name.toLowerCase().includes(vNameLower.replace(/^(con|de|en|y)\s+/i, '').trim())
+          );
+          if (matchedIng && !deductionsMap.has(matchedIng.id)) {
+            const currentQty = deductionsMap.get(matchedIng.id) || 0;
+            // Deduct standard 0.15kg or 1 unit if not specified
+            const defaultQty = matchedIng.unit === 'kg' ? 0.15 : 1;
+            deductionsMap.set(matchedIng.id, currentQty + (defaultQty * quantity));
+          }
+        }
+
+        // A.2) Process Combo items directly matching inventory (e.g. drinks, bottles)
+        if (menuItem.isCombo && menuItem.comboItems && Array.isArray(menuItem.comboItems)) {
+          for (const ci of menuItem.comboItems) {
+            const matchedDirect = allIngredients.find(ing => 
+              ing.name.toLowerCase().trim() === ci.name.toLowerCase().trim() ||
+              ci.name.toLowerCase().includes(ing.name.toLowerCase().trim())
+            );
+            if (matchedDirect && !deductionsMap.has(matchedDirect.id)) {
+              const currentQty = deductionsMap.get(matchedDirect.id) || 0;
+              deductionsMap.set(matchedDirect.id, currentQty + ((ci.quantity || 1) * quantity));
+            }
           }
         }
 

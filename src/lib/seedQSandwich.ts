@@ -3,21 +3,25 @@ import { db } from '../lib/firebase';
 
 export async function clearAndSeedQSandwichMenu() {
   try {
-    // 1. Clear existing menu collection
+    // 1. Clear existing menu collection safely in chunks
     const menuSnapshot = await getDocs(collection(db, 'menu'));
-    const batch = writeBatch(db);
-    menuSnapshot.docs.forEach((d) => {
-      batch.delete(d.ref);
-    });
-    await batch.commit();
+    const menuDocs = menuSnapshot.docs;
+    for (let i = 0; i < menuDocs.length; i += 400) {
+      const chunk = menuDocs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
 
-    // 2. Clear existing inventory collection
+    // 2. Clear existing inventory collection safely in chunks
     const invSnapshot = await getDocs(collection(db, 'inventory'));
-    const invBatch = writeBatch(db);
-    invSnapshot.docs.forEach((d) => {
-      invBatch.delete(d.ref);
-    });
-    await invBatch.commit();
+    const invDocs = invSnapshot.docs;
+    for (let i = 0; i < invDocs.length; i += 400) {
+      const chunk = invDocs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
 
     // 3. Insert Q' Sandwich Official Menu Items
     const qSandwichMenu = [
@@ -29,7 +33,17 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $10', 'Grande: $12', 'Con Pollo: $12/$14', 'Con Camarón: $14/$16', 'Con Pollo y Camarón: $15/$17', 'Con Cangrejo: $12/$14', 'Con Pollo y Cangrejo: $14/$16']
+        variants: [
+          { id: 'cesar-med', name: 'Mediano (Sencilla)', price: 10.0 },
+          { id: 'cesar-grd', name: 'Grande (Sencilla)', price: 12.0 },
+          { id: 'cesar-pol-med', name: 'Mediano Con Pollo', price: 12.0 },
+          { id: 'cesar-pol-grd', name: 'Grande Con Pollo', price: 14.0 },
+          { id: 'cesar-cam-med', name: 'Mediano Con Camarón', price: 14.0 },
+          { id: 'cesar-cam-grd', name: 'Grande Con Camarón', price: 16.0 },
+          { id: 'cesar-cang-med', name: 'Mediano Con Cangrejo', price: 12.0 },
+          { id: 'cesar-cang-grd', name: 'Grande Con Cangrejo', price: 14.0 },
+          { id: 'cesar-mix-grd', name: 'Grande Con Pollo y Camarón', price: 17.0 }
+        ]
       },
       {
         name: 'Salad Fish',
@@ -38,7 +52,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $12', 'Grande: $14']
+        variants: [
+          { id: 'fish-med', name: 'Mediano', price: 12.0 },
+          { id: 'fish-grd', name: 'Grande', price: 14.0 }
+        ]
       },
       {
         name: 'Ensalada Primavera',
@@ -47,7 +64,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $15', 'Grande: $17']
+        variants: [
+          { id: 'prim-med', name: 'Mediano', price: 15.0 },
+          { id: 'prim-grd', name: 'Grande', price: 17.0 }
+        ]
       },
       {
         name: 'Salad Fitness',
@@ -56,7 +76,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $14', 'Grande: $16']
+        variants: [
+          { id: 'fit-med', name: 'Mediano', price: 14.0 },
+          { id: 'fit-grd', name: 'Grande', price: 16.0 }
+        ]
       },
       {
         name: 'Salad Ranch',
@@ -65,7 +88,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $14', 'Grande: $16']
+        variants: [
+          { id: 'ranch-med', name: 'Mediano', price: 14.0 },
+          { id: 'ranch-grd', name: 'Grande', price: 16.0 }
+        ]
       },
       {
         name: 'Marítima (Ensalada)',
@@ -74,7 +100,13 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $15', 'Grande: $17']
+        variants: [
+          { id: 'mar-cam-med', name: 'Mediano Con Camarón', price: 15.0 },
+          { id: 'mar-cam-grd', name: 'Grande Con Camarón', price: 17.0 },
+          { id: 'mar-cang-med', name: 'Mediano Con Cangrejo', price: 15.0 },
+          { id: 'mar-cang-grd', name: 'Grande Con Cangrejo', price: 17.0 },
+          { id: 'mar-mix-grd', name: 'Grande Con Pollo y Camarón', price: 18.5 }
+        ]
       },
       {
         name: 'Salad Bowl',
@@ -92,7 +124,11 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $15', 'Grande: $17']
+        alerts: ['Mediano: $15', 'Grande: $17'],
+        variants: [
+          { id: 'it-med', name: 'Mediano', price: 15.0 },
+          { id: 'it-grd', name: 'Grande', price: 17.0 }
+        ]
       },
       {
         name: 'Deli Pollo',
@@ -101,7 +137,11 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['Mediano: $15', 'Grande: $17']
+        alerts: ['Mediano: $15', 'Grande: $17'],
+        variants: [
+          { id: 'dp-med', name: 'Mediano', price: 15.0 },
+          { id: 'dp-grd', name: 'Grande', price: 17.0 }
+        ]
       },
 
       // SANDWICHES
@@ -112,7 +152,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $7', '30cm: $9']
+        variants: [
+          { id: 'pe-15', name: '15 cm (Regular)', price: 7.0 },
+          { id: 'pe-30', name: '30 cm (Grande)', price: 9.0 }
+        ]
       },
       {
         name: 'Pollo Tradicional (Sandwich)',
@@ -121,7 +164,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'pt-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'pt-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Pollo Champiñón (Sandwich)',
@@ -130,7 +176,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'pc-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'pc-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Pollo Teriyaki (Sandwich)',
@@ -139,7 +188,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'py-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'py-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Pollo Premium (Sandwich)',
@@ -148,7 +200,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'pp-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'pp-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Pollo 4 Quesos (Sandwich)',
@@ -157,7 +212,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $13', '30cm: $15']
+        variants: [
+          { id: 'p4-15', name: '15 cm (Regular)', price: 13.0 },
+          { id: 'p4-30', name: '30 cm (Grande)', price: 15.0 }
+        ]
       },
       {
         name: 'Ranchero (Sandwich)',
@@ -166,7 +224,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'ra-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'ra-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Lomito Tradicional (Sandwich)',
@@ -175,7 +236,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $13', '30cm: $15']
+        variants: [
+          { id: 'lt-15', name: '15 cm (Regular)', price: 13.0 },
+          { id: 'lt-30', name: '30 cm (Grande)', price: 15.0 }
+        ]
       },
       {
         name: 'Lomito Champiñón (Sandwich)',
@@ -184,7 +248,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $13', '30cm: $15']
+        variants: [
+          { id: 'lc-15', name: '15 cm (Regular)', price: 13.0 },
+          { id: 'lc-30', name: '30 cm (Grande)', price: 15.0 }
+        ]
       },
       {
         name: 'Lomito 4 Quesos (Sandwich)',
@@ -193,7 +260,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $14', '30cm: $16']
+        variants: [
+          { id: 'l4-15', name: '15 cm (Regular)', price: 14.0 },
+          { id: 'l4-30', name: '30 cm (Grande)', price: 16.0 }
+        ]
       },
       {
         name: "Q' Camarón (Sandwich)",
@@ -202,7 +272,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $14', '30cm: $16']
+        variants: [
+          { id: 'qc-15', name: '15 cm (Regular)', price: 14.0 },
+          { id: 'qc-30', name: '30 cm (Grande)', price: 16.0 }
+        ]
       },
       {
         name: "Q' Cangrejo (Sandwich)",
@@ -211,7 +284,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'qg-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'qg-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Marítimo (Sandwich)',
@@ -220,7 +296,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $16', '30cm: $18']
+        variants: [
+          { id: 'ms-15', name: '15 cm (Regular)', price: 16.0 },
+          { id: 'ms-30', name: '30 cm (Grande)', price: 18.0 }
+        ]
       },
       {
         name: 'Italianisima (Sandwich)',
@@ -229,7 +308,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $16', '30cm: $18']
+        variants: [
+          { id: 'it-15', name: '15 cm (Regular)', price: 16.0 },
+          { id: 'it-30', name: '30 cm (Grande)', price: 18.0 }
+        ]
       },
       {
         name: 'Atún (Sandwich)',
@@ -238,7 +320,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'at-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'at-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Mediterraneo (Sandwich)',
@@ -247,7 +332,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'md-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'md-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: "Q' Sandwich",
@@ -256,7 +344,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $16', '30cm: $18']
+        variants: [
+          { id: 'qs-15', name: '15 cm (Regular)', price: 16.0 },
+          { id: 'qs-30', name: '30 cm (Grande)', price: 18.0 }
+        ]
       },
       {
         name: "Q' Cesar (Sandwich)",
@@ -265,7 +356,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'qc-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'qc-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Vegetariano (Sandwich)',
@@ -274,7 +368,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'vg-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'vg-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Pernil (Sandwich)',
@@ -283,7 +380,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'pn-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'pn-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Sencillo (Sandwich)',
@@ -292,7 +392,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 8,
         scheduleType: 'always',
-        alerts: ['15cm: $6', '30cm: $8']
+        variants: [
+          { id: 'sc-15', name: '15 cm (Regular)', price: 6.0 },
+          { id: 'sc-30', name: '30 cm (Grande)', price: 8.0 }
+        ]
       },
       {
         name: 'Parrillero (Sandwich)',
@@ -301,7 +404,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $8', '30cm: $10']
+        variants: [
+          { id: 'pr-15', name: '15 cm (Regular)', price: 8.0 },
+          { id: 'pr-30', name: '30 cm (Grande)', price: 10.0 }
+        ]
       },
       {
         name: 'Lomo de Cerdo (Sandwich)',
@@ -310,7 +416,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 10,
         scheduleType: 'always',
-        alerts: ['15cm: $10', '30cm: $12']
+        variants: [
+          { id: 'lc-15', name: '15 cm (Regular)', price: 10.0 },
+          { id: 'lc-30', name: '30 cm (Grande)', price: 12.0 }
+        ]
       },
       {
         name: 'Roast Beef tradicional (Sandwich)',
@@ -319,7 +428,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $13', '30cm: $15']
+        variants: [
+          { id: 'rb-15', name: '15 cm (Regular)', price: 13.0 },
+          { id: 'rb-30', name: '30 cm (Grande)', price: 15.0 }
+        ]
       },
       {
         name: 'Roast Beef 4 Quesos (Sandwich)',
@@ -328,7 +440,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $14', '30cm: $16']
+        variants: [
+          { id: 'rb4-15', name: '15 cm (Regular)', price: 14.0 },
+          { id: 'rb4-30', name: '30 cm (Grande)', price: 16.0 }
+        ]
       },
       {
         name: 'Roast Beef Champiñón (Sandwich)',
@@ -337,7 +452,10 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
         preparationTime: 12,
         scheduleType: 'always',
-        alerts: ['15cm: $13', '30cm: $15']
+        variants: [
+          { id: 'rbc-15', name: '15 cm (Regular)', price: 13.0 },
+          { id: 'rbc-30', name: '30 cm (Grande)', price: 15.0 }
+        ]
       },
 
       // ENROLLADOS
@@ -610,6 +728,71 @@ export async function clearAndSeedQSandwichMenu() {
         image: 'https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?auto=format&fit=crop&q=80&w=600',
         preparationTime: 5,
         scheduleType: 'always'
+      },
+
+      // BEBIDAS & REFRESCOS
+      {
+        name: 'Refresco en Lata 355ml',
+        price: 2.0,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 1,
+        scheduleType: 'always',
+        alerts: ['Coca-Cola', 'Chinotto', 'Frescolita']
+      },
+      {
+        name: 'Refresco Familiar 1.5L',
+        price: 3.5,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 1,
+        scheduleType: 'always',
+        alerts: ['Para compartir']
+      },
+      {
+        name: 'Jugo Natural de Naranja',
+        price: 3.0,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 4,
+        scheduleType: 'always',
+        alerts: ['Natural 450ml']
+      },
+      {
+        name: 'Jugo de Fresa o Parchita',
+        price: 3.5,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1525385133512-2f3bdd039054?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 4,
+        scheduleType: 'always',
+        alerts: ['Fruta Natural 450ml']
+      },
+      {
+        name: 'Té Frío Nestea Limón',
+        price: 2.5,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 2,
+        scheduleType: 'always',
+        alerts: ['Vaso 500ml con hielo']
+      },
+      {
+        name: 'Agua Mineral 500ml',
+        price: 1.5,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 1,
+        scheduleType: 'always',
+        alerts: ['Botella fría']
+      },
+      {
+        name: 'Cerveza Polar / Zulia',
+        price: 2.5,
+        category: 'Bebidas',
+        image: 'https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=600',
+        preparationTime: 1,
+        scheduleType: 'always',
+        alerts: ['Tercio bien frío']
       }
     ];
 
@@ -630,7 +813,13 @@ export async function clearAndSeedQSandwichMenu() {
       { name: 'Queso Mozzarella', stock: 25, minStock: 5, unit: 'kg', cost: 6.5 },
       { name: 'Lechuga', stock: 40, minStock: 10, unit: 'kg', cost: 2.0 },
       { name: 'Tomate', stock: 35, minStock: 10, unit: 'kg', cost: 2.5 },
-      { name: 'Papas para Fritar', stock: 100, minStock: 25, unit: 'kg', cost: 1.8 }
+      { name: 'Papas para Fritar', stock: 100, minStock: 25, unit: 'kg', cost: 1.8 },
+      { name: 'Pan de Sandwich 15/30cm', stock: 80, minStock: 20, unit: 'und', cost: 0.8 },
+      { name: 'Pan de Hamburguesa', stock: 60, minStock: 15, unit: 'und', cost: 0.6 },
+      { name: 'Refresco Lata 355ml', stock: 120, minStock: 24, unit: 'und', cost: 0.8 },
+      { name: 'Refresco Familiar 1.5L', stock: 40, minStock: 10, unit: 'und', cost: 1.5 },
+      { name: 'Agua Mineral 500ml', stock: 80, minStock: 20, unit: 'und', cost: 0.5 },
+      { name: 'Cerveza Polar / Zulia', stock: 72, minStock: 24, unit: 'und', cost: 1.2 }
     ];
 
     for (const ing of qSandwichIngredients) {

@@ -24,7 +24,11 @@ import {
   ChevronRight,
   Flame,
   Terminal,
-  UtensilsCrossed
+  UtensilsCrossed,
+  Plus,
+  X,
+  Grid,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, query, where, collectionGroup } from 'firebase/firestore';
@@ -64,6 +68,11 @@ export default function Sidebar({
   });
 
   const [isInsideTable, setIsInsideTable] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMobileMoreOpen(false);
+  }, [activeView]);
 
   // Hide mobile bottom navigation bar when inside a table comanda modal
   useEffect(() => {
@@ -225,6 +234,149 @@ export default function Sidebar({
 
   // Flat list for mobile bar
   const allVisibleItems = visibleSections.flatMap(s => s.items);
+
+  // Fixed 4 primary buttons + 1 "Más" button for mobile matching Screenshot 1:
+  // 1. Inicio (LayoutGrid)
+  // 2. POS (Store)
+  // 3. Caja (Wallet)
+  // 4. Stock (Package)
+  const mobilePrimaryTabs = [
+    { id: 'dashboard', label: 'Inicio', icon: LayoutGrid, badge: 0 },
+    { id: 'waiter', label: 'POS', icon: Store, badge: tableWaitingBillCount },
+    { id: 'caja', label: 'Caja', icon: Wallet, badge: cajaPendingCount },
+    { id: 'inventory', label: 'Stock', icon: Package, badge: 0 },
+  ];
+
+  const primaryIds = mobilePrimaryTabs.map(t => t.id);
+  const isMoreSelected = !primaryIds.includes(activeView);
+
+  // Tools list for "Más Herramientas" drawer matching Screenshot 2:
+  const moreToolsList = [
+    {
+      id: 'compras',
+      title: 'Compras & Proveedores',
+      subtitle: 'Órdenes de compra y gestión de proveedores',
+      icon: Truck,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('inventory');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'crm',
+      title: 'Clientes & Fiado (CRM)',
+      subtitle: 'Deudas, abonos e historial de clientes',
+      icon: Users,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('crm');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'finance',
+      title: 'Caja & Finanzas',
+      subtitle: 'Cierre Z, flujo de caja e ingresos',
+      icon: Wallet,
+      roles: ['admin', 'finance'],
+      action: () => {
+        onViewChange('finance');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'analytics',
+      title: 'Estadísticas & IA',
+      subtitle: 'Métricas de ventas y Asistente IA',
+      icon: TrendingUp,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('analytics');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'marketing',
+      title: 'Marketing & Descuentos',
+      subtitle: 'Cupones y promociones',
+      icon: Sparkles,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('marketing');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'personal',
+      title: 'Personal & Turnos',
+      subtitle: 'PINs de acceso, cajeros/contadores y asistencia',
+      icon: UserCheck,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('personal');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'kernel',
+      title: 'Bitácora de Auditoría',
+      subtitle: 'Trazabilidad forense e historial de cambios global',
+      icon: ShieldCheck,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('kernel');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'menu_settings',
+      title: 'Configuración del Menú',
+      subtitle: 'Platos, combos, mesas y ajustes del local',
+      icon: Settings,
+      roles: ['admin'],
+      action: () => {
+        onViewChange('menu_settings');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'kitchen',
+      title: 'Cocina (KDS)',
+      subtitle: 'Monitor de comandas y tiempos de preparación',
+      icon: ChefHat,
+      roles: ['admin', 'cook'],
+      action: () => {
+        onViewChange('kitchen');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'chat',
+      title: 'Chat del Equipo',
+      subtitle: 'Comunicación interna entre colaboradores',
+      icon: MessageSquare,
+      roles: ['admin', 'waiter', 'cook', 'finance'],
+      badge: chatMessagesCount > 0 ? '•' : 0,
+      action: () => {
+        onViewChange('chat');
+        setIsMobileMoreOpen(false);
+      }
+    },
+    {
+      id: 'my_shift',
+      title: 'Mi Turno & Perfil',
+      subtitle: 'Control de asistencia, horario y perfil personal',
+      icon: User,
+      roles: ['admin', 'waiter', 'cook', 'finance'],
+      action: () => {
+        onViewChange('my_shift');
+        setIsMobileMoreOpen(false);
+      }
+    }
+  ].filter(tool => tool.roles.includes(role));
+
+  const moreHasBadge = moreToolsList.some(tool => !!tool.badge);
 
   return (
     <>
@@ -436,71 +588,178 @@ export default function Sidebar({
         </div>
       </motion.aside>
 
-      {/* Mobile Bottom Navigation Bar - hidden when inside table modal to provide full height for orders */}
+      {/* Mobile Bottom Navigation Bar: Exact match to Screenshot 1 */}
       {!isInsideTable && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg">
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-1 px-2 w-full justify-start select-none touch-pan-x -webkit-overflow-scrolling-touch">
-            {allVisibleItems.map((item) => {
-              const isSelected = activeView === item.id;
-              const hasBadge = !!item.badge;
-              const isDot = item.badge === '•';
-              const IconComponent = item.icon;
+        <>
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200/90 z-50 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+            <div className="grid grid-cols-5 items-center justify-items-center px-1 select-none w-full">
+              {mobilePrimaryTabs.map((item) => {
+                const isSelected = activeView === item.id && !isMobileMoreOpen;
+                const hasBadge = !!item.badge;
+                const IconComponent = item.icon;
 
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onViewChange(item.id)}
-                  className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all shrink-0 min-w-[70px] ${
-                    isSelected 
-                      ? 'text-blue-600 font-bold scale-[1.02] bg-blue-50/60' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  <div className="relative mb-0.5">
-                    <IconComponent 
-                      size={18} 
-                      className={isSelected ? 'text-blue-600 stroke-[2.5]' : 'text-slate-400 stroke-[1.8]'} 
-                    />
-                    {hasBadge && (
-                      <span className={`absolute -top-1 -right-1.5 rounded-full flex items-center justify-center font-black leading-none ${
-                        isDot 
-                          ? 'w-1.5 h-1.5 bg-emerald-500 ring-1 ring-white' 
-                          : 'text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white ring-1 ring-white'
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setIsMobileMoreOpen(false);
+                      onViewChange(item.id);
+                    }}
+                    className="w-full flex items-center justify-center cursor-pointer transition-all"
+                  >
+                    <div className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
+                      isSelected 
+                        ? 'bg-blue-50 text-blue-600' 
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}>
+                      <div className="relative mb-0.5">
+                        <IconComponent 
+                          size={22} 
+                          className={isSelected ? 'text-blue-600 stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'} 
+                        />
+                        {hasBadge && (
+                          <span className="absolute -top-1 -right-1.5 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black">
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-[11px] tracking-tight text-center ${
+                        isSelected ? 'font-bold text-blue-600' : 'font-medium text-slate-500'
                       }`}>
-                        {!isDot && item.badge}
+                        {item.label}
                       </span>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {/* 5th button: "Más" matching Screenshot 1 */}
+              <button
+                onClick={() => setIsMobileMoreOpen(prev => !prev)}
+                className="w-full flex items-center justify-center cursor-pointer transition-all"
+              >
+                <div className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
+                  isMoreSelected || isMobileMoreOpen
+                    ? 'bg-blue-50 text-blue-600' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}>
+                  <div className="relative mb-0.5">
+                    <Sparkles 
+                      size={22} 
+                      className={isMoreSelected || isMobileMoreOpen ? 'text-blue-600 stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'} 
+                    />
+                    {moreHasBadge && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
                     )}
                   </div>
-                  <span className="text-[9px] tracking-tight truncate w-[66px] text-center font-semibold">
-                    {item.label}
+                  <span className={`text-[11px] tracking-tight text-center ${
+                    isMoreSelected || isMobileMoreOpen ? 'font-bold text-blue-600' : 'font-medium text-slate-500'
+                  }`}>
+                    Más
                   </span>
-                </button>
-              );
-            })}
+                </div>
+              </button>
+            </div>
+          </nav>
 
-            {/* Mobile Sound Toggle */}
-            <button
-              onClick={toggleSound}
-              className="flex flex-col items-center justify-center p-2 rounded-xl text-emerald-600 hover:text-emerald-700 transition-colors shrink-0 min-w-[65px]"
-            >
-              {soundEnabled ? (
-                <Volume2 size={18} className="mb-0.5 text-emerald-500" />
-              ) : (
-                <VolumeX size={18} className="mb-0.5 text-slate-400" />
-              )}
-              <span className="text-[9px] font-semibold text-slate-600">Audio</span>
-            </button>
+          {/* Slide-up Sheet for "Más Herramientas" matching Screenshot 2 */}
+          <AnimatePresence>
+            {isMobileMoreOpen && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsMobileMoreOpen(false)}
+                  className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-50 cursor-pointer"
+                />
+                <motion.div
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+                  className="md:hidden fixed bottom-0 left-0 right-0 bg-white rounded-t-[32px] border-t border-slate-100 z-50 p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl max-h-[85vh] flex flex-col"
+                >
+                  {/* Sheet Header matching Screenshot 2 */}
+                  <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-3.5 shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <Sparkles size={20} className="stroke-[2.2]" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-base leading-tight">Más Herramientas</h3>
+                        <p className="text-xs text-slate-400 font-normal mt-0.5">Gestión avanzada del negocio</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsMobileMoreOpen(false)}
+                      className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+                      title="Cerrar"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
 
-            {/* Mobile Logout */}
-            <button
-              onClick={onLogout}
-              className="flex flex-col items-center justify-center p-2 rounded-xl text-rose-500 hover:text-rose-600 transition-colors shrink-0 min-w-[65px]"
-            >
-              <LogOut size={18} className="mb-0.5 text-rose-500" />
-              <span className="text-[9px] font-bold text-rose-600">Salir</span>
-            </button>
-          </div>
-        </nav>
+                  {/* Single column tool card list matching Screenshot 2 */}
+                  <div className="space-y-2.5 overflow-y-auto pr-1 flex-1 scrollbar-thin">
+                    {moreToolsList.map((tool) => (
+                      <button
+                        key={tool.id}
+                        onClick={tool.action}
+                        className={`w-full bg-slate-50/70 hover:bg-slate-100/90 border rounded-2xl p-3.5 flex items-center gap-3.5 transition-all text-left cursor-pointer group ${
+                          activeView === tool.id ? 'border-blue-400 bg-blue-50/50 shadow-2xs' : 'border-slate-100/90'
+                        }`}
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-white shadow-2xs border border-slate-100/90 flex items-center justify-center text-slate-700 shrink-0 group-hover:scale-105 transition-transform">
+                          <tool.icon size={22} className={activeView === tool.id ? 'text-blue-600' : 'text-slate-700 stroke-[1.8]'} />
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <h4 className="text-sm font-bold text-slate-900 leading-snug truncate">{tool.title}</h4>
+                          <p className="text-xs text-slate-400 font-normal mt-0.5 truncate">{tool.subtitle}</p>
+                        </div>
+                        {tool.badge ? (
+                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white shrink-0">
+                            {tool.badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Bottom Actions: Audio Toggle & Logout */}
+                  <div className="pt-3.5 border-t border-slate-100 mt-3 grid grid-cols-2 gap-2 shrink-0">
+                    <button
+                      onClick={toggleSound}
+                      className="flex items-center justify-center gap-2 p-3 bg-slate-50 hover:bg-slate-100 rounded-xl text-xs font-bold text-slate-700 cursor-pointer"
+                    >
+                      {soundEnabled ? (
+                        <>
+                          <Volume2 size={16} className="text-emerald-500" />
+                          <span>Audio Activo</span>
+                        </>
+                      ) : (
+                        <>
+                          <VolumeX size={16} className="text-slate-400" />
+                          <span>Sin Audio</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMobileMoreOpen(false);
+                        onLogout();
+                      }}
+                      className="flex items-center justify-center gap-2 p-3 bg-rose-50 hover:bg-rose-100 rounded-xl text-xs font-bold text-rose-600 cursor-pointer"
+                    >
+                      <LogOut size={16} />
+                      <span>Cerrar Sesión</span>
+                    </button>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </>
       )}
     </>
   );

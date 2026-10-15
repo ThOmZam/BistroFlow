@@ -66,6 +66,13 @@ export interface ExtraOption {
   quantity?: number;
 }
 
+export interface MenuItemVariant {
+  id: string;
+  name: string; // e.g. "15 cm", "30 cm", "Mediano", "Grande", "Con Camarón", "Con Pollo"
+  price: number;
+  recipe?: { ingredientId: string; quantity: number }[];
+}
+
 export interface OrderItem {
   id: string;
   accountId: string;
@@ -78,6 +85,11 @@ export interface OrderItem {
   courseStatus?: CourseStatus;
   seatNumber?: number;
   extras?: ExtraOption[];
+  variantId?: string;
+  variantName?: string;
+  variantPrice?: number;
+  excludedIngredientIds?: string[];
+  inventoryDeducted?: boolean;
   // Extended info for UI
   menuItem?: MenuItem;
 }
@@ -88,6 +100,7 @@ export interface MenuItem {
   price: number;
   category: string;
   image: string;
+  description?: string;
   recipe?: { ingredientId: string; quantity: number }[];
   scheduleType?: 'always' | 'breakfast' | 'lunch' | 'dinner' | 'custom';
   availableFrom?: string;
@@ -96,7 +109,16 @@ export interface MenuItem {
   course?: CourseType;
   is86ed?: boolean;
   extras?: ExtraOption[];
+  variants?: MenuItemVariant[];
   preparationTime?: number;
+  isCombo?: boolean;
+  comboItems?: {
+    menuItemId: string;
+    name: string;
+    price: number;
+    quantity: number;
+    category?: string;
+  }[];
 }
 
 export interface Ingredient {

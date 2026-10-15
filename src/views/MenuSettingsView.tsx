@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
-import { MenuItem, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock } from 'lucide-react';
+import { MenuItem, MenuItemVariant, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock, ArrowLeft, Clock, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
@@ -16,7 +16,7 @@ import { clearAndSeedQSandwichMenu } from '../lib/seedQSandwich';
 
 export default function MenuSettingsView({ currentUser }: { currentUser?: any }) {
   const { menu = [], tables = [], exchangeRate, settings, promotions = [], ingredients = [] } = useRestaurantData() || {};
-  const { activeCurrency, currentRateBs, currencySymbol, updateManualRate } = useCurrency();
+  const { activeCurrency, currentRateBs, currencySymbol, updateManualRate, toBolivares, formatBs, formatPrice } = useCurrency();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [activeTab, setActiveTab] = useState<'menu' | 'tables' | 'general' | 'toast_pos' | 'promotions' | 'payments' | 'notifications'>('menu');
 
@@ -58,30 +58,56 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     availableTo: '',
     alerts: [] as string[],
     extras: [] as ExtraOption[],
+    variants: [] as MenuItemVariant[],
     preparationTime: '' as number | ''
   });
 
+  // Variant form input state inside dish modal
+  const [variantFormName, setVariantFormName] = useState('');
+  const [variantFormPrice, setVariantFormPrice] = useState('');
+  const [variantFormIngId, setVariantFormIngId] = useState('');
+  const [variantFormQty, setVariantFormQty] = useState('1');
+
   const [isCreatingCombo, setIsCreatingCombo] = useState(false);
-  const [comboData, setComboData] = useState({
+  const [editingComboId, setEditingComboId] = useState<string | null>(null);
+  const [comboData, setComboData] = useState<{
+    name: string;
+    price: number | '';
+    description: string;
+    image: string;
+    items: {
+      menuItemId: string;
+      name: string;
+      price: number;
+      quantity: number;
+      category?: string;
+    }[];
+  }>({
     name: '',
-    price: 0,
+    price: '',
     description: '',
     image: '',
-    includedMenuItemIds: [] as string[]
+    items: []
   });
   const [selectedMenuIdToAdd, setSelectedMenuIdToAdd] = useState('');
+  const [selectedQtyToAdd, setSelectedQtyToAdd] = useState<number>(1);
   const [isSeedingQSandwich, setIsSeedingQSandwich] = useState(false);
+  const [isSeedingConfirmOpen, setIsSeedingConfirmOpen] = useState(false);
+
+  // In-app Deletion confirmation states (never blocked by browser iframe)
+  const [itemToDelete, setItemToDelete] = useState<MenuItem | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [tableToDelete, setTableToDelete] = useState<Table | null>(null);
 
   const handleSeedQSandwich = async () => {
-    if (!confirm('¿Estás seguro de borrar todo el menú actual e inventario para cargar el menú oficial de Q\' Sandwich basado en las imágenes del cliente?')) return;
     setIsSeedingQSandwich(true);
+    setIsSeedingConfirmOpen(false);
     try {
       await clearAndSeedQSandwichMenu();
       playSuccessSound();
-      alert('¡Menú oficial de Q\' Sandwich e inventario cargados exitosamente!');
     } catch (err) {
+      console.error('Error seeding menu:', err);
       playErrorSound();
-      alert('Error cargando el menú');
     } finally {
       setIsSeedingQSandwich(false);
     }
@@ -336,6 +362,18 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
 
   // MENU LOGIC
   const handleEditMenu = (item: MenuItem) => {
+    if (item.isCombo || item.category === 'Combos & Promos') {
+      setEditingComboId(item.id);
+      setIsCreatingCombo(true);
+      setComboData({
+        name: item.name,
+        price: item.price,
+        description: item.description || '',
+        image: item.image || '',
+        items: item.comboItems || []
+      });
+      return;
+    }
     setEditingItem(item); setIsCreatingMenu(false);
     setMenuData({ 
       name: item.name, 
@@ -348,10 +386,15 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
       availableTo: item.availableTo || '',
       alerts: item.alerts || [],
       extras: item.extras || [],
+      variants: item.variants || [],
       preparationTime: item.preparationTime || ''
     });
     setModalRecipeIngId('');
     setModalRecipeQty('1');
+    setVariantFormName('');
+    setVariantFormPrice('');
+    setVariantFormIngId('');
+    setVariantFormQty('1');
   };
   const handleSaveMenu = async () => {
     if (isSavingMenu) return;
@@ -368,6 +411,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         availableTo: menuData.availableTo || '',
         alerts: menuData.alerts || [],
         extras: menuData.extras || [],
+        variants: (menuData.variants || []).filter(v => v.name && v.name.trim() !== ''),
         preparationTime: menuData.preparationTime !== '' ? Number(menuData.preparationTime) : null
       };
       if (isCreatingMenu) {
@@ -382,75 +426,95 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   };
 
   const handleSaveCombo = async () => {
-    if (!comboData.name || comboData.price <= 0) {
-      alert('Por favor ingresa un nombre y un precio válido para el combo.');
+    if (!comboData.name.trim()) {
+      playErrorSound();
       return;
     }
-    if (comboData.includedMenuItemIds.length === 0) {
-      alert('Por favor selecciona al menos un plato o bebida del menú que compone este combo.');
+    const finalPrice = typeof comboData.price === 'number' ? comboData.price : parseFloat(String(comboData.price)) || 0;
+    if (finalPrice <= 0) {
+      playErrorSound();
+      return;
+    }
+    if (!comboData.items || comboData.items.length === 0) {
+      playErrorSound();
       return;
     }
 
     try {
       const aggregatedRecipe: { ingredientId: string; quantity: number }[] = [];
-      const itemNames: string[] = [];
+      const itemNamesWithQty: string[] = [];
 
-      comboData.includedMenuItemIds.forEach(id => {
-        const menuItem = menu.find(m => m.id === id);
-        if (menuItem) {
-          itemNames.push(menuItem.name);
-          if (menuItem.recipe && Array.isArray(menuItem.recipe)) {
-            menuItem.recipe.forEach(r => {
-              const existing = aggregatedRecipe.find(ar => ar.ingredientId === r.ingredientId);
-              if (existing) {
-                existing.quantity += r.quantity;
-              } else {
-                aggregatedRecipe.push({ ingredientId: r.ingredientId, quantity: r.quantity });
-              }
-            });
-          }
+      comboData.items.forEach(ci => {
+        const menuItem = menu.find(m => m.id === ci.menuItemId);
+        itemNamesWithQty.push(`${ci.quantity > 1 ? `${ci.quantity}x ` : ''}${ci.name}`);
+
+        if (menuItem && menuItem.recipe && Array.isArray(menuItem.recipe)) {
+          menuItem.recipe.forEach(r => {
+            const qtyNeeded = r.quantity * (ci.quantity || 1);
+            const existing = aggregatedRecipe.find(ar => ar.ingredientId === r.ingredientId);
+            if (existing) {
+              existing.quantity += qtyNeeded;
+            } else {
+              aggregatedRecipe.push({ ingredientId: r.ingredientId, quantity: qtyNeeded });
+            }
+          });
         }
       });
 
       const payload = {
-        name: comboData.name,
-        price: Number(comboData.price),
+        name: comboData.name.trim(),
+        price: finalPrice,
         category: 'Combos & Promos',
         image: comboData.image || 'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&q=80&w=600',
-        description: comboData.description || `Combo compuesto por: ${itemNames.join(', ')}`,
+        description: comboData.description || `Combo compuesto por: ${itemNamesWithQty.join(', ')}`,
         recipe: aggregatedRecipe,
         scheduleType: 'always',
-        alerts: itemNames,
-        preparationTime: 15
+        alerts: itemNamesWithQty,
+        preparationTime: 15,
+        isCombo: true,
+        comboItems: comboData.items
       };
 
-      await addDoc(collection(db, 'menu'), payload);
-      await logAction('system', currentUser?.name || 'Administrador', 'Creó Combo de Menú', `Combo: ${payload.name} - Ítems: ${itemNames.join(', ')} - Precio: $${payload.price.toFixed(2)}`);
+      if (editingComboId) {
+        await updateDoc(doc(db, 'menu', editingComboId), payload);
+        await logAction('system', currentUser?.name || 'Administrador', 'Actualizó Combo de Menú', `Combo: ${payload.name} - Ítems: ${itemNamesWithQty.join(', ')} - Precio: $${finalPrice.toFixed(2)}`);
+      } else {
+        await addDoc(collection(db, 'menu'), payload);
+        await logAction('system', currentUser?.name || 'Administrador', 'Creó Combo de Menú', `Combo: ${payload.name} - Ítems: ${itemNamesWithQty.join(', ')} - Precio: $${finalPrice.toFixed(2)}`);
+      }
+
       setIsCreatingCombo(false);
-      setComboData({ name: '', price: 0, description: '', image: '', includedMenuItemIds: [] });
+      setEditingComboId(null);
+      setComboData({ name: '', price: '', description: '', image: '', items: [] });
       setSelectedMenuIdToAdd('');
+      setSelectedQtyToAdd(1);
       playSuccessSound();
-      alert('¡Combo creado con éxito vinculado al inventario y finanzas!');
     } catch (err) {
       console.error(err);
       playErrorSound();
-      alert('Error al guardar el combo');
     }
   };
 
-  const handleDeleteMenu = async (id: string) => {
+  const handleDeleteMenu = (id: string) => {
     const item = menu.find(m => m.id === id);
-    const itemName = item ? item.name : 'Desconocido';
-    if(confirm('¿Estás seguro de eliminar este platillo del menú?')) {
-      try {
-        await deleteDoc(doc(db, 'menu', id));
-        await logAction('system', currentUser?.name || 'Administrador', 'Eliminó plato del menú', `Plato: ${itemName}`);
-        playSuccessSound();
-      } catch (err) {
-        console.error('Error deleting menu item:', err);
-        playErrorSound();
-        alert('Error al eliminar el platillo. Inténtalo de nuevo.');
-      }
+    if (item) {
+      setItemToDelete(item);
+    }
+  };
+
+  const confirmDeleteItem = async () => {
+    if (!itemToDelete) return;
+    setIsDeletingItem(true);
+    try {
+      await deleteDoc(doc(db, 'menu', itemToDelete.id));
+      await logAction('system', currentUser?.name || 'Administrador', 'Eliminó plato del menú', `Plato: ${itemToDelete.name}`);
+      playSuccessSound();
+      setItemToDelete(null);
+    } catch (err) {
+      console.error('Error deleting menu item:', err);
+      playErrorSound();
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
@@ -782,10 +846,30 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">Configuración del Local</h2>
           <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Gestiona el menú, mesas, promociones, moneda y configuración general.</p>
         </div>
-        {activeTab === 'menu' && (
+        {activeTab === 'menu' && !editingItem && !isCreatingMenu && !isCreatingCombo && (
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
             <button 
-              onClick={() => { setIsCreatingMenu(true); setMenuData({ name: '', price: 0, category: 'Hamburguesas', image: '', scheduleType: 'always', availableFrom: '', availableTo: '', alerts: [], extras: [], preparationTime: '' }); }} 
+              onClick={() => { 
+                setIsCreatingMenu(true); 
+                setMenuData({ 
+                  name: '', 
+                  price: 0, 
+                  category: 'Sandwiches', 
+                  image: '', 
+                  recipe: [],
+                  scheduleType: 'always', 
+                  availableFrom: '', 
+                  availableTo: '', 
+                  alerts: [], 
+                  extras: [], 
+                  variants: [], 
+                  preparationTime: '' 
+                }); 
+                setVariantFormName('');
+                setVariantFormPrice('');
+                setVariantFormIngId('');
+                setVariantFormQty('1');
+              }} 
               className="flex items-center gap-2 px-4 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
             >
               <Plus size={16} />
@@ -793,8 +877,11 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
             </button>
             <button 
               onClick={() => { 
+                setEditingComboId(null);
+                setComboData({ name: '', price: '', description: '', image: '', items: [] });
+                setSelectedMenuIdToAdd('');
+                setSelectedQtyToAdd(1);
                 setIsCreatingCombo(true); 
-                setComboData({ name: '', price: 0, description: '', image: '', includedItems: ['Hamburguesa', 'Papas Fritas', 'Refresco 350ml'] }); 
               }} 
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
             >
@@ -802,7 +889,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
               <span>Crear Combo Especial</span>
             </button>
             <button 
-              onClick={handleSeedQSandwich}
+              onClick={() => setIsSeedingConfirmOpen(true)}
               disabled={isSeedingQSandwich}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md transition-all disabled:opacity-50 cursor-pointer"
             >
@@ -813,9 +900,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         )}
       </header>
 
-      {/* Sub-menu Navegación de Ajustes - Impecable, Centrado, Responsive y Sin Romperse */}
-      <div className="w-full mb-8">
-        <div className="bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 shadow-2xs flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth">
+      {/* Sub-menu Navegación de Ajustes - Se oculta durante la edición para máxima comodidad */}
+      {!editingItem && !isCreatingMenu && !isCreatingCombo && (
+        <div className="w-full mb-8">
+          <div className="bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 shadow-2xs flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth">
           {[
             { id: 'menu', label: 'Menú & Platos', icon: UtensilsCrossed, badge: menu.length },
             { id: 'tables', label: 'Mesas & QR', icon: Grid, badge: tables.length },
@@ -858,10 +946,12 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           })}
         </div>
       </div>
+      )}
 
       {activeTab === 'menu' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {!editingItem && !isCreatingMenu && !isCreatingCombo && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {menu.map(item => {
               const isStarred = isBookmarked(item.id, 'menu');
               return (
@@ -891,7 +981,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                     </button>
                   
                   {/* Active tags badges */}
-                  {item.alerts && item.alerts.length > 0 && (
+                  {Array.isArray(item.alerts) && item.alerts.length > 0 && (
                     <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1 z-10">
                       {item.alerts.map(tagId => {
                         const labelMap: { [key: string]: string } = {
@@ -959,6 +1049,25 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   return null;
                 })()}
 
+                {/* Variantes Preview Badge */}
+                {item.variants && item.variants.length > 0 && (
+                  <div className="mb-3 p-2.5 bg-indigo-50/70 border border-indigo-100 rounded-xl">
+                    <div className="text-[10px] font-black uppercase text-indigo-800 tracking-wider flex items-center justify-between mb-1.5">
+                      <span className="flex items-center gap-1">📏 {item.variants.length} Variantes</span>
+                      <span className="text-[9px] font-bold text-indigo-600">
+                        ${Math.min(...item.variants.map(v => v.price)).toFixed(2)} - ${Math.max(...item.variants.map(v => v.price)).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {item.variants.map(v => (
+                        <span key={v.id} className="text-[9px] font-bold bg-white text-indigo-900 px-2 py-0.5 rounded-md border border-indigo-200/60 shadow-2xs">
+                          {v.name}: <span className="font-mono text-indigo-700">${v.price.toFixed(2)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2 border-t border-slate-50 pt-4">
                   <button type="button" onClick={() => handleEditMenu(item)} className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors cursor-pointer">Editar</button>
                   <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteMenu(item.id); }} className="w-12 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl transition-colors cursor-pointer" title="Eliminar"><Trash2 size={16} /></button>
@@ -967,6 +1076,7 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
             );
           })}
           </div>
+          )}
         </>
       )}
 
@@ -2695,14 +2805,57 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         </>
       )}
 
-      {/* MODALS */}
+      {/* EDITOR DE PLATILLO INLINE (SIN MODALS NI ELEMENTOS FLOTANTES) */}
       <AnimatePresence>
         {(editingItem || isCreatingMenu) && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-3xl sm:rounded-[40px] p-5 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col">
-              <button onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }} className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer"><X size={20} /></button>
-              <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6 pr-8">{isCreatingMenu ? 'Nuevo Platillo' : 'Editar Platillo'}</h3>
-              <div className="space-y-4 mb-4 sm:mb-6 max-h-[65vh] sm:max-h-[70vh] overflow-y-auto pr-1 sm:pr-2 scrollbar-thin">
+          <div className="w-full bg-white rounded-3xl sm:rounded-[36px] border border-slate-200/90 shadow-sm p-5 sm:p-8 relative flex flex-col space-y-6 my-4 animate-fadeIn">
+            {/* Header del Editor */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }} 
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-all text-xs font-bold flex items-center gap-2 cursor-pointer border border-slate-200/70"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Volver al Menú</span>
+                </button>
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                    <span>{isCreatingMenu ? 'Nuevo Platillo' : 'Editar Platillo'}</span>
+                    {menuData.name && (
+                      <span className="text-sm font-bold text-slate-400 font-sans hidden sm:inline">
+                        — {menuData.name}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Configura datos generales, precios, receta de insumos y variantes de tamaño o proteínas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveMenu}
+                  disabled={isSavingMenu || !menuData.name.trim()}
+                  className="px-5 py-2.5 bg-black hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl font-black text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                >
+                  {isSavingMenu ? <span className="animate-spin">⏳</span> : <Save size={16} />}
+                  <span>{isSavingMenu ? 'Guardando...' : 'Guardar Platillo'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-6">
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre</label>
                   <input type="text" value={menuData.name} onChange={e => setMenuData({...menuData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium" />
@@ -2994,8 +3147,357 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   })()}
                 </div>
 
-                <div className="pt-4 border-t border-slate-100">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Ingredientes Extras / Adicionales</label>
+                  {/* VARIANTES DEL PLATILLO (TAMAÑOS, PROTEÍNAS Y OPCIONES) */}
+                  <div className="pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-slate-800 flex items-center gap-1.5">
+                        <span>📏 / 🥩 Variantes del Platillo (Tamaños, Proteínas y Opciones)</span>
+                      </label>
+                      <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full">
+                        {(menuData.variants || []).length} {(menuData.variants || []).length === 1 ? 'Variante' : 'Variantes'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      Registra opciones de diferente tamaño (ej: 15cm / 30cm, Mediano / Grande) o de proteínas (ej: Pollo, Camarón, Cangrejo) con su precio individual y receta vinculada para descontar el stock exacto:
+                    </p>
+
+                    {/* Quick Preset Buttons */}
+                    <div className="mb-3 p-2.5 bg-indigo-50/50 border border-indigo-100/80 rounded-2xl">
+                      <span className="block text-[9px] font-black uppercase tracking-wider text-indigo-900 mb-1.5">
+                        ⚡ Carga Rápida con Presets Inteligentes:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = Number(menuData.price) || 8;
+                            const p15 = base;
+                            const p30 = Math.round(base * 1.35 * 10) / 10;
+                            const newVariants: MenuItemVariant[] = [
+                              { id: `var-${Date.now()}-1`, name: '15 cm (Regular)', price: p15 },
+                              { id: `var-${Date.now()}-2`, name: '30 cm (Grande)', price: p30 }
+                            ];
+                            setMenuData({ ...menuData, variants: [...(menuData.variants || []), ...newVariants] });
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                        >
+                          <span>🥪 15cm y 30cm</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = Number(menuData.price) || 10;
+                            const pP = Math.round(base * 0.8 * 10) / 10;
+                            const pM = base;
+                            const pG = Math.round(base * 1.4 * 10) / 10;
+                            const newVariants: MenuItemVariant[] = [
+                              { id: `var-${Date.now()}-p`, name: 'Pequeño', price: pP },
+                              { id: `var-${Date.now()}-m`, name: 'Mediano', price: pM },
+                              { id: `var-${Date.now()}-g`, name: 'Grande (Familiar)', price: pG }
+                            ];
+                            setMenuData({ ...menuData, variants: [...(menuData.variants || []), ...newVariants] });
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                        >
+                          <span>📏 Pequeño / Mediano / Grande</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = Number(menuData.price) || 12;
+                            const camIng = ingredients.find(i => i.name.toLowerCase().includes('camarón') || i.name.toLowerCase().includes('camaron'));
+                            const cangIng = ingredients.find(i => i.name.toLowerCase().includes('cangrejo') || i.name.toLowerCase().includes('surimi'));
+                            const newVariants: MenuItemVariant[] = [
+                              { id: `var-${Date.now()}-pol`, name: 'Con Pollo', price: base },
+                              { 
+                                id: `var-${Date.now()}-cam`, 
+                                name: 'Con Camarón', 
+                                price: base + 3,
+                                ...(camIng ? { recipe: [{ ingredientId: camIng.id, quantity: 0.15 }] } : {})
+                              },
+                              { 
+                                id: `var-${Date.now()}-cang`, 
+                                name: 'Con Cangrejo', 
+                                price: base + 4,
+                                ...(cangIng ? { recipe: [{ ingredientId: cangIng.id, quantity: 0.15 }] } : {})
+                              },
+                              { 
+                                id: `var-${Date.now()}-mix`, 
+                                name: 'Con Pollo y Camarón', 
+                                price: base + 5,
+                                ...(camIng ? { recipe: [{ ingredientId: camIng.id, quantity: 0.12 }] } : {})
+                              }
+                            ];
+                            setMenuData({ ...menuData, variants: [...(menuData.variants || []), ...newVariants] });
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                        >
+                          <span>🍤 Pollo / Camarón / Cangrejo</span>
+                        </button>
+
+                        {(menuData.variants || []).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setMenuData({ ...menuData, variants: [] })}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ml-auto"
+                          >
+                            <Trash2 size={11} />
+                            <span>Limpiar Todas</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* List of current variants */}
+                    <div className="space-y-2 mb-3">
+                      {(menuData.variants || []).map((variant, vIdx) => {
+                        return (
+                          <div key={variant.id || vIdx} className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 flex flex-col gap-2 shadow-2xs">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                                <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-900 font-black text-[10px] flex items-center justify-center shrink-0">
+                                  {vIdx + 1}
+                                </span>
+                                <input 
+                                  type="text"
+                                  value={variant.name}
+                                  onChange={(e) => {
+                                    const updated = [...(menuData.variants || [])];
+                                    updated[vIdx] = { ...updated[vIdx], name: e.target.value };
+                                    setMenuData({ ...menuData, variants: updated });
+                                  }}
+                                  placeholder="Nombre de la variante..."
+                                  className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-800 outline-none focus:border-indigo-600 flex-1"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1">
+                                  <span className="text-[10px] font-bold text-slate-400">$</span>
+                                  <input 
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={variant.price}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      const updated = [...(menuData.variants || [])];
+                                      updated[vIdx] = { ...updated[vIdx], price: val };
+                                      setMenuData({ ...menuData, variants: updated });
+                                    }}
+                                    className="w-16 font-mono text-xs font-black text-indigo-700 outline-none text-right"
+                                  />
+                                </div>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (menuData.variants || []).filter((_, i) => i !== vIdx);
+                                    setMenuData({ ...menuData, variants: updated });
+                                  }}
+                                  className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                                  title="Eliminar Variante"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Linked Recipe items for this variant */}
+                            <div className="pl-7 pr-1 pt-1.5 border-t border-slate-200/60 flex items-center justify-between flex-wrap gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400">
+                                  📦 Insumos a descontar:
+                                </span>
+                                {(variant.recipe && variant.recipe.length > 0) ? (
+                                  variant.recipe.map((ri, riIdx) => {
+                                    const ing = ingredients.find(i => i.id === ri.ingredientId);
+                                    return (
+                                      <span key={riIdx} className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-lg shadow-2xs">
+                                        <span>{ing ? ing.name : 'Insumo'}: {ri.quantity} {ing ? ing.unit : 'und'}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updated = [...(menuData.variants || [])];
+                                            const updatedRecipe = (updated[vIdx].recipe || []).filter((_, i) => i !== riIdx);
+                                            updated[vIdx] = { ...updated[vIdx], recipe: updatedRecipe };
+                                            setMenuData({ ...menuData, variants: updated });
+                                          }}
+                                          className="text-rose-400 hover:text-rose-700 cursor-pointer ml-0.5"
+                                          title="Quitar insumo de variante"
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    );
+                                  })
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 italic">
+                                    Hereda la receta base del plato
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Add ingredient mini-picker to variant */}
+                              <div className="flex items-center gap-1">
+                                <select
+                                  onChange={(e) => {
+                                    const ingId = e.target.value;
+                                    if (!ingId) return;
+                                    const ing = ingredients.find(i => i.id === ingId);
+                                    const defaultQty = ing && ing.unit === 'kg' ? 0.15 : 1;
+                                    const updated = [...(menuData.variants || [])];
+                                    const currentRecipe = updated[vIdx].recipe || [];
+                                    const existingIdx = currentRecipe.findIndex(r => r.ingredientId === ingId);
+                                    let newRecipe = [...currentRecipe];
+                                    if (existingIdx >= 0) {
+                                      newRecipe[existingIdx] = { ...newRecipe[existingIdx], quantity: newRecipe[existingIdx].quantity + defaultQty };
+                                    } else {
+                                      newRecipe.push({ ingredientId: ingId, quantity: defaultQty });
+                                    }
+                                    updated[vIdx] = { ...updated[vIdx], recipe: newRecipe };
+                                    setMenuData({ ...menuData, variants: updated });
+                                    e.target.value = '';
+                                  }}
+                                  className="bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-[10px] font-medium text-slate-700 outline-none cursor-pointer"
+                                  defaultValue=""
+                                >
+                                  <option value="" disabled>+ Vincular Insumo...</option>
+                                  {ingredients.map(ing => (
+                                    <option key={ing.id} value={ing.id}>
+                                      {ing.name} ({ing.unit})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {(menuData.variants || []).length === 0 && (
+                        <p className="text-[10px] italic text-slate-400">
+                          No hay variantes registradas. El platillo se venderá a precio único (${Number(menuData.price).toFixed(2)}).
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Add New Variant Form */}
+                    {(() => {
+                      const selectedIngForVar = ingredients.find(i => i.id === variantFormIngId);
+                      return (
+                        <div className="flex flex-col gap-2.5 bg-slate-50/70 border border-slate-200/70 rounded-2xl p-3">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                            + Registrar Nueva Variante Manual
+                          </span>
+                          
+                          <div className="grid grid-cols-12 gap-2 items-end">
+                            <div className="col-span-5 sm:col-span-4">
+                              <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                Nombre de Variante
+                              </label>
+                              <input 
+                                type="text" 
+                                placeholder="Ej: 30 cm o Con Camarón" 
+                                value={variantFormName}
+                                onChange={(e) => setVariantFormName(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-medium"
+                              />
+                            </div>
+
+                            <div className="col-span-3 sm:col-span-2">
+                              <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                Precio $
+                              </label>
+                              <input 
+                                type="number" 
+                                placeholder={Number(menuData.price || 0).toFixed(2)} 
+                                value={variantFormPrice}
+                                onChange={(e) => setVariantFormPrice(e.target.value)}
+                                step="0.01"
+                                min="0"
+                                className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-bold text-indigo-600"
+                              />
+                            </div>
+
+                            <div className="col-span-4 sm:col-span-3">
+                              <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                Insumo Específico (Opcional)
+                              </label>
+                              <select
+                                value={variantFormIngId}
+                                onChange={(e) => {
+                                  const id = e.target.value;
+                                  setVariantFormIngId(id);
+                                  const selected = ingredients.find(i => i.id === id);
+                                  if (selected && !variantFormName) {
+                                    setVariantFormName(`Con ${selected.name}`);
+                                  }
+                                }}
+                                className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-[11px] font-medium text-slate-700"
+                              >
+                                <option value="">-- Sin Insumo Extra --</option>
+                                {ingredients.map(ing => (
+                                  <option key={ing.id} value={ing.id}>
+                                    {ing.name} ({ing.unit})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="col-span-2 sm:col-span-2">
+                              <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                Cant. ({selectedIngForVar ? selectedIngForVar.unit : 'und'})
+                              </label>
+                              <input 
+                                type="number" 
+                                placeholder="Cant." 
+                                value={variantFormQty}
+                                onChange={(e) => setVariantFormQty(e.target.value)}
+                                step="any"
+                                min="0.01"
+                                className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none focus:border-black text-xs font-bold text-slate-800"
+                              />
+                            </div>
+
+                            <div className="col-span-12 sm:col-span-1 flex justify-end">
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  const name = variantFormName.trim();
+                                  const price = parseFloat(variantFormPrice) || Number(menuData.price) || 0;
+                                  const qty = parseFloat(variantFormQty) || 1;
+
+                                  if (name) {
+                                    const newVariant: MenuItemVariant = {
+                                      id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                                      name,
+                                      price,
+                                      ...(variantFormIngId ? { recipe: [{ ingredientId: variantFormIngId, quantity: qty }] } : {})
+                                    };
+                                    setMenuData({ ...menuData, variants: [...(menuData.variants || []), newVariant] });
+                                    setVariantFormName('');
+                                    setVariantFormPrice('');
+                                    setVariantFormIngId('');
+                                    setVariantFormQty('1');
+                                  }
+                                }}
+                                className="w-full h-[38px] bg-black hover:bg-slate-800 text-white rounded-xl font-black text-xs cursor-pointer flex items-center justify-center transition-colors shadow-2xs"
+                                title="Agregar Variante"
+                              >
+                                <Plus size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-100">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Ingredientes Extras / Adicionales</label>
                   <p className="text-[10px] text-slate-400 mb-3">Define los ingredientes adicionales que los clientes pueden agregar a este platillo:</p>
                   
                   {/* List of current extras */}
@@ -3159,91 +3661,428 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                       </div>
                     );
                   })()}
-                </div>
               </div>
-              <button onClick={handleSaveMenu} className="w-full bg-black text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0"><Save size={18}/> Guardar Cambios</button>
-            </motion.div>
+            </div>
+
+            {/* Bottom action bar */}
+            <div className="pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => { setEditingItem(null); setIsCreatingMenu(false); }}
+                className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer text-center"
+              >
+                Cancelar y Volver al Menú
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMenu}
+                disabled={isSavingMenu || !menuData.name.trim()}
+                className="w-full sm:w-auto px-8 py-3 bg-black hover:bg-slate-800 disabled:opacity-50 text-white rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isSavingMenu ? <span className="animate-spin">⏳</span> : <Save size={18} />}
+                <span>{isSavingMenu ? 'Guardando Platillo...' : 'Guardar Platillo'}</span>
+              </button>
+            </div>
           </div>
         )}
 
         {isCreatingCombo && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-3xl sm:rounded-[40px] p-5 sm:p-8 w-full max-w-xl shadow-2xl relative max-h-[90vh] flex flex-col">
-              <button onClick={() => setIsCreatingCombo(false)} className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer"><X size={20} /></button>
-              <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6 pr-8 flex items-center gap-2">
-                <Sparkles className="text-amber-500" size={22} />
-                <span>Crear Combo / Promoción Especial</span>
-              </h3>
-              <div className="space-y-4 mb-4 sm:mb-6 max-h-[65vh] sm:max-h-[70vh] overflow-y-auto pr-1 sm:pr-2 scrollbar-thin">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Nombre del Combo</label>
-                  <input type="text" placeholder="Ej: Combo Familiar Burger + 2 Refrescos + Papas" value={comboData.name} onChange={e => setComboData({...comboData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs sm:text-sm" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Precio del Combo ($)</label>
-                    <input type="number" placeholder="15.00" value={comboData.price} onChange={e => setComboData({...comboData, price: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-indigo-600 font-bold text-xs sm:text-sm" />
+          <div className="w-full bg-white rounded-3xl sm:rounded-[36px] border border-amber-200/80 shadow-sm p-5 sm:p-8 relative flex flex-col space-y-6 my-4 animate-fadeIn">
+            {/* Header del Combo Editor */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-amber-100">
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingCombo(false);
+                    setEditingComboId(null);
+                  }} 
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl transition-all text-xs font-bold flex items-center gap-2 cursor-pointer border border-slate-200/70"
+                >
+                  <ArrowLeft size={16} />
+                  <span>Volver al Menú</span>
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center font-bold">
+                    <Sparkles size={22} />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Categoría</label>
-                    <input type="text" value="Combos & Promos" disabled className="w-full bg-slate-100 border border-slate-200 rounded-2xl p-4 text-slate-500 font-medium text-xs sm:text-sm" />
+                    <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight">
+                      {editingComboId ? 'Editar Combo / Promoción' : 'Crear Combo / Promoción Especial'}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Arma paquetes combinando platos y bebidas registrados para sincronizar finanzas e inventario automáticamente.
+                    </p>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Descripción o Qué incluye</label>
-                  <textarea rows={2} placeholder="Incluye hamburguesa doble, papas medianas y bebida..." value={comboData.description} onChange={e => setComboData({...comboData, description: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs"></textarea>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingCombo(false);
+                    setEditingComboId(null);
+                  }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={handleSaveCombo} 
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer shadow-amber-500/25"
+                >
+                  <Sparkles size={16}/> 
+                  <span>{editingComboId ? 'Guardar Cambios' : 'Publicar Combo'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+                {/* Nombre y Precio */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Nombre del Combo</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ej: Super Combo Burger + Papas + Refresco" 
+                      value={comboData.name} 
+                      onChange={e => setComboData({...comboData, name: e.target.value})} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3.5 outline-none focus:border-amber-500 font-bold text-xs sm:text-sm" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Precio Combo ($)</label>
+                    <input 
+                      type="number" 
+                      step="any"
+                      placeholder="12.50" 
+                      value={comboData.price} 
+                      onChange={e => setComboData({...comboData, price: e.target.value === '' ? '' : parseFloat(e.target.value) || 0})} 
+                      className="w-full bg-amber-50/50 border border-amber-300/80 rounded-2xl p-3.5 outline-none focus:border-amber-500 font-black text-amber-700 text-sm" 
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Platos y Bebidas del Menú Incluidos</label>
-                  <p className="text-[10px] text-slate-400 mb-3">Selecciona los platillos o bebidas registrados en el menú que componen este combo (para descontar inventario y finanzas automáticamente):</p>
-                  
-                  <div className="space-y-2 mb-3">
-                    {comboData.includedMenuItemIds.map((itemId, idx) => {
-                      const mItem = menu.find(m => m.id === itemId);
-                      return (
-                        <div key={idx} className="flex items-center justify-between bg-amber-50/60 border border-amber-200/60 rounded-xl px-3 py-2 text-xs font-bold text-amber-900">
-                          <span>🍔 {mItem ? mItem.name : 'Plato no encontrado'} <span className="text-[10px] text-slate-500">(${mItem?.price?.toFixed(2) || '0.00'})</span></span>
-                          <button type="button" onClick={() => {
-                            const updated = comboData.includedMenuItemIds.filter((_, i) => i !== idx);
-                            setComboData({...comboData, includedMenuItemIds: updated});
-                          }} className="text-rose-500 hover:text-rose-700 cursor-pointer"><Trash2 size={14} /></button>
-                        </div>
-                      );
-                    })}
-                    {comboData.includedMenuItemIds.length === 0 && (
-                      <p className="text-[10px] italic text-slate-400">Ningún plato o bebida seleccionado todavía.</p>
-                    )}
-                  </div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Descripción o Qué incluye</label>
+                  <textarea 
+                    rows={2} 
+                    placeholder="Incluye hamburguesa especial, papas grill y refresco lata..." 
+                    value={comboData.description} 
+                    onChange={e => setComboData({...comboData, description: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs resize-none"
+                  />
+                </div>
 
-                  <div className="flex gap-2">
+                {/* Platos y Bebidas Registrados */}
+                <div className="bg-slate-50/80 border border-slate-200/80 rounded-3xl p-4 sm:p-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <span>🍽️</span> Platos y Bebidas Registrados
+                    </label>
+                    <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
+                      {(comboData.items || []).length} ítems en el combo
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
+                    Cada ítem agregado transferirá sus insumos al combo. Cuando se venda en el POS, el inventario de cada plato y bebida se descontará de forma exacta.
+                  </p>
+
+                  {/* Selector con categoría y cantidad */}
+                  <div className="flex flex-col sm:flex-row gap-2 mb-4">
                     <select 
                       value={selectedMenuIdToAdd}
                       onChange={e => setSelectedMenuIdToAdd(e.target.value)}
-                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs outline-none focus:border-black font-medium"
+                      className="flex-1 bg-white border border-slate-200 rounded-xl p-3 text-xs outline-none focus:border-amber-500 font-medium"
                     >
-                      <option value="">-- Seleccionar Plato o Bebida del Menú --</option>
-                      {menu.map(m => (
-                        <option key={m.id} value={m.id}>{m.name} (${m.price.toFixed(2)} - {m.category})</option>
+                      <option value="">-- Seleccionar Platillo o Bebida del Menú --</option>
+                      {Array.from(new Set(menu.filter(m => !m.isCombo && m.category !== 'Combos & Promos').map(m => m.category))).map(cat => (
+                        <optgroup key={cat} label={`📂 ${cat}`}>
+                          {menu.filter(m => m.category === cat && !m.isCombo).map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} (${m.price.toFixed(2)})
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
-                    <button type="button" onClick={() => {
-                      if (selectedMenuIdToAdd) {
-                        if (!comboData.includedMenuItemIds.includes(selectedMenuIdToAdd)) {
-                          setComboData({...comboData, includedMenuItemIds: [...comboData.includedMenuItemIds, selectedMenuIdToAdd]});
-                          setSelectedMenuIdToAdd('');
-                        }
-                      }
-                    }} className="px-4 bg-black text-white rounded-xl text-xs font-black cursor-pointer"><Plus size={16} /></button>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center bg-white border border-slate-200 rounded-xl px-2 py-1">
+                        <span className="text-[10px] font-bold text-slate-400 mr-1.5">Cant:</span>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="20" 
+                          value={selectedQtyToAdd} 
+                          onChange={e => setSelectedQtyToAdd(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-10 text-center font-black text-xs outline-none" 
+                        />
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          if (selectedMenuIdToAdd) {
+                            const foundItem = menu.find(m => m.id === selectedMenuIdToAdd);
+                            if (foundItem) {
+                              const existingIdx = (comboData.items || []).findIndex(ci => ci.menuItemId === foundItem.id);
+                              if (existingIdx >= 0) {
+                                const updated = [...(comboData.items || [])];
+                                updated[existingIdx].quantity += selectedQtyToAdd;
+                                setComboData({...comboData, items: updated});
+                              } else {
+                                setComboData({
+                                  ...comboData, 
+                                  items: [
+                                    ...(comboData.items || []), 
+                                    {
+                                      menuItemId: foundItem.id,
+                                      name: foundItem.name,
+                                      price: foundItem.price,
+                                      quantity: selectedQtyToAdd,
+                                      category: foundItem.category
+                                    }
+                                  ]
+                                });
+                              }
+                              setSelectedMenuIdToAdd('');
+                              setSelectedQtyToAdd(1);
+                            }
+                          }
+                        }} 
+                        className="px-4 py-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                      >
+                        <Plus size={15} />
+                        <span>Agregar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista de ítems en el combo */}
+                  <div className="space-y-2">
+                    {(comboData.items || []).map((ci, idx) => {
+                      const itemSubtotal = (ci.price || 0) * (ci.quantity || 1);
+                      return (
+                        <div key={idx} className="flex items-center justify-between bg-white border border-slate-200/80 rounded-2xl px-3.5 py-2.5 shadow-2xs gap-2">
+                          <div className="flex items-center gap-2 overflow-hidden flex-1">
+                            <span className="text-base">{ci.category === 'Bebidas' ? '🥤' : '🍔'}</span>
+                            <div className="overflow-hidden">
+                              <span className="text-xs font-bold text-slate-800 block truncate leading-tight">{ci.name}</span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                ${ci.price.toFixed(2)} c/u • <span className="text-slate-600 font-semibold">{ci.category}</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Control de cantidad */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...(comboData.items || [])];
+                                if (updated[idx].quantity > 1) {
+                                  updated[idx].quantity -= 1;
+                                  setComboData({...comboData, items: updated});
+                                } else {
+                                  setComboData({...comboData, items: updated.filter((_, i) => i !== idx)});
+                                }
+                              }}
+                              className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="w-6 text-center text-xs font-black text-slate-900">{ci.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...(comboData.items || [])];
+                                updated[idx].quantity += 1;
+                                setComboData({...comboData, items: updated});
+                              }}
+                              className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <span className="text-xs font-black text-slate-900 w-16 text-right shrink-0">
+                            ${itemSubtotal.toFixed(2)}
+                          </span>
+
+                          <button 
+                            type="button" 
+                            onClick={() => {
+                              const updated = (comboData.items || []).filter((_, i) => i !== idx);
+                              setComboData({...comboData, items: updated});
+                            }} 
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors shrink-0"
+                            title="Eliminar ítem del combo"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    {(comboData.items || []).length === 0 && (
+                      <div className="py-6 text-center border border-dashed border-slate-200 rounded-2xl bg-white/50">
+                        <p className="text-xs font-medium text-slate-400">No hay platos ni bebidas seleccionados todavía.</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Usa el selector superior para armar el combo.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
+                {/* Dashboard Financiero del Combo en Tiempo Real */}
+                {(() => {
+                  const itemsList = comboData.items || [];
+                  const regularTotal = itemsList.reduce((acc, ci) => acc + ((ci.price || 0) * (ci.quantity || 1)), 0);
+                  const comboPriceNum = typeof comboData.price === 'number' ? comboData.price : (parseFloat(String(comboData.price)) || 0);
+                  const savings = Math.max(0, regularTotal - comboPriceNum);
+                  const savingsPct = regularTotal > 0 && comboPriceNum > 0 ? Math.round((savings / regularTotal) * 100) : 0;
+
+                  let foodCost = 0;
+                  itemsList.forEach(ci => {
+                    const mItem = menu.find(m => m.id === ci.menuItemId);
+                    if (mItem && mItem.recipe) {
+                      mItem.recipe.forEach(r => {
+                        const ing = ingredients.find(i => i.id === r.ingredientId);
+                        if (ing && ing.cost) {
+                          foodCost += ing.cost * r.quantity * (ci.quantity || 1);
+                        }
+                      });
+                    }
+                  });
+                  const grossProfit = comboPriceNum - foodCost;
+                  const profitMargin = comboPriceNum > 0 ? Math.round((grossProfit / comboPriceNum) * 100) : 0;
+
+                  return (
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-3xl p-4 sm:p-5 shadow-lg">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-3 flex items-center justify-between">
+                        <span>📊 Análisis de Rentabilidad del Combo</span>
+                        <span className="text-emerald-400 font-bold">100% Integrado con Inventario</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                        <div className="bg-white/10 rounded-2xl p-2.5">
+                          <span className="text-[9px] text-slate-300 block uppercase font-bold">Precio Regular</span>
+                          <span className="text-sm font-black text-slate-200 line-through">${regularTotal.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-emerald-500/20 border border-emerald-400/30 rounded-2xl p-2.5">
+                          <span className="text-[9px] text-emerald-300 block uppercase font-bold">Ahorro Cliente</span>
+                          <span className="text-sm font-black text-emerald-400">-${savings.toFixed(2)} ({savingsPct}%)</span>
+                        </div>
+                        <div className="bg-white/10 rounded-2xl p-2.5">
+                          <span className="text-[9px] text-slate-300 block uppercase font-bold">Costo Insumos</span>
+                          <span className="text-sm font-black text-amber-300">${foodCost.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-white/10 rounded-2xl p-2.5">
+                          <span className="text-[9px] text-slate-300 block uppercase font-bold">Margen Bruto</span>
+                          <span className="text-sm font-black text-emerald-300">{profitMargin}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Imagen del combo */}
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Imagen del Combo (URL o Subir)</label>
-                  <input type="text" placeholder="https://images.unsplash.com/..." value={comboData.image} onChange={e => setComboData({...comboData, image: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium text-xs" />
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Imagen del Combo (URL opcional)</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://images.unsplash.com/photo-..." 
+                    value={comboData.image} 
+                    onChange={e => setComboData({...comboData, image: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 outline-none focus:border-black font-medium text-xs" 
+                  />
                 </div>
               </div>
-              <button onClick={handleSaveCombo} className="w-full bg-amber-500 hover:bg-amber-600 text-white p-4 rounded-xl font-bold hover:scale-[1.02] flex justify-center gap-2 mt-4 shrink-0 shadow-lg cursor-pointer"><Sparkles size={18}/> Guardar y Publicar Combo en el Menú</button>
+
+              {/* Bottom action bar */}
+            <div className="pt-5 border-t border-amber-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCreatingCombo(false);
+                  setEditingComboId(null);
+                }}
+                className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer text-center"
+              >
+                Cancelar y Volver al Menú
+              </button>
+              <button 
+                type="button"
+                onClick={handleSaveCombo} 
+                className="w-full sm:w-auto px-8 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shadow-amber-500/25"
+              >
+                <Sparkles size={18}/> 
+                <span>{editingComboId ? 'Guardar Cambios del Combo' : 'Guardar y Publicar Combo'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Confirmación para Eliminar Platillo (In-App, sin window.confirm) */}
+        {itemToDelete && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-sm shadow-2xl border border-slate-100 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center mb-4 mx-auto shadow-inner">
+                <Trash2 size={28} />
+              </div>
+              <h3 className="text-lg font-black text-slate-900 mb-2">¿Eliminar platillo del menú?</h3>
+              <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                ¿Estás seguro de que deseas eliminar permanentemente <strong className="text-slate-800">"{itemToDelete.name}"</strong>? Esta acción no se puede deshacer.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  className="py-3 px-4 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingItem}
+                  onClick={confirmDeleteItem}
+                  className="py-3 px-4 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-rose-500/25 cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingItem ? 'Eliminando...' : 'Sí, Eliminar'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal de Confirmación para Cargar Menú Q' Sandwich */}
+        {isSeedingConfirmOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl border border-slate-100">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 mx-auto text-2xl font-black">
+                🥪
+              </div>
+              <h3 className="text-lg font-black text-slate-900 text-center mb-2">Cargar Menú Oficial Q' Sandwich</h3>
+              <p className="text-xs text-slate-500 text-center mb-6 leading-relaxed">
+                Esta acción restablecerá el menú y el inventario con los platos oficiales (Sandwiches 15cm y 30cm, Hamburguesas, Club House, Papas, Ensaladas, Bebidas y Postres) extraídos de las imágenes del cliente.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsSeedingConfirmOpen(false)}
+                  className="py-3 px-4 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isSeedingQSandwich}
+                  onClick={handleSeedQSandwich}
+                  className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/25 cursor-pointer disabled:opacity-50"
+                >
+                  {isSeedingQSandwich ? 'Cargando...' : 'Sí, Cargar Menú'}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
