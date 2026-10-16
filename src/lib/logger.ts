@@ -28,8 +28,10 @@ export async function logAction(
       details,
       metadata,
       timestamp: new Date().toISOString()
+    }).catch(() => {
+      // Silently ignore activity log write failures (e.g. offline cache conflicts)
     });
   } catch (error) {
-    console.error('Error writing to activity_logs', error);
+    // Silently ignore
   }
 }

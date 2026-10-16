@@ -191,14 +191,14 @@ export default function KDSView({ currentUser }: { currentUser?: any }) {
 
       // Log activity to trigger waiter real-time notifications
       const itemSummary = ticket.items.map((i: any) => `${i.quantity}x ${i.itemName}`).join(', ');
-      await addDoc(collection(db, 'activity_logs'), {
+      addDoc(collection(db, 'activity_logs'), {
         type: 'order',
         actorName: currentUser?.name || 'Cocina',
         actorRole: 'Cocinero',
         action: 'Platillo Listo para Servir 🔔',
         details: `${ticket.tableName}: ${itemSummary}`,
         timestamp: new Date().toISOString()
-      });
+      }).catch(() => {});
     } catch (err) {
       console.error(err);
     }
