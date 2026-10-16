@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { signInAnonymously } from 'firebase/auth';
-import { auth } from '../lib/firebase';
 import { motion } from 'motion/react';
 import { ArrowRight, Lock, Mail, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { loginStaff } from '../lib/authService';
 
 export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: string) => void }) {
+  const brandColor = localStorage.getItem('restaurant_brand_color') || '#2563eb';
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
@@ -45,83 +45,35 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/auth/staff-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, pin: cleanPin })
-      });
+      const res = await loginStaff(cleanEmail, cleanPin);
 
-      const data = await res.json();
-
-      if (res.status === 429 || data.isLocked) {
+      if (res.isLocked) {
         setLockoutInfo({
           isLocked: true,
-          remainingMinutes: data.remainingMinutes || 15
+          remainingMinutes: res.remainingMinutes || 15
         });
-        setError(data.error || 'Acceso bloqueado por seguridad.');
+        setError(res.error || 'Acceso bloqueado por seguridad.');
         setIsLoading(false);
         return;
       }
 
-      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
-      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
-
-      if (!res.ok || !data.success) {
-        // Direct fallback for authorized admin email & PIN
-        if (isAdminEmail && isAdminPin) {
-          const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
-          localStorage.setItem('demo_role', 'admin');
-          localStorage.setItem('demo_employee_id', 'admin-thomas');
-          localStorage.setItem('demo_user_name', name);
-          localStorage.setItem('demo_user_email', cleanEmail);
-          localStorage.setItem('demo_user_pin', cleanPin);
-          try { await signInAnonymously(auth); } catch {}
-          window.location.reload();
-          return;
-        }
-
-        setError(data.error || 'Credenciales inválidas. Verifica tu correo y PIN.');
-        if (typeof data.attemptsRemaining === 'number') {
-          setAttemptsRemaining(data.attemptsRemaining);
+      if (!res.success) {
+        setError(res.error || 'Credenciales inválidas. Verifica tu correo y PIN.');
+        if (typeof res.attemptsRemaining === 'number') {
+          setAttemptsRemaining(res.attemptsRemaining);
         }
         setIsLoading(false);
         return;
       }
 
       // Success
-      const user = data.user;
-      localStorage.setItem('demo_role', user.role);
-      localStorage.setItem('demo_employee_id', user.employeeId || user.id);
-      localStorage.setItem('demo_user_name', user.name);
-      localStorage.setItem('demo_user_email', user.email || cleanEmail);
-      localStorage.setItem('demo_user_pin', cleanPin);
-
-      try {
-        await signInAnonymously(auth);
-      } catch (authErr) {
-        if (onOfflineLogin) {
-          onOfflineLogin(user.role);
-        } else {
-          localStorage.setItem('demo_fallback_role', user.role);
-        }
+      if (onOfflineLogin && res.user?.role) {
+        onOfflineLogin(res.user.role);
       }
-
+      window.dispatchEvent(new Event('storage'));
       window.location.reload();
     } catch (err: any) {
       console.error('Auth error:', err);
-      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
-      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
-      if (isAdminEmail && isAdminPin) {
-        const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
-        localStorage.setItem('demo_role', 'admin');
-        localStorage.setItem('demo_employee_id', 'admin-thomas');
-        localStorage.setItem('demo_user_name', name);
-        localStorage.setItem('demo_user_email', cleanEmail);
-        localStorage.setItem('demo_user_pin', cleanPin);
-        try { await signInAnonymously(auth); } catch {}
-        window.location.reload();
-        return;
-      }
       setError('Error al conectar con el servidor de autenticación.');
     } finally {
       setIsLoading(false);
@@ -267,7 +219,8 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
             <button
               type="submit"
               disabled={isLoading || lockoutInfo?.isLocked || !email.trim() || pin.length < 4}
-              className="w-full mt-2 py-3 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="w-full mt-2 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>

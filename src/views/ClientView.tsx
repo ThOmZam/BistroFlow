@@ -35,7 +35,10 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Mail
+  Mail,
+  Instagram,
+  Globe,
+  Share2
 } from 'lucide-react';
 import { collection, addDoc, doc, updateDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -48,6 +51,10 @@ import PromotionsBanner from '../components/PromotionsBanner';
 import FlashDealsBanner from '../components/FlashDealsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
+import { loginStaff } from '../lib/authService';
+import { updateSEOMetadata } from '../lib/seo';
+import ShareDishModal from '../components/ShareDishModal';
+import ThermalReceiptTicket from '../components/ThermalReceiptTicket';
 
 export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const { menu, settings, promotions, ingredients, tables, activeSessions, coupons, flashDeals } = useRestaurantData();
@@ -66,9 +73,35 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   } = useCurrency();
   const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
 
-  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
-  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
-  const brandColor = (settings as any)?.brandColor || '#16a34a';
+  const formatSocialUrl = (type: 'instagram' | 'tiktok' | 'whatsapp' | 'facebook' | 'website', val: string) => {
+    if (!val) return '';
+    const trimmed = val.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+
+    if (type === 'instagram') {
+      const clean = trimmed.replace(/^@/, '');
+      return `https://instagram.com/${clean}`;
+    }
+    if (type === 'tiktok') {
+      const clean = trimmed.replace(/^@/, '');
+      return `https://tiktok.com/@${clean}`;
+    }
+    if (type === 'whatsapp') {
+      const clean = trimmed.replace(/[^0-9]/g, '');
+      return `https://wa.me/${clean}`;
+    }
+    if (type === 'facebook') {
+      return `https://facebook.com/${trimmed}`;
+    }
+    if (type === 'website') {
+      return `https://${trimmed}`;
+    }
+    return trimmed;
+  };
+
+  const bgTheme = (settings as any)?.bgTheme || localStorage.getItem('restaurant_bg_theme') || 'kinetic';
+  const sidebarTheme = (settings as any)?.sidebarTheme || localStorage.getItem('restaurant_sidebar_theme') || 'minimalist';
+  const brandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
 
   const isDarkClient = bgTheme === 'dark_luxury' || sidebarTheme === 'dark';
 
@@ -175,6 +208,102 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
   const [vueltoIdNumber, setVueltoIdNumber] = useState('');
   const [vueltoRef, setVueltoRef] = useState('');
 
+  // Selected item details modal state
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+  const [modalQty, setModalQty] = useState(1);
+
+  // Sharing State & Clipboard Copy Feedback
+  const [sharingItem, setSharingItem] = useState<MenuItem | null>(null);
+  const [copiedDishId, setCopiedDishId] = useState<string | null>(null);
+
+  const activeSEOItem = selectedItem || sharingItem;
+
+  // Sync SEO Head & OpenGraph metadata dynamically
+  useEffect(() => {
+    if (activeSEOItem) {
+      const baseUrl = typeof window !== 'undefined' ? (window.location.origin + window.location.pathname) : '';
+      const dishUrl = `${baseUrl}?dish=${activeSEOItem.id}`;
+
+      updateSEOMetadata({
+        title: `${activeSEOItem.name} - ${formatPrice(activeSEOItem.price)}`,
+        description: activeSEOItem.description || settings?.slogan || 'Ordena este plato directo en nuestro menú digital.',
+        image: activeSEOItem.image || settings?.logoUrl,
+        url: dishUrl,
+        type: 'product',
+        restaurantName: settings?.restaurantName,
+        slogan: settings?.slogan,
+        logoUrl: settings?.logoUrl,
+        price: activeSEOItem.price,
+        currency: 'USD',
+        category: activeSEOItem.category
+      });
+    } else {
+      updateSEOMetadata({
+        restaurantName: settings?.restaurantName,
+        slogan: settings?.slogan,
+        logoUrl: settings?.logoUrl
+      });
+    }
+  }, [selectedItem, sharingItem, settings?.restaurantName, settings?.slogan, settings?.logoUrl, formatPrice]);
+
+  // Handle direct share action: copies link with metadata & opens share modal
+  const handleShareDish = async (item: MenuItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    const baseUrl = typeof window !== 'undefined' ? (window.location.origin + window.location.pathname) : '';
+    const shareUrl = `${baseUrl}?dish=${item.id}`;
+
+    // Inject OpenGraph meta tags into <head>
+    updateSEOMetadata({
+      title: `${item.name} - ${formatPrice(item.price)}`,
+      description: item.description || settings?.slogan || 'Ordena este plato directo en nuestro menú digital.',
+      image: item.image || settings?.logoUrl,
+      url: shareUrl,
+      type: 'product',
+      restaurantName: settings?.restaurantName,
+      slogan: settings?.slogan,
+      logoUrl: settings?.logoUrl,
+      price: item.price,
+      currency: 'USD',
+      category: item.category
+    });
+
+    // Copy link to clipboard
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedDishId(item.id);
+      setTimeout(() => setCopiedDishId(null), 2500);
+    } catch (err) {
+      const el = document.createElement('textarea');
+      el.value = shareUrl;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopiedDishId(item.id);
+      setTimeout(() => setCopiedDishId(null), 2500);
+    }
+
+    setSharingItem(item);
+  };
+
+  // Deep Link Handling for shared dish URLs (?dish=ITEM_ID)
+  useEffect(() => {
+    if (menu && menu.length > 0) {
+      const searchParams = new URLSearchParams(window.location.search);
+      const dishParam = searchParams.get('dish') || searchParams.get('dishId') || searchParams.get('plato');
+      if (dishParam) {
+        const found = menu.find(m => m.id === dishParam);
+        if (found) {
+          setSelectedItem(found);
+          setModalQty(1);
+          setExcludedIds([]);
+          setExtraNote('');
+        }
+      }
+    }
+  }, [menu]);
+
   // Coupon & Marketing State
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
@@ -263,10 +392,6 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
   // Submitting state to prevent double clicks/submissions
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Selected item details modal state
-  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
-  const [modalQty, setModalQty] = useState(1);
 
   // Real-time listener for current order session
   useEffect(() => {
@@ -956,81 +1081,35 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     setIsLoggingIn(true);
 
     try {
-      const res = await fetch('/api/auth/staff-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, pin: cleanPin })
-      });
+      const res = await loginStaff(cleanEmail, cleanPin);
 
-      const data = await res.json();
-
-      if (res.status === 429 || data.isLocked) {
+      if (res.isLocked) {
         setLockoutInfo({
           isLocked: true,
-          remainingMinutes: data.remainingMinutes || 15,
-          remainingSeconds: data.remainingSeconds || 900
+          remainingMinutes: res.remainingMinutes || 15,
+          remainingSeconds: (res.remainingMinutes || 15) * 60
         });
-        setLoginError(data.error || 'Acceso bloqueado por seguridad tras múltiples intentos.');
+        setLoginError(res.error || 'Acceso bloqueado por seguridad.');
         setIsLoggingIn(false);
         return;
       }
 
-      const isAdminEmail = cleanEmail.toLowerCase() === 'thomaszambrano24@gmail.com' || cleanEmail.toLowerCase() === 'admin@bistroflow.com';
-      const isAdminPin = cleanPin === '1612' || cleanPin === '1234';
-
-      if (!res.ok || !data.success) {
-        // Direct offline fallback for authorized admin
-        if (isAdminEmail && isAdminPin) {
-          const name = cleanEmail.toLowerCase().includes('thomas') ? 'Thomas Zambrano' : 'Administrador';
-          localStorage.setItem('demo_role', 'admin');
-          localStorage.setItem('demo_employee_id', 'admin-thomas');
-          localStorage.setItem('demo_user_name', name);
-          localStorage.setItem('demo_user_email', cleanEmail);
-          localStorage.setItem('demo_user_pin', cleanPin);
-          try { await signInAnonymously(auth); } catch {}
-          setIsStaffLoginOpen(false);
-          window.location.reload();
-          return;
-        }
-
-        setLoginError(data.error || 'Credenciales inválidas. Verifica tu correo y PIN.');
-        if (typeof data.attemptsRemaining === 'number') {
-          setAttemptsRemaining(data.attemptsRemaining);
+      if (!res.success) {
+        setLoginError(res.error || 'Credenciales inválidas. Verifica tu correo y PIN.');
+        if (typeof res.attemptsRemaining === 'number') {
+          setAttemptsRemaining(res.attemptsRemaining);
         }
         setIsLoggingIn(false);
         return;
       }
 
-      // Login Succeeded!
-      const user = data.user;
-      localStorage.setItem('demo_role', user.role);
-      localStorage.setItem('demo_employee_id', user.employeeId || user.id);
-      localStorage.setItem('demo_user_name', user.name);
-      localStorage.setItem('demo_user_email', user.email || cleanEmail);
-      localStorage.setItem('demo_user_pin', cleanPin);
-
-      try {
-        await signInAnonymously(auth);
-      } catch (authErr) {
-        localStorage.setItem('demo_fallback_role', user.role);
-      }
-
+      // Login Successful!
       setIsStaffLoginOpen(false);
+      window.dispatchEvent(new Event('storage'));
       window.location.reload();
     } catch (err: any) {
       console.error('Error during staff login:', err);
-      if (cleanEmail.toLowerCase() === 'admin@bistroflow.com' && (cleanPin === '1234' || cleanPin === '1612')) {
-        localStorage.setItem('demo_role', 'admin');
-        localStorage.setItem('demo_employee_id', 'admin-master');
-        localStorage.setItem('demo_user_name', 'Administrador');
-        localStorage.setItem('demo_user_email', cleanEmail);
-        localStorage.setItem('demo_user_pin', cleanPin);
-        try { await signInAnonymously(auth); } catch {}
-        setIsStaffLoginOpen(false);
-        window.location.reload();
-        return;
-      }
-      setLoginError('Error al conectar con el servidor de autenticación.');
+      setLoginError('Error al procesar el inicio de sesión.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -1096,7 +1175,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
           </div>
 
           {countInCart > 0 && (
-            <span className="absolute top-3 right-3 bg-black text-white text-xs font-black w-7 h-7 rounded-full flex items-center justify-center shadow-md animate-bounce z-10">
+            <span 
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="absolute top-3 right-3 text-xs font-black w-7 h-7 rounded-full flex items-center justify-center shadow-md animate-bounce z-10"
+            >
               {countInCart}
             </span>
           )}
@@ -1137,18 +1219,35 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </span>
             </div>
 
-            <button 
-              disabled={!canOrder}
-              onClick={(e) => { e.stopPropagation(); if (canOrder) addToCart(item); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
-                !canOrder
-                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-105 active:scale-95 shadow-xs'
-              }`}
-            >
-              <ShoppingBag size={13} />
-              <span>Agregar</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button 
+                type="button"
+                onClick={(e) => handleShareDish(item, e)}
+                title="Compartir y copiar link con metadatos OG"
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer shrink-0 ${
+                  copiedDishId === item.id 
+                    ? 'bg-emerald-500 text-white shadow-xs' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                {copiedDishId === item.id ? <Check size={14} /> : <Share2 size={14} />}
+                <span className="hidden sm:inline">{copiedDishId === item.id ? '¡Copiado!' : 'Compartir'}</span>
+              </button>
+
+              <button 
+                disabled={!canOrder}
+                onClick={(e) => { e.stopPropagation(); if (canOrder) addToCart(item); }}
+                style={canOrder ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                  !canOrder
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'text-white hover:scale-105 active:scale-95 shadow-xs opacity-95 hover:opacity-100'
+                }`}
+              >
+                <ShoppingBag size={13} />
+                <span>Agregar</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1206,7 +1305,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
           )}
 
           {countInCart > 0 && (
-            <span className="absolute top-3 right-3 bg-black text-white text-xs font-black w-7 h-7 rounded-full flex items-center justify-center shadow-lg animate-bounce z-10">
+            <span 
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="absolute top-3 right-3 text-xs font-black w-7 h-7 rounded-full flex items-center justify-center shadow-lg animate-bounce z-10"
+            >
               {countInCart}
             </span>
           )}
@@ -1240,18 +1342,35 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               </span>
             </div>
 
-            <button 
-              disabled={!canOrder}
-              onClick={(e) => { e.stopPropagation(); if (canOrder) addToCart(item); }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                !canOrder
-                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-105 active:scale-95'
-              }`}
-            >
-              <ShoppingBag size={14} />
-              <span>{!isRestaurantOpen ? 'Cerrado' : isOutOfStock ? 'Agotado' : !isAvailable ? 'Inactivo' : 'Agregar'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button 
+                type="button"
+                onClick={(e) => handleShareDish(item, e)}
+                title="Compartir y copiar link con metadatos OG"
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer shrink-0 ${
+                  copiedDishId === item.id 
+                    ? 'bg-emerald-500 text-white shadow-xs' 
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                {copiedDishId === item.id ? <Check size={14} /> : <Share2 size={14} />}
+                <span className="hidden sm:inline">{copiedDishId === item.id ? '¡Copiado!' : 'Compartir'}</span>
+              </button>
+
+              <button 
+                disabled={!canOrder}
+                onClick={(e) => { e.stopPropagation(); if (canOrder) addToCart(item); }}
+                style={canOrder ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  !canOrder
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'text-white hover:scale-105 active:scale-95 shadow-xs opacity-95 hover:opacity-100'
+                }`}
+              >
+                <ShoppingBag size={14} />
+                <span>{!isRestaurantOpen ? 'Cerrado' : isOutOfStock ? 'Agotado' : !isAvailable ? 'Inactivo' : 'Agregar'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1268,12 +1387,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className={`min-h-screen font-sans pb-32 transition-colors ${clientBgClass}`}>
-      {/* TOP CLEAN HEADER (No Brand Color Fill, No Delivery Address Bar) */}
-      <div className={`pt-4 pb-4 px-4 sm:px-6 shadow-sm rounded-b-[28px] mb-6 transition-colors border-b ${
-        isDarkClient 
-          ? 'bg-[#121826] border-slate-800 text-white' 
-          : 'bg-white border-slate-200/90 text-slate-900'
-      }`}>
+      {/* TOP HEADER: Dynamic color according to theme (Brand Color, Minimalist White, or Dark Mode) */}
+      <div 
+        style={sidebarTheme === 'brand' ? { backgroundColor: brandColor } : undefined}
+        className={`pt-4 pb-4 px-4 sm:px-6 shadow-sm rounded-b-[28px] mb-6 transition-colors border-b ${
+          sidebarTheme === 'brand'
+            ? 'text-white border-black/10 shadow-md'
+            : isDarkClient 
+              ? 'bg-[#121826] border-slate-800 text-white' 
+              : 'bg-white border-slate-200/90 text-slate-900 shadow-xs'
+        }`}
+      >
         <div className="max-w-4xl mx-auto space-y-3">
           {/* Header Top Row: Logo/Name + Tracker & Staff Access */}
           <div className="flex items-center justify-between gap-2">
@@ -1282,18 +1406,29 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 <img 
                   src={settings.logoUrl} 
                   alt={settings?.restaurantName || "Bistro"} 
-                  className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0 shadow-2xs" 
+                  className={`w-9 h-9 rounded-xl object-cover shrink-0 shadow-2xs ${
+                    sidebarTheme === 'brand' ? 'border border-white/30' : isDarkClient ? 'border border-slate-700' : 'border border-slate-200'
+                  }`}
                 />
               ) : (
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-black shadow-2xs shrink-0 text-sm">
+                <div 
+                  style={sidebarTheme !== 'brand' ? { backgroundColor: brandColor } : undefined}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center font-black shadow-2xs shrink-0 text-sm ${
+                    sidebarTheme === 'brand' ? 'bg-white/20 text-white border border-white/20' : 'text-white'
+                  }`}
+                >
                   {settings?.restaurantName ? settings.restaurantName.charAt(0).toUpperCase() : 'B'}
                 </div>
               )}
               <div className="min-w-0 leading-tight">
-                <h1 className={`text-sm sm:text-base font-black truncate tracking-tight ${isDarkClient ? 'text-white' : 'text-slate-900'}`}>
+                <h1 className={`text-sm sm:text-base font-black truncate tracking-tight ${
+                  sidebarTheme === 'brand' ? 'text-white' : isDarkClient ? 'text-white' : 'text-slate-900'
+                }`}>
                   {settings?.restaurantName || "Q' Sandwich"}
                 </h1>
-                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">
+                <span className={`text-[10px] font-bold uppercase tracking-wider block ${
+                  sidebarTheme === 'brand' ? 'text-white/80' : isDarkClient ? 'text-slate-400' : 'text-slate-500'
+                }`}>
                   {qrTable ? `Mesa ${qrTable.number} • Auto-servicio` : (settings?.slogan || 'Menú Digital & Pedidos')}
                 </span>
               </div>
@@ -1303,7 +1438,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               {trackedSessionId && (
                 <button 
                   onClick={() => setIsTrackerDrawerOpen(true)}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-xs font-black flex items-center gap-1 shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                  style={sidebarTheme !== 'brand' ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
+                  className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1 shadow-sm hover:scale-105 active:scale-95 transition-all cursor-pointer ${
+                    sidebarTheme === 'brand' ? 'bg-white text-slate-900 hover:bg-white/90' : 'text-white'
+                  }`}
                 >
                   <Navigation size={13} className="animate-pulse" />
                   <span>Tracker</span>
@@ -1318,7 +1456,11 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                   setIsStaffLoginOpen(true);
                 }} 
                 className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                  isDarkClient ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  sidebarTheme === 'brand' 
+                    ? 'bg-white/20 hover:bg-white/30 text-white' 
+                    : isDarkClient 
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' 
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                 }`}
                 title="Acceso Staff"
               >
@@ -1336,10 +1478,12 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 placeholder="¿Qué se te antoja ordenar hoy?"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 rounded-2xl outline-none text-sm font-medium shadow-sm placeholder:text-slate-400 transition-colors ${
-                  isDarkClient 
-                    ? 'bg-[#1b2438] text-white border border-slate-800 focus:border-emerald-500' 
-                    : 'bg-slate-50 text-slate-900 border border-slate-200 focus:ring-2 focus:ring-emerald-400'
+                className={`w-full pl-10 pr-4 py-3 rounded-2xl outline-none text-sm font-medium shadow-sm transition-colors ${
+                  sidebarTheme === 'brand'
+                    ? 'bg-white text-slate-900 border border-white/20 placeholder:text-slate-400 focus:ring-2 focus:ring-white/50'
+                    : isDarkClient 
+                      ? 'bg-[#1b2438] text-white border border-slate-800 focus:border-slate-600 placeholder:text-slate-400' 
+                      : 'bg-slate-50 text-slate-900 border border-slate-200 focus:ring-2 focus:ring-slate-300 placeholder:text-slate-400'
                 }`}
               />
             </div>
@@ -1350,11 +1494,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 if (el) el.scrollIntoView({ behavior: 'smooth' });
               }}
               title="Ver menú completo"
+              style={sidebarTheme !== 'brand' ? { color: brandColor } : undefined}
               className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm shrink-0 active:scale-95 transition-all cursor-pointer ${
-                isDarkClient ? 'bg-[#1b2438] hover:bg-slate-800 text-emerald-400 border border-slate-800' : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+                sidebarTheme === 'brand' 
+                  ? 'bg-white/20 hover:bg-white/30 text-white border border-white/20' 
+                  : isDarkClient 
+                    ? 'bg-[#1b2438] hover:bg-slate-800 border border-slate-800' 
+                    : 'bg-white hover:bg-slate-50 border border-slate-200'
               }`}
             >
-              <MapPin size={20} className="text-emerald-500" />
+              <MapPin size={20} />
             </button>
           </div>
         </div>
@@ -1500,10 +1649,13 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               <button 
                 key={cat}
                 onClick={() => setCategory(cat)}
+                style={category === cat ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
                 className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-2 shadow-2xs cursor-pointer ${
                   category === cat 
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20' 
-                    : 'bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50'
+                    ? 'text-white shadow-md' 
+                    : isDarkClient 
+                      ? 'bg-[#161f31] text-slate-300 border border-slate-800 hover:bg-[#1b253b]' 
+                      : 'bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50'
                 }`}
               >
                 <span className="text-sm">{cat === 'All' ? '🍽️' : getCategoryEmoji(cat)}</span>
@@ -1560,10 +1712,13 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
             <button 
               onClick={() => setShowUnavailableItems(!showUnavailableItems)}
+              style={showUnavailableItems ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
                 showUnavailableItems 
-                  ? 'bg-black text-white border-black shadow-2xs' 
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  ? 'text-white shadow-2xs' 
+                  : isDarkClient
+                    ? 'bg-[#161f31] text-slate-300 border-slate-800 hover:bg-[#1b253b]'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
               <span>⏰</span>
@@ -1583,10 +1738,131 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </div>
           )}
         </section>
+
+        {/* BRAND FOOTER SECTION MATCHING REFERENCE SCREENSHOT */}
+        <footer className="mt-16 mb-8 text-center space-y-3 pt-8 border-t border-slate-200/60 dark:border-slate-800/60">
+          <div className="space-y-1">
+            <h3 className={`font-black text-xl sm:text-2xl tracking-tight ${
+              isDarkClient ? 'text-white' : 'text-slate-900'
+            }`}>
+              {settings?.restaurantName || "Q' Sandwich"}
+            </h3>
+            
+            {(settings?.slogan || settings?.tagline) && (
+              <p className={`text-xs sm:text-sm font-medium max-w-md mx-auto px-4 ${
+                isDarkClient ? 'text-slate-400' : 'text-slate-500'
+              }`}>
+                {settings?.slogan || settings?.tagline}
+              </p>
+            )}
+
+            {settings?.rif && (
+              <p className={`text-[11px] font-bold tracking-wider pt-0.5 ${
+                isDarkClient ? 'text-slate-500' : 'text-slate-400'
+              }`}>
+                RIF: {settings.rif}
+              </p>
+            )}
+          </div>
+
+          {/* SOCIAL MEDIA CIRCULAR ICON BUTTONS MATCHING SCREENSHOT */}
+          {(settings?.instagramUrl || settings?.tiktokUrl || settings?.whatsappUrl || settings?.facebookUrl || settings?.websiteUrl || settings?.whatsappPhone) && (
+            <div className="flex items-center justify-center gap-3 pt-2">
+              {/* Instagram */}
+              {settings?.instagramUrl && (
+                <a
+                  href={formatSocialUrl('instagram', settings.instagramUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Instagram"
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer shadow-xs border ${
+                    isDarkClient 
+                      ? 'bg-[#182032] border-slate-700 text-slate-200 hover:bg-slate-700' 
+                      : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:shadow-md'
+                  }`}
+                >
+                  <Instagram size={20} />
+                </a>
+              )}
+
+              {/* TikTok */}
+              {settings?.tiktokUrl && (
+                <a
+                  href={formatSocialUrl('tiktok', settings.tiktokUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="TikTok"
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer shadow-xs border ${
+                    isDarkClient 
+                      ? 'bg-[#182032] border-slate-700 text-slate-200 hover:bg-slate-700' 
+                      : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:shadow-md'
+                  }`}
+                >
+                  <span className="text-lg leading-none">🎵</span>
+                </a>
+              )}
+
+              {/* WhatsApp */}
+              {(settings?.whatsappUrl || settings?.whatsappPhone) && (
+                <a
+                  href={formatSocialUrl('whatsapp', settings?.whatsappUrl || settings?.whatsappPhone || '')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="WhatsApp"
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer shadow-xs border ${
+                    isDarkClient 
+                      ? 'bg-[#182032] border-slate-700 text-slate-200 hover:bg-slate-700' 
+                      : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:shadow-md'
+                  }`}
+                >
+                  <MessageCircle size={20} className="text-emerald-600" />
+                </a>
+              )}
+
+              {/* Facebook */}
+              {settings?.facebookUrl && (
+                <a
+                  href={formatSocialUrl('facebook', settings.facebookUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Facebook"
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer shadow-xs border ${
+                    isDarkClient 
+                      ? 'bg-[#182032] border-slate-700 text-slate-200 hover:bg-slate-700' 
+                      : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:shadow-md'
+                  }`}
+                >
+                  <span className="text-lg leading-none">📘</span>
+                </a>
+              )}
+
+              {/* Website */}
+              {settings?.websiteUrl && (
+                <a
+                  href={formatSocialUrl('website', settings.websiteUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Sitio Web"
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 cursor-pointer shadow-xs border ${
+                    isDarkClient 
+                      ? 'bg-[#182032] border-slate-700 text-slate-200 hover:bg-slate-700' 
+                      : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 hover:shadow-md'
+                  }`}
+                >
+                  <Globe size={20} />
+                </a>
+              )}
+            </div>
+          )}
+        </footer>
       </main>
 
       {/* FLOATING ISLAND BOTTOM NAVIGATION PILL MATCHING SCREENSHOT */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-full px-3.5 py-2 shadow-2xl flex items-center gap-2 sm:gap-3 max-w-[95vw] sm:max-w-md">
+      <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-40 backdrop-blur-md rounded-full px-3.5 py-2 shadow-2xl flex items-center gap-2 sm:gap-3 max-w-[95vw] sm:max-w-md transition-colors ${
+        isDarkClient 
+          ? 'bg-[#121826]/95 border border-slate-800 text-white' 
+          : 'bg-white/95 border border-slate-200/90 text-slate-800'
+      }`}>
         {/* Home Button */}
         <button 
           onClick={() => {
@@ -1594,9 +1870,13 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             setSearchQuery('');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-xs transition-all shadow-2xs hover:bg-emerald-100 cursor-pointer"
+          style={{ backgroundColor: brandColor + '20', color: brandColor }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-xs transition-all shadow-2xs hover:opacity-90 cursor-pointer"
         >
-          <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center">
+          <div 
+            style={{ backgroundColor: brandColor, color: '#ffffff' }}
+            className="w-6 h-6 rounded-full text-white flex items-center justify-center shadow-xs"
+          >
             <Flame size={14} />
           </div>
           <span className="hidden sm:inline">Explorar</span>
@@ -1605,12 +1885,17 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         {/* Cart Button */}
         <button 
           onClick={() => setIsCartOpen(true)}
-          className="relative p-2 hover:bg-slate-100 text-slate-700 rounded-full transition-all cursor-pointer"
+          className={`relative p-2 rounded-full transition-all cursor-pointer ${
+            isDarkClient ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+          }`}
           title="Ver Carrito"
         >
           <ShoppingBag size={20} />
           {cart.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-xs animate-bounce">
+            <span 
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="absolute -top-1 -right-1 text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-white shadow-xs animate-bounce"
+            >
               {cart.reduce((sum, c) => sum + c.qty, 0)}
             </span>
           )}
@@ -1620,11 +1905,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         {trackedSessionId && (
           <button 
             onClick={() => setIsTrackerDrawerOpen(true)}
-            className="relative p-2 hover:bg-indigo-50 text-indigo-600 rounded-full transition-all cursor-pointer"
+            className={`relative p-2 rounded-full transition-all cursor-pointer ${
+              isDarkClient ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+            }`}
             title="Seguir Pedido"
           >
-            <Truck size={20} className="animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-white" />
+            <Truck size={20} className="animate-pulse" style={{ color: brandColor }} />
+            <span 
+              style={{ backgroundColor: brandColor }}
+              className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white" 
+            />
           </button>
         )}
 
@@ -1637,7 +1927,9 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
               input.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
           }}
-          className="p-2 hover:bg-slate-100 text-slate-700 rounded-full transition-all cursor-pointer"
+          className={`p-2 rounded-full transition-all cursor-pointer ${
+            isDarkClient ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
+          }`}
           title="Buscar"
         >
           <Search size={20} />
@@ -1652,7 +1944,9 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             checkLockoutStatus();
             setIsStaffLoginOpen(true);
           }}
-          className="p-2 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-full transition-all cursor-pointer"
+          className={`p-2 rounded-full transition-all cursor-pointer ${
+            isDarkClient ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'
+          }`}
           title="Acceso Staff"
         >
           <KeyRound size={20} />
@@ -1670,22 +1964,23 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         >
           <button 
             onClick={() => setIsCartOpen(true)}
-            className="w-full bg-slate-900/95 hover:bg-black text-white p-4 sm:p-4.5 rounded-2xl flex justify-between items-center shadow-[0_12px_35px_rgba(0,0,0,0.4)] backdrop-blur-md border border-white/10 hover:scale-[1.02] transition-all cursor-pointer"
+            style={{ backgroundColor: brandColor, color: '#ffffff' }}
+            className="w-full text-white p-4 sm:p-4.5 rounded-2xl flex justify-between items-center shadow-[0_12px_35px_rgba(0,0,0,0.3)] backdrop-blur-md border border-white/20 hover:scale-[1.02] transition-all cursor-pointer"
           >
             <div className="flex items-center gap-3">
-              <div className="bg-emerald-500 text-white w-7 h-7 rounded-xl text-xs font-black flex items-center justify-center shadow-xs">
+              <div className="bg-white/25 text-white w-7 h-7 rounded-xl text-xs font-black flex items-center justify-center shadow-xs border border-white/20">
                 {cart.reduce((sum, c) => sum + c.qty, 0)}
               </div>
               <div className="text-left">
                 <span className="text-xs sm:text-sm font-black uppercase tracking-wider block leading-none">Ver Carrito</span>
                 {!qrTable && deliveryType === 'delivery' && (
-                  <span className="text-[10px] text-amber-300 font-medium block mt-0.5">🛵 Envío (${deliveryFeeUSD.toFixed(2)})</span>
+                  <span className="text-[10px] text-white/80 font-medium block mt-0.5">🛵 Envío (${deliveryFeeUSD.toFixed(2)})</span>
                 )}
               </div>
             </div>
             <div className="text-right">
-              <span className="block font-black text-sm">{formatPrice(!qrTable ? grandTotalUSD : cartTotal)}</span>
-              <span className="block text-[10px] text-slate-300 font-bold">{formatBs(toBolivares(!qrTable ? grandTotalUSD : cartTotal))}</span>
+              <span className="block font-black text-sm text-white">{formatPrice(!qrTable ? grandTotalUSD : cartTotal)}</span>
+              <span className="block text-[10px] text-white/80 font-bold">{formatBs(toBolivares(!qrTable ? grandTotalUSD : cartTotal))}</span>
             </div>
           </button>
         </motion.div>
@@ -1734,9 +2029,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       <button
                         type="button"
                         onClick={() => setDeliveryType('delivery')}
+                        style={deliveryType === 'delivery' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
                         className={`py-2.5 px-3 rounded-xl border text-center transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           deliveryType === 'delivery'
-                            ? 'bg-black text-white border-black font-extrabold shadow-sm'
+                            ? 'text-white font-extrabold shadow-sm'
                             : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100/70 font-semibold text-xs'
                         }`}
                       >
@@ -1749,9 +2045,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       <button
                         type="button"
                         onClick={() => setDeliveryType('pickup')}
+                        style={deliveryType === 'pickup' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
                         className={`py-2.5 px-3 rounded-xl border text-center transition-all flex items-center justify-center gap-2 cursor-pointer ${
                           deliveryType === 'pickup'
-                            ? 'bg-black text-white border-black font-extrabold shadow-sm'
+                            ? 'text-white font-extrabold shadow-sm'
                             : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100/70 font-semibold text-xs'
                         }`}
                       >
@@ -2035,7 +2332,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     }
                     setIsOrdering(true);
                   }}
-                  className="w-full bg-black hover:bg-slate-900 text-white p-4 sm:p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-lg shadow-black/10"
+                  style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                  className="w-full text-white p-4 sm:p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-lg"
                 >
                   {qrTable 
                     ? (settings?.qrOrderingEnabled === false ? 'Pedidos QR Desactivados' : `Confirmar Orden en Mesa ${qrTable.number}`) 
@@ -2112,7 +2410,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     <button 
                       onClick={submitOrder}
                       disabled={isSubmitting || !isRestaurantOpen || !customerName.trim()}
-                      className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                      className="w-full text-white p-5 rounded-2xl font-bold text-sm flex justify-center items-center gap-2 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-lg cursor-pointer"
                     >
                       {isSubmitting ? (
                         <>Enviando a Cocina... <span className="animate-pulse">⏳</span></>
@@ -2141,15 +2440,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                           <button 
                             type="button"
                             onClick={() => setDeliveryType('delivery')}
+                            style={deliveryType === 'delivery' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
                             className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${settings?.pickupEnabled === false ? 'col-span-2' : ''} ${
                               deliveryType === 'delivery' 
-                                ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                                ? 'text-white shadow-lg' 
                                 : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
                             <span className="text-xl">🛵</span>
                             <span className="font-bold text-xs">Delivery Express</span>
-                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md mt-0.5 ${deliveryType === 'delivery' ? 'bg-amber-400/30 text-amber-300' : 'bg-amber-100 text-amber-900'}`}>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md mt-0.5 ${deliveryType === 'delivery' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'}`}>
                               +${deliveryFeeUSD.toFixed(2)} USD
                             </span>
                           </button>
@@ -2159,9 +2459,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                           <button 
                             type="button"
                             onClick={() => setDeliveryType('pickup')}
+                            style={deliveryType === 'pickup' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
                             className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${settings?.deliveryEnabled === false ? 'col-span-2' : ''} ${
                               deliveryType === 'pickup' 
-                                ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                                ? 'text-white shadow-lg' 
                                 : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
@@ -2359,9 +2660,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                         <button 
                           type="button"
                           onClick={() => setPaymentMethod('pagomovil')}
-                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                          style={paymentMethod === 'pagomovil' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer ${
                             paymentMethod === 'pagomovil' 
-                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              ? 'text-white shadow-lg' 
                               : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
                           }`}
                         >
@@ -2374,9 +2676,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                         <button 
                           type="button"
                           onClick={() => setPaymentMethod('zelle')}
-                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                          style={paymentMethod === 'zelle' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer ${
                             paymentMethod === 'zelle' 
-                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              ? 'text-white shadow-lg' 
                               : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
                           }`}
                         >
@@ -2389,9 +2692,10 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                         <button 
                           type="button"
                           onClick={() => setPaymentMethod('cash')}
-                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 ${
+                          style={paymentMethod === 'cash' ? { backgroundColor: brandColor, borderColor: brandColor, color: '#ffffff' } : undefined}
+                          className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer ${
                             paymentMethod === 'cash' 
-                              ? 'bg-black text-white border-black shadow-lg shadow-black/10' 
+                              ? 'text-white shadow-lg' 
                               : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
                           }`}
                         >
@@ -2559,7 +2863,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       (deliveryType === 'delivery' && !customerAddress.trim()) || 
                       (paymentMethod !== 'cash' && (!paymentReference.trim() || !paymentReceiptImage))
                     }
-                    className="w-full bg-black hover:bg-slate-900 text-white p-5 rounded-2xl font-bold text-sm flex flex-col items-center justify-center gap-0.5 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-xl shadow-black/10 cursor-pointer"
+                    style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                    className="w-full text-white p-5 rounded-2xl font-bold text-sm flex flex-col items-center justify-center gap-0.5 hover:scale-[1.01] transition-transform disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-xl cursor-pointer"
                   >
                     {isSubmitting ? (
                       <span className="flex items-center gap-2">Enviando Pedido... <span className="animate-pulse">⏳</span></span>
@@ -2766,7 +3071,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 <button
                   type="submit"
                   disabled={isLoggingIn || lockoutInfo?.isLocked || !staffEmail.trim() || pin.length < 4}
-                  className="w-full mt-2 py-3 bg-black hover:bg-slate-800 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                  className="w-full mt-2 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isLoggingIn ? (
                     <>
@@ -3037,6 +3343,19 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     </button>
                   </div>
 
+                  {/* Share button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSharingItem(selectedItem);
+                    }}
+                    title="Compartir plato"
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center shrink-0 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Share2 size={18} />
+                  </button>
+
                   {/* Add with custom Qty button */}
                   <button 
                     disabled={!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false)}
@@ -3048,10 +3367,11 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       addToCart(selectedItem, modalQty, finalNote, excludedIds, selectedExtras);
                       setSelectedItem(null);
                     }}
+                    style={(!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false)) ? undefined : { backgroundColor: brandColor, color: '#ffffff' }}
                     className={`flex-1 rounded-2xl py-3.5 px-4 font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-transform hover:scale-[1.01] shadow-lg cursor-pointer ${
                       (!getMenuItemAvailability(selectedItem).isAvailable || !isRestaurantOpen || (qrTable !== null && settings?.qrOrderingEnabled === false))
                         ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                        : 'bg-black hover:bg-slate-800 text-white shadow-black/10'
+                        : 'text-white shadow-xs'
                     }`}
                   >
                     <ShoppingBag size={16} />
@@ -3075,6 +3395,16 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </motion.div>
           </div>
         )}
+
+      {/* SHARE DISH MODAL WITH LIVE OPENGRAPH PREVIEW */}
+      <ShareDishModal
+        item={sharingItem}
+        isOpen={!!sharingItem}
+        onClose={() => setSharingItem(null)}
+        restaurantName={settings?.restaurantName}
+        slogan={settings?.slogan}
+        logoUrl={settings?.logoUrl}
+      />
       </AnimatePresence>
 
       {/* FLOATING BOTTOM BAR FOR LIVE ORDER TRACKING */}
@@ -3304,222 +3634,36 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
       {/* COMPROBANTE / VOUCHER SUCCESS MODAL */}
       <AnimatePresence>
         {submittedVoucher && (
-          <div className="fixed inset-0 bg-black/70 md:backdrop-blur-sm flex items-stretch md:items-center justify-center z-50 p-0 md:p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
             <motion.div 
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 15 }}
-              className="bg-white rounded-none md:rounded-[32px] w-full h-full md:h-auto md:max-h-[90vh] md:max-w-md shadow-2xl overflow-y-auto border-0 md:border md:border-slate-100 my-0 md:my-8 flex flex-col relative z-50 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+              initial={{ scale: 0.94, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 10 }}
+              className="w-full max-w-sm sm:max-w-md my-auto relative z-50 max-h-[95vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
             >
-              <div className="p-6 md:p-8 flex-1">
-                {/* Header with success badge */}
-                <div className="text-center mb-6">
-                  <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-100">
-                    <CheckCircle2 size={36} className="text-emerald-500" />
-                  </div>
-                  <h3 className="text-xl font-black text-slate-900">¡Pedido Recibido!</h3>
-                  <p className="text-xs text-slate-400 mt-1">Guarda tu comprobante de pago.</p>
-                </div>
-
-                {/* Voucher Ticket Paper Design */}
-                <div id="voucher-ticket" className="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-5 font-mono text-xs text-slate-700 space-y-4 relative overflow-hidden">
-                  {/* Top round notch decorations */}
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1">
-                    <span className="w-2 h-2 rounded-full bg-white block" />
-                    <span className="w-2 h-2 rounded-full bg-white block" />
-                  </div>
-
-                  <div className="text-center border-b border-slate-200 pb-3">
-                    <h4 className="font-bold text-sm uppercase text-slate-900">BISTROFLOW</h4>
-                    <span className="text-[10px] text-slate-400">Comprobante de Pedido</span>
-                  </div>
-
-                  <div className="space-y-1.5 border-b border-slate-200 pb-3">
-                    <div><span className="text-slate-400">Nro Pedido:</span> <strong className="text-slate-900 float-right">#{submittedVoucher.id.slice(-6).toUpperCase()}</strong></div>
-                    <div><span className="text-slate-400">Fecha:</span> <span className="text-slate-900 float-right">{submittedVoucher.timestamp}</span></div>
-                    <div><span className="text-slate-400">Cliente:</span> <span className="text-slate-900 float-right truncate max-w-[180px]">{submittedVoucher.customerName}</span></div>
-                    <div><span className="text-slate-400">Teléfono:</span> <span className="text-slate-900 float-right">{submittedVoucher.customerPhone}</span></div>
-                    <div><span className="text-slate-400">Tipo:</span> <span className="text-slate-900 float-right uppercase font-bold">{submittedVoucher.deliveryType === 'delivery' ? '🛵 Delivery' : '🛍️ Pick Up'}</span></div>
-                    
-                    {submittedVoucher.deliveryType === 'delivery' && (
-                      <div className="pt-1 border-t border-slate-100 mt-1 space-y-1">
-                        {submittedVoucher.deliveryZoneName && (
-                          <div>
-                            <span className="text-slate-400">Zona:</span>
-                            <span className="text-slate-900 float-right font-bold">{submittedVoucher.deliveryZoneName}</span>
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">Dirección:</span>
-                          <span className="text-slate-800 block text-[11px] leading-tight font-sans font-medium">{submittedVoucher.customerAddress}</span>
-                        </div>
-                        {submittedVoucher.deliveryReference && (
-                          <div>
-                            <span className="text-slate-400 block mb-0.5">Referencia:</span>
-                            <span className="text-slate-700 block text-[11px] leading-tight font-sans italic">{submittedVoucher.deliveryReference}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation && (
-                      <div className="pt-1 border-t border-slate-100 mt-1">
-                        <span className="text-slate-400 block mb-0.5">Ubicación GPS:</span>
-                        <a href={submittedVoucher.whatsappLocation} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline block text-[11px] leading-tight font-sans font-medium break-all flex items-center gap-1">
-                          <span>{submittedVoucher.whatsappLocation}</span>
-                          <ExternalLink size={10} />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Items list */}
-                  <div className="border-b border-slate-200 pb-3 space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Detalle:</span>
-                    {submittedVoucher.items.map((it, i) => (
-                      <div key={i} className="flex justify-between">
-                        <span className="truncate max-w-[200px]">{it.qty}x {it.name}</span>
-                        <span>${(it.price * it.qty).toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Totals */}
-                  <div className="space-y-1">
-                    {submittedVoucher.deliveryType === 'delivery' && (
-                      <>
-                        <div className="flex justify-between text-slate-500 text-[11px]">
-                          <span>Subtotal Productos:</span>
-                          <span>${submittedVoucher.subtotalAmount.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-amber-900 font-medium text-[11px]">
-                          <span>Envío ({submittedVoucher.deliveryZoneName || 'Delivery'}):</span>
-                          <span>+${(submittedVoucher.deliveryFee || 0).toFixed(2)}</span>
-                        </div>
-                      </>
-                    )}
-                    <div className="flex justify-between text-slate-900 font-black text-sm pt-1 border-t border-slate-200/80">
-                      <span>TOTAL USD:</span>
-                      <span>${submittedVoucher.totalAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-500 font-bold">
-                      <span>TOTAL BS:</span>
-                      <span>Bs. {(submittedVoucher.totalAmount * exchangeRate).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-400 text-[10px] mt-1 border-t border-slate-100 pt-2">
-                      <span>Pago: {submittedVoucher.paymentMethod.toUpperCase()}</span>
-                      {submittedVoucher.paymentMethod !== 'cash' && (
-                        <span>Ref: {submittedVoucher.paymentReference}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instruction for user */}
-                <p className="text-[11px] text-indigo-600 font-medium text-center mt-4 bg-indigo-50 py-2 px-3 rounded-xl border border-indigo-100">
-                  ⚠️ Envía tu comprobante por WhatsApp al restaurante para validar el pedido y agilizar la cocina.
-                </p>
-              </div>
-
-              {/* Action Buttons footer */}
-              <div className="bg-slate-50 p-6 border-t border-slate-100 flex flex-col gap-2">
-                {/* 1. Enviar por WhatsApp directly */}
-                <button 
-                  onClick={() => {
-                    const phone = settings?.whatsappPhone || '+584121234567';
-                    const cleanPhone = phone.replace(/[^0-9]/g, '');
-                    
-                    // Format message
-                    const itemsText = submittedVoucher.items
-                      .map(it => `• *${it.qty}x* ${it.name} (_$${(it.price * it.qty).toFixed(2)}_)`)
-                      .join('\n');
-                    
-                    const message = `🍔 *NUEVO PEDIDO EN BISTROFLOW* 🍟\n` +
-                      `------------------------------------\n` +
-                      `*Nro Pedido:* #${submittedVoucher.id.slice(-6).toUpperCase()}\n` +
-                      `*Cliente:* ${submittedVoucher.customerName}\n` +
-                      `*Teléfono:* ${submittedVoucher.customerPhone}\n` +
-                      `*Método:* ${submittedVoucher.deliveryType === 'delivery' ? 'Delivery Express 🛵' : 'Retiro en Local (Pick Up) 🛍️'}\n` +
-                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.deliveryZoneName ? `*Zona de Envío:* ${submittedVoucher.deliveryZoneName}\n` : '') +
-                      (submittedVoucher.deliveryType === 'delivery' ? `*Dirección:* ${submittedVoucher.customerAddress}\n` : '') +
-                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.deliveryReference ? `*Referencia:* ${submittedVoucher.deliveryReference}\n` : '') +
-                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation ? `*Ubicación GPS:* ${submittedVoucher.whatsappLocation}\n` : '') +
-                      `\n*Artículos:* \n${itemsText}\n\n` +
-                      `------------------------------------\n` +
-                      (submittedVoucher.deliveryType === 'delivery' ? `*Subtotal:* $${submittedVoucher.subtotalAmount.toFixed(2)} USD\n` : '') +
-                      (submittedVoucher.deliveryType === 'delivery' ? `*Costo Envío:* $${(submittedVoucher.deliveryFee || 0).toFixed(2)} USD\n` : '') +
-                      `*TOTAL ${activeCurrency}:* ${formatPrice(submittedVoucher.totalAmount)}\n` +
-                      `*TOTAL BS:* ${formatBs(toBolivares(submittedVoucher.totalAmount))} _(Tasa: ${currentRateBs.toFixed(2)} Bs/${currencySymbol})_\n` +
-                      `*Método de Pago:* _${submittedVoucher.paymentMethod === 'pagomovil' ? 'Pago Móvil 📱' : submittedVoucher.paymentMethod === 'zelle' ? 'Zelle 📧' : 'Efectivo 💵'}_\n` +
-                      (submittedVoucher.paymentMethod !== 'cash' ? `*Referencia/Pago:* _${submittedVoucher.paymentReference}_\n` : '') +
-                      `------------------------------------\n` +
-                      `_¡Hola! Acabo de enviar mi pedido a través de la aplicación. Quedo atento a la confirmación de la preparación._ 🙏`;
-
-                    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
-                    window.open(waUrl, '_blank');
-                  }}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl py-3.5 px-4 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/15 hover:scale-[1.01] transition-transform"
-                >
-                  <MessageCircle size={18} />
-                  <span>Enviar por WhatsApp</span>
-                </button>
-
-                {/* 2. Download Comprobante as TXT file */}
-                <button 
-                  onClick={() => {
-                    const cleanID = submittedVoucher.id.slice(-6).toUpperCase();
-                    const itemsText = submittedVoucher.items
-                      .map(it => ` - ${it.qty}x ${it.name} : $${(it.price * it.qty).toFixed(2)}`)
-                      .join('\r\n');
-                    
-                    const receiptContent = 
-                      `========================================\r\n` +
-                      `             BISTROFLOW SL              \r\n` +
-                      `         COMPROBANTE DE PEDIDO          \r\n` +
-                      `========================================\r\n` +
-                      `ID Pedido : #${cleanID}\r\n` +
-                      `Fecha     : ${submittedVoucher.timestamp}\r\n` +
-                      `Cliente   : ${submittedVoucher.customerName}\r\n` +
-                      `Telefono  : ${submittedVoucher.customerPhone}\r\n` +
-                      `Tipo      : ${submittedVoucher.deliveryType === 'delivery' ? 'Delivery Express' : 'Retiro en Local'}\r\n` +
-                      (submittedVoucher.deliveryType === 'delivery' ? `Direccion : ${submittedVoucher.customerAddress}\r\n` : '') +
-                      (submittedVoucher.deliveryType === 'delivery' && submittedVoucher.whatsappLocation ? `GPS       : ${submittedVoucher.whatsappLocation}\r\n` : '') +
-                      `----------------------------------------\r\n` +
-                      `DETALLE DEL PEDIDO:\r\n` +
-                      `${itemsText}\r\n` +
-                      `----------------------------------------\r\n` +
-                      `TOTAL ${activeCurrency.padEnd(4, ' ')}: ${formatPrice(submittedVoucher.totalAmount)}\r\n` +
-                      `TOTAL BS  : ${formatBs(toBolivares(submittedVoucher.totalAmount))}\r\n` +
-                      `----------------------------------------\r\n` +
-                      `Metodo    : ${submittedVoucher.paymentMethod.toUpperCase()}\r\n` +
-                      (submittedVoucher.paymentMethod !== 'cash' ? `Referencia: ${submittedVoucher.paymentReference}\r\n` : '') +
-                      `========================================\r\n` +
-                      `       ¡Gracias por tu preferencia!      \r\n` +
-                      `========================================\r\n`;
-
-                    const blob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `bistroflow-pedido-${cleanID}.txt`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-2xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 hover:scale-[1.01] transition-transform"
-                >
-                  <Download size={14} />
-                  <span>Descargar Comprobante (.TXT)</span>
-                </button>
-
-                {/* 3. Ir a Inicio / Cerrar */}
-                <button 
-                  onClick={() => setSubmittedVoucher(null)}
-                  className="w-full bg-black text-white rounded-2xl py-3 px-4 font-black text-xs hover:scale-[1.01] transition-transform"
-                >
-                  Ir al Inicio (Seguimiento en Vivo)
-                </button>
-              </div>
+              <ThermalReceiptTicket
+                data={{
+                  id: submittedVoucher.id,
+                  timestamp: submittedVoucher.timestamp,
+                  customerName: submittedVoucher.customerName,
+                  customerPhone: submittedVoucher.customerPhone,
+                  customerAddress: submittedVoucher.customerAddress,
+                  deliveryType: submittedVoucher.deliveryType,
+                  deliveryZoneName: submittedVoucher.deliveryZoneName,
+                  deliveryFee: submittedVoucher.deliveryFee,
+                  deliveryReference: submittedVoucher.deliveryReference,
+                  whatsappLocation: submittedVoucher.whatsappLocation,
+                  items: submittedVoucher.items,
+                  subtotalAmount: submittedVoucher.subtotalAmount,
+                  totalAmount: submittedVoucher.totalAmount,
+                  paymentMethod: submittedVoucher.paymentMethod,
+                  paymentReference: submittedVoucher.paymentReference
+                }}
+                settings={settings}
+                exchangeRate={currentRateBs}
+                onClose={() => setSubmittedVoucher(null)}
+              />
             </motion.div>
           </div>
         )}

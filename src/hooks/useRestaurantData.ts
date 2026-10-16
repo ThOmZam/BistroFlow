@@ -175,11 +175,20 @@ export function useRestaurantData() {
     zelleEmail: 'pagos@bistroflow.com',
     zelleName: 'BistroFlow SL',
     whatsappPhone: '+584121234567',
-    restaurantName: 'BistroFlow',
-    logoUrl: '',
-    slogan: 'SISTEMA GASTRONÓMICO & POS',
+    restaurantName: localStorage.getItem('restaurant_name') || "Q' Sandwich",
+    logoUrl: localStorage.getItem('restaurant_logo') || '',
+    slogan: localStorage.getItem('restaurant_slogan') || 'SISTEMA GASTRONÓMICO & POS',
+    rif: localStorage.getItem('restaurant_rif') || '',
+    instagramUrl: localStorage.getItem('restaurant_instagram') || '',
+    tiktokUrl: localStorage.getItem('restaurant_tiktok') || '',
+    whatsappUrl: localStorage.getItem('restaurant_whatsapp_link') || '',
+    facebookUrl: localStorage.getItem('restaurant_facebook') || '',
+    websiteUrl: localStorage.getItem('restaurant_website') || '',
     restaurantPhone: '+584121234567',
     restaurantAddress: 'Caracas, Venezuela',
+    brandColor: localStorage.getItem('restaurant_brand_color') || '#2563eb',
+    sidebarTheme: (localStorage.getItem('restaurant_sidebar_theme') as any) || 'minimalist',
+    bgTheme: (localStorage.getItem('restaurant_bg_theme') as any) || 'kinetic',
     deliveryEnabled: true,
     pickupEnabled: true,
     deliveryZones: DEFAULT_DELIVERY_ZONES,
@@ -284,14 +293,20 @@ export function useRestaurantData() {
           zelleEmail: data.zelleEmail || 'pagos@bistroflow.com',
           zelleName: data.zelleName || 'BistroFlow SL',
           whatsappPhone: data.whatsappPhone || '+584121234567',
-          restaurantName: data.restaurantName || 'BistroFlow',
-          logoUrl: data.logoUrl || '',
-          slogan: data.slogan || data.tagline || 'SISTEMA GASTRONÓMICO & POS',
+          restaurantName: data.restaurantName || localStorage.getItem('restaurant_name') || "Q' Sandwich",
+          logoUrl: data.logoUrl || localStorage.getItem('restaurant_logo') || '',
+          slogan: data.slogan || data.tagline || localStorage.getItem('restaurant_slogan') || 'SISTEMA GASTRONÓMICO & POS',
+          rif: data.rif || localStorage.getItem('restaurant_rif') || '',
+          instagramUrl: data.instagramUrl || localStorage.getItem('restaurant_instagram') || '',
+          tiktokUrl: data.tiktokUrl || localStorage.getItem('restaurant_tiktok') || '',
+          whatsappUrl: data.whatsappUrl || localStorage.getItem('restaurant_whatsapp_link') || '',
+          facebookUrl: data.facebookUrl || localStorage.getItem('restaurant_facebook') || '',
+          websiteUrl: data.websiteUrl || localStorage.getItem('restaurant_website') || '',
           restaurantPhone: data.restaurantPhone || '+584121234567',
           restaurantAddress: data.restaurantAddress || 'Caracas, Venezuela',
-          brandColor: data.brandColor || '#2563eb',
-          sidebarTheme: data.sidebarTheme || 'minimalist',
-          bgTheme: data.bgTheme || 'kinetic',
+          brandColor: data.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb',
+          sidebarTheme: data.sidebarTheme || localStorage.getItem('restaurant_sidebar_theme') || 'minimalist',
+          bgTheme: data.bgTheme || localStorage.getItem('restaurant_bg_theme') || 'kinetic',
           deliveryEnabled: data.deliveryEnabled !== undefined ? data.deliveryEnabled : true,
           pickupEnabled: data.pickupEnabled !== undefined ? data.pickupEnabled : true,
           deliveryZones: data.deliveryZones && data.deliveryZones.length > 0 ? data.deliveryZones : DEFAULT_DELIVERY_ZONES,
@@ -338,8 +353,42 @@ export function useRestaurantData() {
             ? data.paymentMethodsList
             : DEFAULT_PAYMENT_METHODS
         });
+
+        // Persist local copy for instant offline and reload restoration
+        if (data.restaurantName) localStorage.setItem('restaurant_name', data.restaurantName);
+        if (data.logoUrl) localStorage.setItem('restaurant_logo', data.logoUrl);
+        if (data.slogan || data.tagline) localStorage.setItem('restaurant_slogan', data.slogan || data.tagline);
+        if (data.rif) localStorage.setItem('restaurant_rif', data.rif);
+        if (data.instagramUrl) localStorage.setItem('restaurant_instagram', data.instagramUrl);
+        if (data.tiktokUrl) localStorage.setItem('restaurant_tiktok', data.tiktokUrl);
+        if (data.whatsappUrl) localStorage.setItem('restaurant_whatsapp_link', data.whatsappUrl);
+        if (data.facebookUrl) localStorage.setItem('restaurant_facebook', data.facebookUrl);
+        if (data.websiteUrl) localStorage.setItem('restaurant_website', data.websiteUrl);
+        if (data.brandColor) localStorage.setItem('restaurant_brand_color', data.brandColor);
+        if (data.sidebarTheme) localStorage.setItem('restaurant_sidebar_theme', data.sidebarTheme);
+        if (data.bgTheme) localStorage.setItem('restaurant_bg_theme', data.bgTheme);
       }
     });
+
+    const handleSettingsEvent = () => {
+      setSettings(prev => ({
+        ...prev,
+        restaurantName: localStorage.getItem('restaurant_name') || prev.restaurantName,
+        logoUrl: localStorage.getItem('restaurant_logo') || prev.logoUrl,
+        slogan: localStorage.getItem('restaurant_slogan') || prev.slogan,
+        rif: localStorage.getItem('restaurant_rif') || prev.rif,
+        instagramUrl: localStorage.getItem('restaurant_instagram') || prev.instagramUrl,
+        tiktokUrl: localStorage.getItem('restaurant_tiktok') || prev.tiktokUrl,
+        whatsappUrl: localStorage.getItem('restaurant_whatsapp_link') || prev.whatsappUrl,
+        facebookUrl: localStorage.getItem('restaurant_facebook') || prev.facebookUrl,
+        websiteUrl: localStorage.getItem('restaurant_website') || prev.websiteUrl,
+        brandColor: localStorage.getItem('restaurant_brand_color') || prev.brandColor,
+        sidebarTheme: (localStorage.getItem('restaurant_sidebar_theme') as any) || prev.sidebarTheme,
+        bgTheme: (localStorage.getItem('restaurant_bg_theme') as any) || prev.bgTheme,
+      }));
+    };
+    window.addEventListener('settings_updated', handleSettingsEvent);
+    window.addEventListener('storage', handleSettingsEvent);
 
     return () => {
       unsubTables();
@@ -350,6 +399,8 @@ export function useRestaurantData() {
       unsubFlashDeals();
       unsubSessions();
       unsubSettings();
+      window.removeEventListener('settings_updated', handleSettingsEvent);
+      window.removeEventListener('storage', handleSettingsEvent);
     };
   }, []);
 

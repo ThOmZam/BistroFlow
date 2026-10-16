@@ -68,9 +68,9 @@ export default function TopBar({
   const [unreadCount, setUnreadCount] = useState(0);
   const [isInsideTable, setIsInsideTable] = useState(false);
 
-  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
-  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
-  const brandColor = (settings as any)?.brandColor || '#2563eb';
+  const sidebarTheme = (settings as any)?.sidebarTheme || localStorage.getItem('restaurant_sidebar_theme') || 'minimalist';
+  const bgTheme = (settings as any)?.bgTheme || localStorage.getItem('restaurant_bg_theme') || 'kinetic';
+  const brandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
 
   const isDark = sidebarTheme === 'dark' || bgTheme === 'dark_luxury';
   const isBrand = sidebarTheme === 'brand';
@@ -168,36 +168,6 @@ export default function TopBar({
           </button>
         </div>
       </div>
-
-      {/* Desktop Floating Pill Quick Navigation Bar */}
-      {onViewChange && (
-        <div className="hidden xl:flex items-center gap-1 bg-slate-100/90 p-1 rounded-full border border-slate-200/90 shadow-2xs select-none">
-          {[
-            { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
-            { id: 'waiter', label: 'POS', icon: UtensilsCrossed },
-            { id: 'kitchen', label: 'Cocina', icon: ChefHat },
-            { id: 'caja', label: 'Caja', icon: DollarSign },
-            { id: 'inventory', label: 'Stock', icon: Package }
-          ].map(tab => {
-            const isSel = activeView === tab.id;
-            const IconComp = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => onViewChange(tab.id)}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  isSel 
-                    ? 'bg-slate-900 text-white shadow-xs scale-105' 
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
-                }`}
-              >
-                <IconComp size={13} className={isSel ? 'text-amber-400' : 'text-slate-400'} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* Right Controls: Tasa de Cambio + Search Button + Quick Actions + User Profile */}
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">

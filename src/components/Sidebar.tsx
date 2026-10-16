@@ -378,9 +378,9 @@ export default function Sidebar({
 
   const moreHasBadge = moreToolsList.some(tool => !!tool.badge);
 
-  const sidebarTheme = (settings as any)?.sidebarTheme || 'minimalist';
-  const bgTheme = (settings as any)?.bgTheme || 'kinetic';
-  const brandColor = (settings as any)?.brandColor || '#2563eb';
+  const sidebarTheme = (settings as any)?.sidebarTheme || localStorage.getItem('restaurant_sidebar_theme') || 'minimalist';
+  const bgTheme = (settings as any)?.bgTheme || localStorage.getItem('restaurant_bg_theme') || 'kinetic';
+  const brandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
 
   const isDarkSidebar = sidebarTheme === 'dark' || bgTheme === 'dark_luxury';
   const isBrandSidebar = sidebarTheme === 'brand';
@@ -661,9 +661,10 @@ export default function Sidebar({
                     setIsMobileMoreOpen(false);
                     onViewChange(item.id);
                   }}
+                  style={isSelected ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
                   className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
                     isSelected 
-                      ? 'bg-blue-600 text-white rounded-full px-3.5 py-1.5 shadow-md shadow-blue-500/30 font-bold scale-[1.03]' 
+                      ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
                       : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
                   }`}
                 >
@@ -692,9 +693,10 @@ export default function Sidebar({
             {/* 5th Pill button: "Más" */}
             <button
               onClick={() => setIsMobileMoreOpen(prev => !prev)}
+              style={isMoreSelected || isMobileMoreOpen ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
               className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 isMoreSelected || isMobileMoreOpen
-                  ? 'bg-blue-600 text-white rounded-full px-3.5 py-1.5 shadow-md shadow-blue-500/30 font-bold scale-[1.03]' 
+                  ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
                   : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
               }`}
             >

@@ -1,6 +1,6 @@
 {
-  "name": "BistroFlow - Restaurant OS",
-  "description": "Una aplicación administrativa integral para restaurantes de comida rápida con enfoque en eficiencia radical, precisión contable y estética minimalista.",
+  "name": "Q' Sandwich - Menú Digital & POS",
+  "description": "Explora nuestro catálogo digital y realiza tu pedido en línea de forma rápida y sencilla.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["real-time-sync", "inventory-management", "kds", "pos", "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

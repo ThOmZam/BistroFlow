@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import { useRestaurantData } from '../hooks/useRestaurantData';
 import { useCurrency } from '../context/CurrencyContext';
+import ThermalReceiptTicket from '../components/ThermalReceiptTicket';
 import {
   AreaChart,
   Area,
@@ -2893,227 +2894,76 @@ Referencia:  ${reference}
       </AnimatePresence>
 
       {/* TRANSACTION DETAIL MODAL */}
+      {/* TRANSACTION DETAIL TICKET MODAL */}
       <AnimatePresence>
         {selectedDetailEntry && (
           <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6 overflow-y-auto"
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto"
             onClick={() => { setSelectedDetailEntry(null); setCurrentDetailOrders([]); }}
           >
+            {/* Hidden Order Loader for Session Line Items */}
+            {selectedDetailEntry.sessionId && (
+              <div className="hidden">
+                <RestaurantOrderDetails 
+                  sessionId={selectedDetailEntry.sessionId} 
+                  accountId={selectedDetailEntry.accountId || 'default'} 
+                  exchangeRate={exchangeRate} 
+                  onOrdersLoaded={(orders) => setCurrentDetailOrders(orders)}
+                />
+              </div>
+            )}
+
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.94, opacity: 0, y: 10 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-white rounded-[40px] w-full max-w-lg shadow-2xl overflow-hidden relative border border-slate-100 text-slate-800 text-left"
+              exit={{ scale: 0.94, opacity: 0, y: 10 }}
+              className="w-full max-w-sm sm:max-w-md my-auto relative z-50 max-h-[95vh] overflow-y-auto"
               onClick={e => e.stopPropagation()}
             >
-              {/* Header */}
-              <div className={`${selectedDetailEntry.type === 'income' ? 'bg-emerald-600' : 'bg-slate-900'} text-white p-8 relative`}>
-                <button 
-                  onClick={() => { setSelectedDetailEntry(null); setCurrentDetailOrders([]); }}
-                  className="absolute top-6 right-6 p-2 bg-white/15 hover:bg-white/25 text-white rounded-full transition-colors cursor-pointer"
-                  title="Cerrar"
-                >
-                  <X size={18} />
-                </button>
-                <span className="text-[10px] bg-white/20 text-white font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  {selectedDetailEntry.type === 'income' ? 'Ingreso Consolidado' : 'Egreso Registrado'}
-                </span>
-                <h3 className="text-xl font-black mt-3 leading-tight">
-                  {selectedDetailEntry.isAutomatic ? 'Detalles del Pedido POS' : 'Registro de Caja Manual'}
-                </h3>
-                <p className="text-white/80 text-xs mt-1">Verificación de consumo y datos financieros</p>
-              </div>
-
-              {/* Body */}
-              <div className="p-8 space-y-6 max-h-[65vh] overflow-y-auto">
-                
-                {/* General Ledger Info */}
-                <div className="space-y-4">
-                  <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 space-y-3">
-                    <div>
-                      <span className="text-[9px] text-slate-400 uppercase font-black block">Concepto</span>
-                      <span className="font-bold text-slate-900 text-sm leading-snug block">
-                        {selectedDetailEntry.description}
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4 text-xs pt-1 border-t border-slate-100">
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Categoría</span>
-                        <span className="font-bold text-slate-800">{selectedDetailEntry.category}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Método de Pago</span>
-                        <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
-                          {getPaymentMethodLabel(selectedDetailEntry.paymentMethod || '')}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t border-slate-100">
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Fecha y Hora</span>
-                        <span className="font-semibold text-slate-700">
-                          {new Date(selectedDetailEntry.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase font-black block">Tipo de Registro</span>
-                        <span className={`inline-flex items-center gap-1.5 font-bold text-[10px] uppercase mt-0.5 px-2.5 py-0.5 rounded-full ${selectedDetailEntry.type === 'income' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${selectedDetailEntry.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                          {selectedDetailEntry.type === 'income' ? 'Ingreso' : 'Egreso'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Reference & Proof of payment details */}
-                    {((selectedDetailEntry as any).waiterName || selectedDetailEntry.paymentReference || selectedDetailEntry.receiptImage || selectedDetailEntry.clientName) && (
-                      <div className="pt-3 border-t border-slate-100 space-y-3 text-xs">
-                        {(selectedDetailEntry as any).waiterName && (
-                          <div>
-                            <span className="text-[9px] text-slate-400 uppercase font-black block">Atendido por (Mesero)</span>
-                            <span className="font-bold text-slate-900 block mt-0.5">
-                              👤 {(selectedDetailEntry as any).waiterName}
-                            </span>
-                          </div>
-                        )}
-                        {selectedDetailEntry.clientName && (
-                          <div>
-                            <span className="text-[9px] text-slate-400 uppercase font-black block">Cliente Asociado</span>
-                            <span className="font-bold text-slate-900 block mt-0.5">
-                              👤 {selectedDetailEntry.clientName}
-                            </span>
-                          </div>
-                        )}
-                        {selectedDetailEntry.paymentReference && (
-                          <div>
-                            <span className="text-[9px] text-slate-400 uppercase font-black block">Código de Referencia</span>
-                            <span className="font-mono font-bold text-slate-900 block mt-0.5 bg-slate-100 px-2.5 py-1 rounded inline-block">
-                              🔑 {selectedDetailEntry.paymentReference}
-                            </span>
-                          </div>
-                        )}
-                        {selectedDetailEntry.receiptImage && (
-                          <div>
-                            <span className="text-[9px] text-slate-400 uppercase font-black block mb-1">Comprobante de Pago</span>
-                            <div className="mt-1 rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 relative group max-h-48 flex justify-center items-center">
-                              <img 
-                                src={selectedDetailEntry.receiptImage} 
-                                alt="Comprobante" 
-                                className="max-h-48 object-contain cursor-zoom-in"
-                                onClick={() => window.open(selectedDetailEntry.receiptImage, '_blank')}
-                              />
-                            </div>
-                            <span className="text-[9px] text-slate-400 mt-1 block font-medium">
-                              * Haz clic en la imagen para abrirla en tamaño completo en otra pestaña.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* If it's an automatic restaurant sale, load the orders dynamically */}
-                {selectedDetailEntry.sessionId ? (
-                  <div className="space-y-4">
-                    <RestaurantOrderDetails 
-                      sessionId={selectedDetailEntry.sessionId} 
-                      accountId={selectedDetailEntry.accountId || 'default'} 
-                      exchangeRate={exchangeRate} 
-                      onOrdersLoaded={(orders) => setCurrentDetailOrders(orders)}
-                    />
-                  </div>
-                ) : null}
-
-                {/* Fiscal Information if present */}
-                {selectedDetailEntry.isFiscal ? (
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] uppercase font-black tracking-widest text-slate-400">Declaración Fiscal SENIAT</h4>
-                    <div className="bg-amber-50/50 p-5 rounded-3xl border border-amber-100/50 text-xs space-y-2.5">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-slate-700">Factura Fiscal Asociada:</span>
-                        <span className="font-mono font-black text-slate-900 bg-amber-100 px-2 py-0.5 rounded text-[10px]">
-                          #{selectedDetailEntry.fiscalInvoice || 'N/A'}
-                        </span>
-                      </div>
-                      
-                      <div className="divide-y divide-slate-200/50 text-xs space-y-2 pt-1">
-                        <div className="flex justify-between font-medium pt-1">
-                          <span className="text-slate-500">Monto Imponible (Base):</span>
-                          <span>${(selectedDetailEntry.type === 'income' ? selectedDetailEntry.amount * (100 / (100 + (selectedDetailEntry.taxRate || 16))) : selectedDetailEntry.amount).toFixed(2)} USD</span>
-                        </div>
-                        <div className="flex justify-between font-medium pt-2">
-                          <span className="text-slate-500">Alícuota IVA:</span>
-                          <span>{selectedDetailEntry.taxRate || 16}%</span>
-                        </div>
-                        <div className="flex justify-between font-medium pt-2">
-                          <span className="text-slate-500">Monto IVA Débito/Crédito:</span>
-                          <span className="text-rose-600 font-bold font-mono">${(selectedDetailEntry.taxAmount || 0).toFixed(2)} USD</span>
-                        </div>
-                        {selectedDetailEntry.withholdingAmount ? (
-                          <div className="flex justify-between font-medium pt-2 text-indigo-700">
-                            <span>Retención ISLR aplicada ({selectedDetailEntry.withholdingRate}%):</span>
-                            <span className="font-bold font-mono">-${selectedDetailEntry.withholdingAmount.toFixed(2)} USD</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <span className="text-xs text-slate-400 font-bold">🧾 Este movimiento no posee efectos fiscales de SENIAT</span>
-                  </div>
-                )}
-
-                {/* Total Section */}
-                <div className="bg-slate-900 text-white p-6 rounded-3xl flex justify-between items-center">
-                  <div>
-                    <span className="text-[9px] text-slate-400 uppercase tracking-wider font-extrabold block">Monto Consolidado</span>
-                    <span className="text-2xl font-black text-white">${selectedDetailEntry.amount.toFixed(2)}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] text-slate-400 uppercase tracking-wider font-extrabold block">Conversión Oficial</span>
-                    <span className="text-base font-bold text-emerald-400">Bs. {(selectedDetailEntry.amount * exchangeRate).toFixed(2)}</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Footer action */}
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center gap-3">
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => handleExportEntryAsTXT(selectedDetailEntry, currentDetailOrders)}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 hover:border-black bg-white hover:bg-slate-50 font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer"
-                    title="Exportar detalle del pedido"
-                  >
-                    <Download size={14} /> Exportar
-                  </button>
-                  <button 
-                    onClick={() => handlePrintEntry(selectedDetailEntry, currentDetailOrders)}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 hover:border-black bg-white hover:bg-slate-50 font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer"
-                    title="Imprimir ticket de consumo"
-                  >
-                    <Printer size={14} /> Imprimir
-                  </button>
-                </div>
-
-                <button 
-                  onClick={() => {
-                    setSelectedDetailEntry(null);
-                    setCurrentDetailOrders([]);
-                  }}
-                  className="px-5 py-3 rounded-2xl bg-black hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
-                >
-                  Entendido
-                </button>
-              </div>
+              <ThermalReceiptTicket
+                data={{
+                  id: selectedDetailEntry.id,
+                  timestamp: selectedDetailEntry.timestamp,
+                  customerName: selectedDetailEntry.clientName || (selectedDetailEntry.description.includes('Mesa') || selectedDetailEntry.description.includes('Pedido') ? selectedDetailEntry.description : undefined),
+                  waiterName: (selectedDetailEntry as any).waiterName,
+                  concept: selectedDetailEntry.description,
+                  category: selectedDetailEntry.category,
+                  items: currentDetailOrders.length > 0
+                    ? currentDetailOrders.map(o => ({
+                        name: o.itemName || o.menuItem?.name || 'Producto',
+                        qty: o.quantity || 1,
+                        price: o.price || 0,
+                        note: o.note
+                      }))
+                    : [{
+                        name: selectedDetailEntry.description || 'Consumo Registrado',
+                        qty: 1,
+                        price: selectedDetailEntry.amount
+                      }],
+                  subtotalAmount: selectedDetailEntry.amount,
+                  totalAmount: selectedDetailEntry.amount,
+                  paymentMethod: selectedDetailEntry.paymentMethod,
+                  paymentReference: selectedDetailEntry.paymentReference,
+                  isFiscal: selectedDetailEntry.isFiscal,
+                  fiscalInvoice: selectedDetailEntry.fiscalInvoice,
+                  taxAmount: selectedDetailEntry.taxAmount,
+                  taxRate: selectedDetailEntry.taxRate
+                }}
+                settings={settings}
+                exchangeRate={exchangeRate}
+                showActions={true}
+                onClose={() => {
+                  setSelectedDetailEntry(null);
+                  setCurrentDetailOrders([]);
+                }}
+              />
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
 
-        {/* MODAL 3: Exportación Contable (Excel / CSV / PDF) */}
+      {/* MODAL 3: Exportación Contable (Excel / CSV / PDF) */}
+      <AnimatePresence>
         {isExportModalOpen && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
             <motion.div 

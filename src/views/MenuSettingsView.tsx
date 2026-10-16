@@ -3,7 +3,7 @@ import { collection, doc, updateDoc, addDoc, deleteDoc, setDoc } from 'firebase/
 import { db } from '../lib/firebase';
 import { useRestaurantData, DEFAULT_DELIVERY_ZONES, DEFAULT_PAYMENT_METHODS } from '../hooks/useRestaurantData';
 import { MenuItem, MenuItemVariant, Table, Promotion, ExtraOption, DeliveryZone, PaymentMethodItem } from '../types';
-import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock, ArrowLeft, Clock, Image as ImageIcon, Palette } from 'lucide-react';
+import { Settings, Plus, Save, Trash2, X, DollarSign, GripHorizontal, Tag, Sparkles, QrCode, Printer, Download, ExternalLink, Copy, Check, Star, MapPin, Edit, CreditCard, Smartphone, ShieldCheck, AlertCircle, ToggleLeft, ToggleRight, CheckCircle2, ChevronRight, Edit3, Globe, ShoppingBag, UtensilsCrossed, Grid, Building2, Bell, Zap, Lock, ArrowLeft, Clock, Image as ImageIcon, Palette, Instagram, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logAction } from '../lib/logger';
 import { playNotificationSound, playSuccessSound, playErrorSound, playClickSound, playCashSound } from '../lib/audio';
@@ -188,16 +188,50 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
   });
 
   // Restaurant General Info & Theme Personalization State
-  const [restaurantNameInput, setRestaurantNameInput] = useState(settings?.restaurantName || 'BistroFlow');
-  const [logoUrlInput, setLogoUrlInput] = useState((settings as any)?.logoUrl || '');
-  const [sloganInput, setSloganInput] = useState((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
+  const [restaurantNameInput, setRestaurantNameInput] = useState(
+    settings?.restaurantName || localStorage.getItem('restaurant_name') || "Q' Sandwich"
+  );
+  const [logoUrlInput, setLogoUrlInput] = useState(
+    (settings as any)?.logoUrl || localStorage.getItem('restaurant_logo') || ''
+  );
+  const [sloganInput, setSloganInput] = useState(
+    (settings as any)?.slogan || (settings as any)?.tagline || localStorage.getItem('restaurant_slogan') || 'SISTEMA GASTRONÓMICO & POS'
+  );
+  const [rifInput, setRifInput] = useState(
+    (settings as any)?.rif || localStorage.getItem('restaurant_rif') || ''
+  );
+  const [instagramUrlInput, setInstagramUrlInput] = useState(
+    (settings as any)?.instagramUrl || localStorage.getItem('restaurant_instagram') || ''
+  );
+  const [tiktokUrlInput, setTiktokUrlInput] = useState(
+    (settings as any)?.tiktokUrl || localStorage.getItem('restaurant_tiktok') || ''
+  );
+  const [whatsappUrlInput, setWhatsappUrlInput] = useState(
+    (settings as any)?.whatsappUrl || localStorage.getItem('restaurant_whatsapp_link') || ''
+  );
+  const [facebookUrlInput, setFacebookUrlInput] = useState(
+    (settings as any)?.facebookUrl || localStorage.getItem('restaurant_facebook') || ''
+  );
+  const [websiteUrlInput, setWebsiteUrlInput] = useState(
+    (settings as any)?.websiteUrl || localStorage.getItem('restaurant_website') || ''
+  );
   const [restaurantPhoneInput, setRestaurantPhoneInput] = useState(settings?.restaurantPhone || '+584121234567');
   const [restaurantAddressInput, setRestaurantAddressInput] = useState(settings?.restaurantAddress || 'Caracas, Venezuela');
-  const [brandColorInput, setBrandColorInput] = useState<string>((settings as any)?.brandColor || '#2563eb');
-  const [sidebarThemeInput, setSidebarThemeInput] = useState<'minimalist' | 'brand' | 'dark'>((settings as any)?.sidebarTheme || 'minimalist');
-  const [bgThemeInput, setBgThemeInput] = useState<'kinetic' | 'warm_silk' | 'pure_white' | 'dark_luxury'>((settings as any)?.bgTheme || 'kinetic');
+  const [brandColorInput, setBrandColorInput] = useState<string>(
+    (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb'
+  );
+  const [sidebarThemeInput, setSidebarThemeInput] = useState<'minimalist' | 'brand' | 'dark'>(
+    (settings as any)?.sidebarTheme || (localStorage.getItem('restaurant_sidebar_theme') as any) || 'minimalist'
+  );
+  const [bgThemeInput, setBgThemeInput] = useState<'kinetic' | 'warm_silk' | 'pure_white' | 'dark_luxury'>(
+    (settings as any)?.bgTheme || (localStorage.getItem('restaurant_bg_theme') as any) || 'kinetic'
+  );
+  const brandColor = brandColorInput || '#2563eb';
 
   const updateThemeInstantly = async (sidebarThemeVal: string, bgThemeVal: string, brandColorVal: string) => {
+    localStorage.setItem('restaurant_sidebar_theme', sidebarThemeVal);
+    localStorage.setItem('restaurant_bg_theme', bgThemeVal);
+    localStorage.setItem('restaurant_brand_color', brandColorVal);
     try {
       await setDoc(doc(db, 'settings', 'general'), {
         sidebarTheme: sidebarThemeVal,
@@ -205,8 +239,77 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         brandColor: brandColorVal
       }, { merge: true });
       window.dispatchEvent(new Event('settings_updated'));
+      window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.error('Error auto saving theme:', e);
+    }
+  };
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const maxSize = 256;
+        let { width, height } = img;
+        if (width > height) {
+          if (width > maxSize) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.85);
+          setLogoUrlInput(compressed);
+          localStorage.setItem('restaurant_logo', compressed);
+          try {
+            await setDoc(doc(db, 'settings', 'general'), { logoUrl: compressed }, { merge: true });
+            window.dispatchEvent(new Event('settings_updated'));
+            window.dispatchEvent(new Event('storage'));
+          } catch (err) {
+            console.error('Error auto-saving logo:', err);
+          }
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleQuickSaveBrandInfo = async () => {
+    try {
+      const name = restaurantNameInput.trim() || "Q' Sandwich";
+      const logo = logoUrlInput.trim();
+      const slogan = sloganInput.trim();
+      const rif = rifInput.trim();
+      localStorage.setItem('restaurant_name', name);
+      localStorage.setItem('restaurant_logo', logo);
+      localStorage.setItem('restaurant_slogan', slogan);
+      localStorage.setItem('restaurant_rif', rif);
+      await setDoc(doc(db, 'settings', 'general'), {
+        restaurantName: name,
+        logoUrl: logo,
+        slogan: slogan,
+        rif: rif
+      }, { merge: true });
+      window.dispatchEvent(new Event('settings_updated'));
+      window.dispatchEvent(new Event('storage'));
+      alert('✅ Nombre y Logo guardados con éxito en la base de datos');
+    } catch (e) {
+      alert('Error al guardar datos del restaurante');
     }
   };
   const [deliveryEnabledInput, setDeliveryEnabledInput] = useState(true);
@@ -286,15 +389,80 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
     setPagoMovilIdInput(settings?.pagoMovilId || 'V-12345678');
     setZelleEmailInput(settings?.zelleEmail || 'pagos@bistroflow.com');
     setZelleNameInput(settings?.zelleName || 'BistroFlow SL');
-    setWhatsappPhoneInput(settings?.whatsappPhone || '+584121234567');
-    setRestaurantNameInput(settings?.restaurantName || 'BistroFlow');
-    setLogoUrlInput((settings as any)?.logoUrl || '');
-    setSloganInput((settings as any)?.slogan || (settings as any)?.tagline || 'SISTEMA GASTRONÓMICO & POS');
+    if (settings?.restaurantName) {
+      setRestaurantNameInput(settings.restaurantName);
+    } else {
+      const storedName = localStorage.getItem('restaurant_name');
+      if (storedName) setRestaurantNameInput(storedName);
+    }
+    if ((settings as any)?.logoUrl !== undefined && (settings as any).logoUrl !== '') {
+      setLogoUrlInput((settings as any).logoUrl);
+    } else {
+      const storedLogo = localStorage.getItem('restaurant_logo');
+      if (storedLogo) setLogoUrlInput(storedLogo);
+    }
+    if ((settings as any)?.slogan || (settings as any)?.tagline) {
+      setSloganInput((settings as any).slogan || (settings as any).tagline);
+    } else {
+      const storedSlogan = localStorage.getItem('restaurant_slogan');
+      if (storedSlogan) setSloganInput(storedSlogan);
+    }
+    if ((settings as any)?.rif !== undefined) {
+      setRifInput((settings as any).rif);
+    } else {
+      const storedRif = localStorage.getItem('restaurant_rif');
+      if (storedRif) setRifInput(storedRif);
+    }
+    if ((settings as any)?.instagramUrl !== undefined) {
+      setInstagramUrlInput((settings as any).instagramUrl);
+    } else {
+      const storedIg = localStorage.getItem('restaurant_instagram');
+      if (storedIg) setInstagramUrlInput(storedIg);
+    }
+    if ((settings as any)?.tiktokUrl !== undefined) {
+      setTiktokUrlInput((settings as any).tiktokUrl);
+    } else {
+      const storedTt = localStorage.getItem('restaurant_tiktok');
+      if (storedTt) setTiktokUrlInput(storedTt);
+    }
+    if ((settings as any)?.whatsappUrl !== undefined) {
+      setWhatsappUrlInput((settings as any).whatsappUrl);
+    } else {
+      const storedWa = localStorage.getItem('restaurant_whatsapp_link');
+      if (storedWa) setWhatsappUrlInput(storedWa);
+    }
+    if ((settings as any)?.facebookUrl !== undefined) {
+      setFacebookUrlInput((settings as any).facebookUrl);
+    } else {
+      const storedFb = localStorage.getItem('restaurant_facebook');
+      if (storedFb) setFacebookUrlInput(storedFb);
+    }
+    if ((settings as any)?.websiteUrl !== undefined) {
+      setWebsiteUrlInput((settings as any).websiteUrl);
+    } else {
+      const storedWeb = localStorage.getItem('restaurant_website');
+      if (storedWeb) setWebsiteUrlInput(storedWeb);
+    }
     setRestaurantPhoneInput(settings?.restaurantPhone || '+584121234567');
     setRestaurantAddressInput(settings?.restaurantAddress || 'Caracas, Venezuela');
-    if ((settings as any)?.brandColor) setBrandColorInput((settings as any).brandColor);
-    if ((settings as any)?.sidebarTheme) setSidebarThemeInput((settings as any).sidebarTheme);
-    if ((settings as any)?.bgTheme) setBgThemeInput((settings as any).bgTheme);
+    if ((settings as any)?.brandColor) {
+      setBrandColorInput((settings as any).brandColor);
+    } else {
+      const storedColor = localStorage.getItem('restaurant_brand_color');
+      if (storedColor) setBrandColorInput(storedColor);
+    }
+    if ((settings as any)?.sidebarTheme) {
+      setSidebarThemeInput((settings as any).sidebarTheme);
+    } else {
+      const storedSidebar = localStorage.getItem('restaurant_sidebar_theme') as any;
+      if (storedSidebar) setSidebarThemeInput(storedSidebar);
+    }
+    if ((settings as any)?.bgTheme) {
+      setBgThemeInput((settings as any).bgTheme);
+    } else {
+      const storedBg = localStorage.getItem('restaurant_bg_theme') as any;
+      if (storedBg) setBgThemeInput(storedBg);
+    }
     setDeliveryEnabledInput(settings?.deliveryEnabled !== undefined ? settings?.deliveryEnabled : true);
     setMinDeliveryOrderEnabledInput((settings as any)?.minDeliveryOrderEnabled !== undefined ? (settings as any).minDeliveryOrderEnabled : false);
     setMinDeliveryOrderAmountInput((settings as any)?.minDeliveryOrderAmount !== undefined ? Number((settings as any).minDeliveryOrderAmount) : 10);
@@ -660,6 +828,12 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         restaurantName: restaurantNameInput,
         logoUrl: logoUrlInput,
         slogan: sloganInput,
+        rif: rifInput,
+        instagramUrl: instagramUrlInput,
+        tiktokUrl: tiktokUrlInput,
+        whatsappUrl: whatsappUrlInput,
+        facebookUrl: facebookUrlInput,
+        websiteUrl: websiteUrlInput,
         restaurantPhone: restaurantPhoneInput,
         restaurantAddress: restaurantAddressInput,
         brandColor: brandColorInput,
@@ -683,6 +857,19 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
         dinnerStart: dinnerStartInput,
         dinnerEnd: dinnerEndInput
       }, { merge: true });
+
+      localStorage.setItem('restaurant_name', restaurantNameInput);
+      localStorage.setItem('restaurant_logo', logoUrlInput);
+      localStorage.setItem('restaurant_slogan', sloganInput);
+      localStorage.setItem('restaurant_rif', rifInput);
+      localStorage.setItem('restaurant_instagram', instagramUrlInput);
+      localStorage.setItem('restaurant_tiktok', tiktokUrlInput);
+      localStorage.setItem('restaurant_whatsapp_link', whatsappUrlInput);
+      localStorage.setItem('restaurant_facebook', facebookUrlInput);
+      localStorage.setItem('restaurant_website', websiteUrlInput);
+      localStorage.setItem('restaurant_brand_color', brandColorInput);
+      localStorage.setItem('restaurant_sidebar_theme', sidebarThemeInput);
+      localStorage.setItem('restaurant_bg_theme', bgThemeInput);
 
       const changes: string[] = [];
       if (settings?.restaurantName !== restaurantNameInput) changes.push(`Nombre: ${restaurantNameInput}`);
@@ -894,7 +1081,8 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                 setVariantFormIngId('');
                 setVariantFormQty('1');
               }} 
-              className="flex items-center gap-2 px-4 py-2.5 bg-black hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="flex items-center gap-2 px-4 py-2.5 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer hover:scale-105"
             >
               <Plus size={16} />
               <span>Nuevo Platillo</span>
@@ -947,9 +1135,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   setActiveTab(tab.id as any);
                   playClickSound();
                 }}
+                style={isActive ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
                 className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-slate-900 text-white shadow-md shadow-slate-900/10 scale-[1.01]'
+                    ? 'text-white shadow-md scale-[1.01]'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/80 bg-transparent'
                 }`}
               >
@@ -1216,28 +1405,60 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           <div className="space-y-6">
             {/* LOGO & BRAND IDENTITY */}
             <div className="p-4 bg-slate-50/70 border border-slate-100 rounded-2xl flex flex-col sm:flex-row items-center gap-4">
-              <div className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
+              <div className="w-20 h-20 rounded-2xl border-2 border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-xs relative group">
                 {logoUrlInput ? (
                   <img src={logoUrlInput} alt="Logo" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full bg-[#EEF4FF] text-blue-600 font-black text-lg flex items-center justify-center">
+                  <div className="w-full h-full bg-[#EEF4FF] text-blue-600 font-black text-2xl flex items-center justify-center">
                     {(restaurantNameInput || 'B').charAt(0).toUpperCase()}
                   </div>
                 )}
+                {logoUrlInput && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setLogoUrlInput('');
+                      localStorage.removeItem('restaurant_logo');
+                      try {
+                        await setDoc(doc(db, 'settings', 'general'), { logoUrl: '' }, { merge: true });
+                        window.dispatchEvent(new Event('settings_updated'));
+                        window.dispatchEvent(new Event('storage'));
+                      } catch {}
+                    }}
+                    title="Eliminar Logo"
+                    className="absolute inset-0 bg-black/60 text-white text-xs font-bold flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    Quitar
+                  </button>
+                )}
               </div>
-              <div className="flex-1 w-full space-y-1.5">
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  Logo / Imagen del Negocio (URL)
-                </label>
+              <div className="flex-1 w-full space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Logo / Imagen del Negocio
+                  </label>
+                  <label className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors">
+                    <span>📁 Subir Imagen (JPG/PNG)</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleLogoFileUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+                </div>
                 <input 
                   type="text" 
                   value={logoUrlInput}
-                  onChange={e => setLogoUrlInput(e.target.value)}
+                  onChange={e => {
+                    setLogoUrlInput(e.target.value);
+                    localStorage.setItem('restaurant_logo', e.target.value);
+                  }}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 outline-none focus:border-black font-medium transition-colors text-xs"
-                  placeholder="https://ejemplo.com/logo.png"
+                  placeholder="https://ejemplo.com/logo.png o sube una imagen directa"
                 />
                 <span className="text-[10px] text-slate-400 block">
-                  Aparece en el círculo superior del menú lateral. Si está vacío se mostrará la inicial con estilo circular.
+                  Aparece en la barra superior y menú del cliente. Al subir una foto se comprime y guarda de inmediato en la base de datos.
                 </span>
               </div>
             </div>
@@ -1247,7 +1468,10 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
               <input 
                 type="text" 
                 value={restaurantNameInput}
-                onChange={e => setRestaurantNameInput(e.target.value)}
+                onChange={e => {
+                  setRestaurantNameInput(e.target.value);
+                  localStorage.setItem('restaurant_name', e.target.value);
+                }}
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
                 placeholder="Nombre comercial"
               />
@@ -1259,11 +1483,44 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
               <input 
                 type="text" 
                 value={sloganInput}
-                onChange={e => setSloganInput(e.target.value)}
+                onChange={e => {
+                  setSloganInput(e.target.value);
+                  localStorage.setItem('restaurant_slogan', e.target.value);
+                }}
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
-                placeholder="Ej. TU PARADA DE SABOR EN LA VÍA... o SISTEMA GASTRONÓMICO & POS"
+                placeholder="Ej. TU PARADA DE SABOR EN LA VÍA... o Maquillaje, Skincare Coreano"
               />
-              <span className="text-[10px] text-slate-400 mt-1 block">Texto secundario que se muestra debajo del nombre en el menú lateral.</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">Texto secundario que se muestra debajo del nombre en el menú y pie de página.</span>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                RIF / Documento Fiscal (Opcional)
+              </label>
+              <input 
+                type="text" 
+                value={rifInput}
+                onChange={e => {
+                  setRifInput(e.target.value);
+                  localStorage.setItem('restaurant_rif', e.target.value);
+                }}
+                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
+                placeholder="Ej. J-12345678-9 o V-12345678-0"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Se mostrará de forma opcional en el pie de página del menú y en los comprobantes de pago.
+              </span>
+            </div>
+
+            {/* Quick Save Identity button */}
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleQuickSaveBrandInfo}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl shadow-sm transition-all hover:scale-[1.02] active:scale-95 cursor-pointer flex items-center gap-2"
+              >
+                <span>💾 Guardar Datos Identidad y RIF</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1286,6 +1543,110 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
                   className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-black font-medium transition-colors text-sm"
                   placeholder="Ej. Las Mercedes, Caracas"
                 />
+              </div>
+            </div>
+
+            {/* REDES SOCIALES & ENLACES DE CONTACTO */}
+            <div className="pt-6 border-t border-slate-100 space-y-4">
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                  <span>🌐 Redes Sociales & Enlaces de Contacto</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Los enlaces configurados mostrarán sus íconos en el pie de página del catálogo (como en la referencia).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Instagram */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                    <Instagram size={14} className="text-pink-600" />
+                    <span>Instagram</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={instagramUrlInput}
+                    onChange={e => {
+                      setInstagramUrlInput(e.target.value);
+                      localStorage.setItem('restaurant_instagram', e.target.value);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 outline-none focus:border-black text-xs font-medium"
+                    placeholder="Ej. @peoniasshop o https://instagram.com/peoniasshop"
+                  />
+                </div>
+
+                {/* TikTok */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                    <span className="text-sm">🎵</span>
+                    <span>TikTok</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={tiktokUrlInput}
+                    onChange={e => {
+                      setTiktokUrlInput(e.target.value);
+                      localStorage.setItem('restaurant_tiktok', e.target.value);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 outline-none focus:border-black text-xs font-medium"
+                    placeholder="Ej. @peoniasshop o https://tiktok.com/@peoniasshop"
+                  />
+                </div>
+
+                {/* WhatsApp */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                    <MessageCircle size={14} className="text-emerald-600" />
+                    <span>Enlace WhatsApp</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={whatsappUrlInput}
+                    onChange={e => {
+                      setWhatsappUrlInput(e.target.value);
+                      localStorage.setItem('restaurant_whatsapp_link', e.target.value);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 outline-none focus:border-black text-xs font-medium"
+                    placeholder="Ej. +584121234567 o https://wa.me/584121234567"
+                  />
+                </div>
+
+                {/* Facebook */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                    <span className="text-sm">📘</span>
+                    <span>Facebook</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={facebookUrlInput}
+                    onChange={e => {
+                      setFacebookUrlInput(e.target.value);
+                      localStorage.setItem('restaurant_facebook', e.target.value);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 outline-none focus:border-black text-xs font-medium"
+                    placeholder="Ej. https://facebook.com/peoniasshop"
+                  />
+                </div>
+
+                {/* Website */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                    <Globe size={14} className="text-blue-500" />
+                    <span>Sitio Web / Enlace Principal (Opcional)</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={websiteUrlInput}
+                    onChange={e => {
+                      setWebsiteUrlInput(e.target.value);
+                      localStorage.setItem('restaurant_website', e.target.value);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 outline-none focus:border-black text-xs font-medium"
+                    placeholder="Ej. https://peoniasshop.com"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1978,7 +2339,11 @@ export default function MenuSettingsView({ currentUser }: { currentUser?: any })
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-100">
-            <button onClick={handleSaveGeneralSettings} className="w-full bg-black text-white p-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform">
+            <button 
+              onClick={handleSaveGeneralSettings} 
+              style={{ backgroundColor: brandColor, color: '#ffffff' }}
+              className="w-full text-white p-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform cursor-pointer"
+            >
               <Save size={18} /> Guardar Configuración General
             </button>
           </div>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, signInAnonymously, signOut } from 'firebase/auth';
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
@@ -27,6 +27,7 @@ import ChatView from './views/ChatView';
 import MyShiftView from './views/MyShiftView';
 import { useRestaurantData } from './hooks/useRestaurantData';
 import { useCurrency } from './context/CurrencyContext';
+import { updateSEOMetadata } from './lib/seo';
 import { logAction } from './lib/logger';
 import NotificationManager from './components/NotificationManager';
 import TopBar from './components/TopBar';
@@ -134,40 +135,54 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
+    updateSEOMetadata({
+      restaurantName: settings?.restaurantName,
+      slogan: settings?.slogan,
+      logoUrl: settings?.logoUrl
+    });
+  }, [settings?.restaurantName, settings?.slogan, settings?.logoUrl]);
+
+  const prevRoleRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser?.role && currentUser.role !== prevRoleRef.current) {
+      prevRoleRef.current = currentUser.role;
       if (currentUser.role === 'waiter') setActiveView('waiter');
       else if (currentUser.role === 'cook') setActiveView('kitchen');
       else if (currentUser.role === 'finance') setActiveView('caja');
       else if (currentUser.role === 'admin') setActiveView('dashboard');
     }
-  }, [currentUser]);
+  }, [currentUser?.role]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      if (fbUser || fallbackRole) {
-        const storedRole = fallbackRole || localStorage.getItem('demo_role') || 'client';
+    const restoreSession = (fbUser: any) => {
+      const storedRole = localStorage.getItem('demo_role') || localStorage.getItem('demo_fallback_role') || fallbackRole;
+      
+      // If user has a valid authenticated staff role or active Firebase user
+      if ((storedRole && storedRole !== 'client') || (fbUser && storedRole && storedRole !== 'client')) {
+        const activeRole = (storedRole && storedRole !== 'client') ? storedRole : 'client';
         const storedName = localStorage.getItem('demo_user_name');
         const storedEmail = localStorage.getItem('demo_user_email') || '';
         const storedPin = localStorage.getItem('demo_user_pin') || '';
         
         let userName = storedName;
         if (!storedName) {
-          if (storedRole === 'admin') userName = 'Administrador';
-          else if (storedRole === 'waiter') userName = 'Mesero';
-          else if (storedRole === 'cook') userName = 'Cocina';
-          else if (storedRole === 'client') userName = 'Cliente';
-          else if (storedRole === 'finance') userName = 'Caja / Finanzas';
+          if (activeRole === 'admin') userName = 'Thomas Zambrano';
+          else if (activeRole === 'waiter') userName = 'Mesero';
+          else if (activeRole === 'cook') userName = 'Cocina';
+          else if (activeRole === 'client') userName = 'Cliente';
+          else if (activeRole === 'finance') userName = 'Caja / Finanzas';
           else userName = 'Colaborador';
         }
 
-        const storedEmpId = localStorage.getItem('demo_employee_id') || ('fallback-' + storedRole);
+        const storedEmpId = localStorage.getItem('demo_employee_id') || ('employee-' + activeRole);
 
         setCurrentUser({
-          id: fbUser?.uid || 'offline-user-id',
-          uid: fbUser?.uid || 'offline-user-id',
+          id: fbUser?.uid || ('user-' + storedEmpId),
+          uid: fbUser?.uid || ('user-' + storedEmpId),
           employeeId: storedEmpId,
           name: userName,
-          role: storedRole as Role,
+          role: activeRole as Role,
           email: storedEmail,
           pin: storedPin
         } as User & { uid: string; employeeId: string });
@@ -175,9 +190,26 @@ export default function App() {
         setCurrentUser(null);
       }
       setIsLoading(false);
+    };
+
+    // Immediately restore stored session so there is zero latency/flash on Vercel
+    restoreSession(auth.currentUser);
+
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      restoreSession(fbUser);
     });
 
-    return () => unsubscribe();
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key || e.key === 'demo_role' || e.key === 'demo_fallback_role' || e.key === 'demo_employee_id' || e.key === 'demo_user_email' || e.key === 'demo_user_name') {
+        restoreSession(auth.currentUser);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, [fallbackRole]);
 
   const handleLogout = () => {

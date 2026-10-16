@@ -65,6 +65,7 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
     formatWithBs 
   } = useCurrency();
   const exchangeRate = currentRateBs || settings?.exchangeRate || 874.73;
+  const brandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
   // Listen for global search selection
@@ -1636,8 +1637,9 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
                   <button
                     key={f.id}
                     onClick={() => setTableFilter(f.id as any)}
+                    style={tableFilter === f.id ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
                     className={`px-3 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      tableFilter === f.id ? 'bg-black text-white shadow-md' : 'text-slate-600 hover:text-black hover:bg-white/80'
+                      tableFilter === f.id ? 'text-white shadow-md' : 'text-slate-600 hover:text-black hover:bg-white/80'
                     }`}
                   >
                     {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
@@ -1783,7 +1785,8 @@ export default function WaiterView({ currentUser }: { currentUser?: any }) {
 
                 <button
                   onClick={() => setIsCreatingDelivery(true)}
-                  className="bg-black hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
+                  style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                  className="text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
                 >
                   <Plus size={14} /> Nuevo Pedido
                 </button>
