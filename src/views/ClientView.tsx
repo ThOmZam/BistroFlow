@@ -1143,7 +1143,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     return 1; // Default
   };
 
-  const renderHorizontalCard = (item: MenuItem, badgeText?: string, badgeColor = "bg-amber-400 text-slate-900") => {
+  const renderHorizontalCard = (item: MenuItem, badgeText?: string, badgeColor = "bg-amber-400 text-slate-900", cardKey?: string) => {
     const countInCart = cart.find(c => c.item.id === item.id)?.qty || 0;
     const { isAvailable, timingLabel } = getMenuItemAvailability(item);
     const stockAlert = getMenuItemStockAlert(item, ingredients);
@@ -1152,7 +1152,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
     return (
       <div 
-        key={item.id}
+        key={cardKey || item.id}
         onClick={() => { if (!isOutOfStock) { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); } }}
         className="w-64 sm:w-72 bg-white rounded-[24px] border border-slate-100/90 overflow-hidden shrink-0 snap-start shadow-xs hover:shadow-md transition-all group cursor-pointer flex flex-col justify-between"
       >
@@ -1254,7 +1254,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
     );
   };
 
-  const renderVerticalDishCard = (item: MenuItem) => {
+  const renderVerticalDishCard = (item: MenuItem, cardKey?: string) => {
     const countInCart = cart.find(c => c.item.id === item.id)?.qty || 0;
     const { isAvailable, timingLabel } = getMenuItemAvailability(item);
     const stockAlert = getMenuItemStockAlert(item, ingredients);
@@ -1263,7 +1263,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
     return (
       <div 
-        key={item.id}
+        key={cardKey || item.id}
         onClick={() => { if (!isOutOfStock) { setSelectedItem(item); setModalQty(1); setExcludedIds([]); setExtraNote(''); } }}
         className={`bg-white rounded-[24px] border border-slate-100 overflow-hidden flex flex-col hover:shadow-xl hover:-translate-y-0.5 transition-all group cursor-pointer ${
           (!isAvailable || !isRestaurantOpen || isOutOfStock) ? 'opacity-85' : ''
@@ -1687,7 +1687,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                     </div>
 
                     <div className="flex overflow-x-auto gap-4 pb-3 pt-1 scrollbar-hide snap-x snap-mandatory">
-                      {catItems.map(item => renderHorizontalCard(item))}
+                      {catItems.map((item, idx) => renderHorizontalCard(item, undefined, undefined, `${cat}-${item.id}-${idx}`))}
                     </div>
                   </div>
                 );
@@ -1695,7 +1695,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </div>
           ) : (
             <div className="flex overflow-x-auto gap-4 pb-3 pt-1 scrollbar-hide snap-x snap-mandatory">
-              {filteredMenu.map(item => renderHorizontalCard(item))}
+              {filteredMenu.map((item, idx) => renderHorizontalCard(item, undefined, undefined, `filtered-${item.id}-${idx}`))}
             </div>
           )}
         </section>
@@ -1734,7 +1734,7 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
-              {filteredMenu.map(item => renderVerticalDishCard(item))}
+              {filteredMenu.map((item, idx) => renderVerticalDishCard(item, `vertical-${item.id}-${idx}`))}
             </div>
           )}
         </section>
@@ -2260,30 +2260,6 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                       <p className="text-[10px] font-bold text-rose-600">
                         {couponError}
                       </p>
-                    )}
-
-                    {/* Quick Available Coupon Chips */}
-                    {coupons && coupons.filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now())).length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[9px] font-bold uppercase text-slate-400">Disponibles:</span>
-                        {coupons
-                          .filter(c => c.status === 'active' && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now()))
-                          .slice(0, 3)
-                          .map(c => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => {
-                                setCouponCodeInput(c.code);
-                                handleApplyCoupon(c.code);
-                              }}
-                              className="text-[10px] font-mono font-black bg-indigo-50 border border-indigo-200/70 text-indigo-700 px-2 py-0.5 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>🏷️ {c.code}</span>
-                              <span className="text-[9px] text-indigo-500 font-sans">(-{c.discountType === 'percentage' ? `${c.discountValue}%` : `$${c.discountValue}`})</span>
-                            </button>
-                          ))}
-                      </div>
                     )}
                   </div>
                 )}
