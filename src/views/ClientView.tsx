@@ -21,6 +21,7 @@ import {
   Minus,
   Plus,
   X,
+  UserCheck,
   Download,
   MessageCircle,
   ExternalLink,
@@ -51,7 +52,7 @@ import PromotionsBanner from '../components/PromotionsBanner';
 import FlashDealsBanner from '../components/FlashDealsBanner';
 import { getMenuItemStockAlert } from '../lib/stockUtils';
 import { useCurrency } from '../context/CurrencyContext';
-import { loginStaff } from '../lib/authService';
+import { loginStaff, verifyStaffEmail } from '../lib/authService';
 import { updateSEOMetadata } from '../lib/seo';
 import ShareDishModal from '../components/ShareDishModal';
 import ThermalReceiptTicket from '../components/ThermalReceiptTicket';
@@ -380,7 +381,8 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
 
   // Staff Login Modal State (Secure Enterprise Portal)
   const [isStaffLoginOpen, setIsStaffLoginOpen] = useState(false);
-  const [staffAuthMode, setStaffAuthMode] = useState<'credentials' | 'pin'>('credentials');
+  const [staffAuthStep, setStaffAuthStep] = useState<1 | 2>(1);
+  const [staffVerifiedAccount, setStaffVerifiedAccount] = useState<{ name?: string; role?: string } | null>(null);
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -1059,6 +1061,41 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
         }
       }
     } catch {}
+  };
+
+  const handleVerifyStaffEmail = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setLoginError('');
+
+    const cleanEmail = staffEmail.trim();
+    if (!cleanEmail) {
+      setLoginError('Por favor ingresa tu correo electrónico.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+
+    try {
+      const res = await verifyStaffEmail(cleanEmail);
+      if (!res.exists) {
+        setLoginError(res.error || 'No se encontró ninguna cuenta registrada con este correo.');
+        setIsLoggingIn(false);
+        return;
+      }
+
+      setStaffVerifiedAccount({
+        name: res.name,
+        role: res.role
+      });
+      setStaffAuthStep(2);
+      setPin('');
+      setLoginError('');
+    } catch (err) {
+      console.error('Email verification error:', err);
+      setLoginError('Error al verificar el correo electrónico.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const handleStaffLogin = async (e?: React.FormEvent) => {
@@ -2937,132 +2974,207 @@ export default function ClientView({ onLogout }: { onLogout: () => void }) {
                 </div>
               )}
 
-              {/* UNIFIED FORM: CORREO Y PIN */}
-              <form onSubmit={handleStaffLogin} className="space-y-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Correo Electrónico
-                  </label>
-                  <div className="relative">
-                    <Mail size={15} className="absolute left-3.5 top-3 text-slate-400" />
-                    <input 
-                      type="email"
-                      required
-                      disabled={isLoggingIn || lockoutInfo?.isLocked}
-                      value={staffEmail}
-                      onChange={(e) => setStaffEmail(e.target.value)}
-                      placeholder="ej: usuario@restaurante.com"
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold text-slate-600">
-                      PIN de Acceso
+              {/* STEP 1: VERIFICAR CORREO */}
+              {staffAuthStep === 1 && (
+                <form onSubmit={handleVerifyStaffEmail} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Correo Electrónico
                     </label>
-                    <span className="text-[10px] text-slate-400 font-medium">4 a 6 dígitos</span>
+                    <div className="relative">
+                      <Mail size={15} className="absolute left-3.5 top-3.5 text-slate-400" />
+                      <input 
+                        type="email"
+                        required
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        value={staffEmail}
+                        onChange={(e) => {
+                          setStaffEmail(e.target.value);
+                          setLoginError('');
+                        }}
+                        placeholder="ej: usuario@restaurante.com"
+                        className="w-full pl-10 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                      />
+                    </div>
                   </div>
-                  <div className="relative">
-                    <KeyRound size={15} className="absolute left-3.5 top-3 text-slate-400" />
-                    <input 
-                      type={showPassword ? 'text' : 'password'}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={6}
-                      required
-                      disabled={isLoggingIn || lockoutInfo?.isLocked}
-                      value={pin}
-                      onChange={(e) => {
-                        setPin(e.target.value.replace(/\D/g, ''));
-                        setLoginError('');
-                      }}
-                      placeholder="••••"
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold tracking-widest focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
-                    />
+
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn || lockoutInfo?.isLocked || !staffEmail.trim()}
+                    style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                    className="w-full py-3.5 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isLoggingIn ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Verificando correo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Siguiente</span>
+                        <ArrowRight size={16} />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {/* STEP 2: INGRESAR PIN */}
+              {staffAuthStep === 2 && (
+                <form onSubmit={handleStaffLogin} className="space-y-3.5">
+                  {/* Account Card */}
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 font-black text-xs flex items-center justify-center shrink-0 border border-emerald-200">
+                        <UserCheck size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1">
+                          <h4 className="font-black text-slate-900 text-xs truncate">
+                            {staffVerifiedAccount?.name || 'Colaborador'}
+                          </h4>
+                          <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-bold truncate">
+                          {staffVerifiedAccount?.role?.toUpperCase() || 'PERSONAL'} • <span className="font-mono text-slate-400 font-normal">{staffEmail}</span>
+                        </p>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-black cursor-pointer"
+                      onClick={() => {
+                        setStaffAuthStep(1);
+                        setPin('');
+                        setLoginError('');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-600 font-bold text-[10px] border border-slate-200 transition-colors cursor-pointer shrink-0"
                     >
-                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      Cambiar
                     </button>
                   </div>
-                </div>
 
-                {/* Keypad for Quick Mobile / Touch Entry */}
-                <div className="pt-1">
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-slate-600">
+                        PIN de Acceso
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-medium">4 a 6 dígitos</span>
+                    </div>
+                    <div className="relative">
+                      <KeyRound size={15} className="absolute left-3.5 top-3 text-slate-400" />
+                      <input 
+                        type={showPassword ? 'text' : 'password'}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        required
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        value={pin}
+                        onChange={(e) => {
+                          setPin(e.target.value.replace(/\D/g, ''));
+                          setLoginError('');
+                        }}
+                        placeholder="••••"
+                        className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold tracking-widest focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                      />
                       <button
-                        key={num}
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-black cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Keypad for Quick Mobile / Touch Entry */}
+                  <div className="pt-1">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          disabled={isLoggingIn || lockoutInfo?.isLocked}
+                          onClick={() => {
+                            if (pin.length < 6) setPin(prev => prev + num);
+                            setLoginError('');
+                          }}
+                          className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 active:scale-95 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
+                        >
+                          {num}
+                        </button>
+                      ))}
+                      <button 
                         type="button"
                         disabled={isLoggingIn || lockoutInfo?.isLocked}
                         onClick={() => {
-                          if (pin.length < 6) setPin(prev => prev + num);
+                          setPin(prev => prev.slice(0, -1));
+                          setLoginError('');
+                        }}
+                        className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                      >
+                        Borrar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        onClick={() => {
+                          if (pin.length < 6) setPin(prev => prev + '0');
                           setLoginError('');
                         }}
                         className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 active:scale-95 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
                       >
-                        {num}
+                        0
                       </button>
-                    ))}
-                    <button 
-                      type="button"
-                      disabled={isLoggingIn || lockoutInfo?.isLocked}
-                      onClick={() => {
-                        setPin(prev => prev.slice(0, -1));
-                        setLoginError('');
-                      }}
-                      className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
-                    >
-                      Borrar
-                    </button>
+                      <button
+                        type="button"
+                        disabled={isLoggingIn || lockoutInfo?.isLocked}
+                        onClick={() => {
+                          setPin('');
+                          setLoginError('');
+                        }}
+                        className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
                     <button
                       type="button"
-                      disabled={isLoggingIn || lockoutInfo?.isLocked}
                       onClick={() => {
-                        if (pin.length < 6) setPin(prev => prev + '0');
-                        setLoginError('');
-                      }}
-                      className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 active:scale-95 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isLoggingIn || lockoutInfo?.isLocked}
-                      onClick={() => {
+                        setStaffAuthStep(1);
                         setPin('');
                         setLoginError('');
                       }}
-                      className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                      className="px-3.5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0"
                     >
-                      Limpiar
+                      Atrás
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={isLoggingIn || lockoutInfo?.isLocked || pin.length < 4}
+                      style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                      className="flex-1 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {isLoggingIn ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Verificando Credenciales...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound size={15} />
+                          <span>Iniciar Sesión</span>
+                        </>
+                      )}
                     </button>
                   </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoggingIn || lockoutInfo?.isLocked || !staffEmail.trim() || pin.length < 4}
-                  style={{ backgroundColor: brandColor, color: '#ffffff' }}
-                  className="w-full mt-2 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {isLoggingIn ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Verificando Credenciales...</span>
-                    </>
-                  ) : (
-                    <>
-                      <KeyRound size={15} />
-                      <span>Iniciar Sesión</span>
-                    </>
-                  )}
-                </button>
-              </form>
+                </form>
+              )}
 
               <div className="text-center text-[10px] text-slate-400 mt-4 pt-3 border-t border-slate-100 flex items-center justify-center gap-1.5">
                 <Lock size={11} className="text-slate-400" />

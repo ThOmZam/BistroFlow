@@ -1,17 +1,64 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, Lock, Mail, KeyRound, Eye, EyeOff } from 'lucide-react';
-import { loginStaff } from '../lib/authService';
+import { ArrowRight, Lock, Mail, KeyRound, Eye, EyeOff, CheckCircle2, UserCheck, ArrowLeft } from 'lucide-react';
+import { loginStaff, verifyStaffEmail } from '../lib/authService';
 
 export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: string) => void }) {
   const brandColor = localStorage.getItem('restaurant_brand_color') || '#2563eb';
+  
+  // Step 1: Email verification, Step 2: PIN entry
+  const [authStep, setAuthStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
+  const [verifiedAccount, setVerifiedAccount] = useState<{ name?: string; role?: string } | null>(null);
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
   const [lockoutInfo, setLockoutInfo] = useState<{ isLocked: boolean; remainingMinutes?: number } | null>(null);
+
+  const roleLabels: Record<string, string> = {
+    admin: 'Administrador',
+    waiter: 'Mesero / Salonero',
+    cook: 'Cocina / Chef',
+    finance: 'Caja / Finanzas',
+    client: 'Cliente'
+  };
+
+  const handleVerifyEmail = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Por favor ingresa tu correo electrónico.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const res = await verifyStaffEmail(cleanEmail);
+      if (!res.exists) {
+        setError(res.error || 'No se encontró ninguna cuenta registrada con este correo.');
+        setIsLoading(false);
+        return;
+      }
+
+      setVerifiedAccount({
+        name: res.name,
+        role: res.role
+      });
+      setAuthStep(2);
+      setPin('');
+      setError('');
+    } catch (err) {
+      console.error('Email verification error:', err);
+      setError('Error al verificar el correo electrónico. Inténtalo de nuevo.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleNumberClick = (num: string) => {
     if (pin.length < 6) {
@@ -34,6 +81,7 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
 
     if (!cleanEmail) {
       setError('Ingresa tu correo electrónico.');
+      setAuthStep(1);
       return;
     }
 
@@ -58,7 +106,7 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
       }
 
       if (!res.success) {
-        setError(res.error || 'Credenciales inválidas. Verifica tu correo y PIN.');
+        setError(res.error || 'PIN incorrecto. Verifica e intenta de nuevo.');
         if (typeof res.attemptsRemaining === 'number') {
           setAttemptsRemaining(res.attemptsRemaining);
         }
@@ -101,8 +149,14 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
             <div className="w-12 h-12 bg-slate-100 text-slate-800 rounded-2xl mx-auto flex items-center justify-center mb-3 border border-slate-200 shadow-xs">
               <KeyRound size={22} className="text-slate-800" />
             </div>
-            <h2 className="text-2xl font-black tracking-tight text-slate-900">Iniciar Sesión</h2>
-            <p className="text-slate-400 text-xs mt-0.5">Ingresa tu correo y PIN para acceder</p>
+            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+              {authStep === 1 ? 'Iniciar Sesión' : 'Ingresa tu PIN'}
+            </h2>
+            <p className="text-slate-400 text-xs mt-0.5">
+              {authStep === 1 
+                ? 'Paso 1 de 2: Ingresa tu correo electrónico' 
+                : 'Paso 2 de 2: Confirma tu PIN de acceso para ingresar'}
+            </p>
           </div>
 
           {/* Lockout Warning */}
@@ -113,7 +167,7 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
                 <span>Acceso Temporalmente Bloqueado</span>
               </div>
               <p className="text-[11px] font-medium text-rose-600">
-                Se detectaron 5 intentos fallidos. Bloqueo activo durante {lockoutInfo.remainingMinutes || 15} min.
+                Se detectaron varios intentos fallidos. Bloqueo activo durante {lockoutInfo.remainingMinutes || 15} min.
               </p>
             </div>
           )}
@@ -124,117 +178,196 @@ export default function AuthView({ onOfflineLogin }: { onOfflineLogin?: (role: s
             </div>
           )}
 
-          {/* Form Correo y PIN */}
-          <form onSubmit={handleLogin} className="space-y-3.5">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Correo Electrónico
-              </label>
-              <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-3 text-slate-400" />
-                <input 
-                  type="email"
-                  required
-                  disabled={isLoading || lockoutInfo?.isLocked}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ej: usuario@restaurante.com"
-                  className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-[11px] font-bold text-slate-600">
-                  PIN de Acceso
+          {/* STEP 1: VERIFICAR CORREO */}
+          {authStep === 1 && (
+            <form onSubmit={handleVerifyEmail} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                  Correo Electrónico Institucional
                 </label>
-                <span className="text-[10px] text-slate-400 font-medium">4 a 6 dígitos</span>
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3.5 top-3.5 text-slate-400" />
+                  <input 
+                    type="email"
+                    required
+                    disabled={isLoading || lockoutInfo?.isLocked}
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError('');
+                    }}
+                    placeholder="ej: usuario@restaurante.com"
+                    className="w-full pl-10 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <KeyRound size={15} className="absolute left-3.5 top-3 text-slate-400" />
-                <input 
-                  type={showPin ? 'text' : 'password'}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  required
-                  disabled={isLoading || lockoutInfo?.isLocked}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="••••"
-                  className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold tracking-widest focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
-                />
+
+              <button
+                type="submit"
+                disabled={isLoading || lockoutInfo?.isLocked || !email.trim()}
+                style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                className="w-full py-3.5 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Verificando correo...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Siguiente</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* STEP 2: INGRESAR PIN */}
+          {authStep === 2 && (
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Account Badge */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 font-black text-sm flex items-center justify-center shrink-0 border border-emerald-200">
+                    <UserCheck size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="font-black text-slate-900 text-xs truncate">
+                        {verifiedAccount?.name || 'Colaborador'}
+                      </h4>
+                      <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-bold truncate">
+                      {roleLabels[verifiedAccount?.role || ''] || verifiedAccount?.role || 'Personal'} • <span className="font-mono text-slate-400 font-normal">{email}</span>
+                    </p>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="absolute right-3 top-2.5 text-slate-400 hover:text-black cursor-pointer"
+                  onClick={() => {
+                    setAuthStep(1);
+                    setPin('');
+                    setError('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 font-bold text-[10px] border border-slate-200 transition-colors cursor-pointer shrink-0"
                 >
-                  {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+                  Cambiar
                 </button>
               </div>
-            </div>
 
-            {/* Quick numeric pad */}
-            <div className="pt-1">
-              <div className="grid grid-cols-3 gap-1.5 mb-3">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-600">
+                    PIN de Acceso
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-medium">4 a 6 dígitos</span>
+                </div>
+                <div className="relative">
+                  <KeyRound size={15} className="absolute left-3.5 top-3 text-slate-400" />
+                  <input 
+                    type={showPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    required
+                    disabled={isLoading || lockoutInfo?.isLocked}
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(e.target.value.replace(/\D/g, ''));
+                      setError('');
+                    }}
+                    placeholder="••••"
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold tracking-widest focus:outline-none focus:border-black focus:bg-white transition-all disabled:opacity-50"
+                  />
                   <button
-                    key={num}
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-black cursor-pointer"
+                  >
+                    {showPin ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick numeric pad */}
+              <div className="pt-1">
+                <div className="grid grid-cols-3 gap-1.5 mb-2">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      disabled={isLoading || lockoutInfo?.isLocked}
+                      onClick={() => handleNumberClick(num)}
+                      className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
+                    >
+                      {num}
+                    </button>
+                  ))}
+                  <button 
                     type="button"
                     disabled={isLoading || lockoutInfo?.isLocked}
-                    onClick={() => handleNumberClick(num)}
+                    onClick={handleDelete}
+                    className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                  >
+                    Borrar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isLoading || lockoutInfo?.isLocked}
+                    onClick={() => handleNumberClick('0')}
                     className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
                   >
-                    {num}
+                    0
                   </button>
-                ))}
-                <button 
-                  type="button"
-                  disabled={isLoading || lockoutInfo?.isLocked}
-                  onClick={handleDelete}
-                  className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
-                >
-                  Borrar
-                </button>
+                  <button
+                    type="button"
+                    disabled={isLoading || lockoutInfo?.isLocked}
+                    onClick={() => setPin('')}
+                    className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  disabled={isLoading || lockoutInfo?.isLocked}
-                  onClick={() => handleNumberClick('0')}
-                  className="h-10 w-full text-base font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all cursor-pointer text-slate-800 disabled:opacity-40"
+                  onClick={() => {
+                    setAuthStep(1);
+                    setPin('');
+                    setError('');
+                  }}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
                 >
-                  0
+                  <ArrowLeft size={15} />
+                  <span>Atrás</span>
                 </button>
+
                 <button
-                  type="button"
-                  disabled={isLoading || lockoutInfo?.isLocked}
-                  onClick={() => setPin('')}
-                  className="h-10 w-full text-[10px] font-bold rounded-xl bg-slate-50 hover:bg-slate-100 flex items-center justify-center transition-all text-slate-400 uppercase tracking-wider cursor-pointer disabled:opacity-40"
+                  type="submit"
+                  disabled={isLoading || lockoutInfo?.isLocked || pin.length < 4}
+                  style={{ backgroundColor: brandColor, color: '#ffffff' }}
+                  className="flex-1 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Limpiar
+                  {isLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Iniciando sesión...</span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound size={16} />
+                      <span>Ingresar al Sistema</span>
+                    </>
+                  )}
                 </button>
               </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading || lockoutInfo?.isLocked || !email.trim() || pin.length < 4}
-              style={{ backgroundColor: brandColor, color: '#ffffff' }}
-              className="w-full mt-2 py-3 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md hover:scale-[1.01] active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Verificando Credenciales...</span>
-                </>
-              ) : (
-                <>
-                  <KeyRound size={16} />
-                  <span>Ingresar al Sistema</span>
-                </>
-              )}
-            </button>
-          </form>
+            </form>
+          )}
 
           {attemptsRemaining !== null && !lockoutInfo?.isLocked && (
             <div className="mt-4 text-center text-[10px] text-slate-400 font-mono">

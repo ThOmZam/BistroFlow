@@ -648,7 +648,7 @@ export default function Sidebar({
       {/* Mobile Suspended Floating Pill Navigation Dock (Menú Flotante Píldora) */}
       {!isInsideTable && (
         <>
-          <nav className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white backdrop-blur-xl border border-slate-800/90 shadow-[0_16px_40px_rgba(0,0,0,0.35)] rounded-full px-2 py-1.5 flex items-center justify-between gap-1 w-[94vw] max-w-md ring-1 ring-white/10 select-none">
+          <nav className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/95 text-slate-800 backdrop-blur-xl border border-slate-200/90 shadow-[0_12px_35px_rgba(0,0,0,0.12)] rounded-full px-2 py-1.5 flex items-center justify-between gap-1 w-[94vw] max-w-md ring-1 ring-slate-900/5 select-none">
             {mobilePrimaryTabs.map((item) => {
               const isSelected = activeView === item.id && !isMobileMoreOpen;
               const hasBadge = !!item.badge;
@@ -665,17 +665,17 @@ export default function Sidebar({
                   className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
                     isSelected 
                       ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
-                      : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full px-2.5 py-1.5 font-medium'
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
                     <div className="relative flex items-center justify-center">
                       <IconComponent 
                         size={18} 
-                        className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-300 stroke-[1.8]'} 
+                        className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.8]'} 
                       />
                       {hasBadge && (
-                        <span className="absolute -top-1.5 -right-2 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-slate-900">
+                        <span className="absolute -top-1.5 -right-2 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-white">
                           {item.badge}
                         </span>
                       )}
@@ -697,17 +697,17 @@ export default function Sidebar({
               className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
                 isMoreSelected || isMobileMoreOpen
                   ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
-                  : 'text-slate-400 hover:text-white hover:bg-white/10 rounded-full px-2.5 py-1.5 font-medium'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full px-2.5 py-1.5 font-medium'
               }`}
             >
               <div className="flex items-center gap-1.5">
                 <div className="relative flex items-center justify-center">
                   <Sparkles 
                     size={18} 
-                    className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-300 stroke-[1.8]'} 
+                    className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.8]'} 
                   />
                   {moreHasBadge && (
-                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900" />
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
                   )}
                 </div>
                 {(isMoreSelected || isMobileMoreOpen) && (

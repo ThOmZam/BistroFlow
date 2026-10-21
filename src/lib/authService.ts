@@ -45,6 +45,86 @@ export function persistLogin(user: { id?: string; employeeId?: string; name: str
   } catch {}
 }
 
+export async function verifyStaffEmail(rawEmail: string): Promise<{
+  exists: boolean;
+  name?: string;
+  role?: string;
+  error?: string;
+}> {
+  const cleanEmail = rawEmail.trim().toLowerCase();
+  if (!cleanEmail) {
+    return { exists: false, error: 'Por favor ingresa tu correo electrónico.' };
+  }
+
+  // 1. Authoritative check for Super Admin Thomas Zambrano
+  if (cleanEmail === 'thomaszambrano24@gmail.com' || cleanEmail === 'thomaszambrano@gmail.com') {
+    return { exists: true, name: 'Thomas Zambrano', role: 'admin' };
+  }
+
+  // 2. Authoritative check for General Admin
+  if (cleanEmail === 'admin@bistroflow.com') {
+    return { exists: true, name: 'Gerencia General', role: 'admin' };
+  }
+
+  // 3. Demo staff accounts
+  if (cleanEmail === 'mesero@bistroflow.com') {
+    return { exists: true, name: 'Carlos Mesero', role: 'waiter' };
+  }
+  if (cleanEmail === 'cocina@bistroflow.com') {
+    return { exists: true, name: 'Elena Cocinera', role: 'cook' };
+  }
+  if (cleanEmail === 'caja@bistroflow.com') {
+    return { exists: true, name: 'Roberto Cajero', role: 'finance' };
+  }
+
+  // 4. Check Firestore 'employees' collection
+  try {
+    const snap = await getDocs(collection(db, 'employees'));
+    const employees = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+    const matched = employees.find(emp => {
+      const empEmail = String(emp.email || '').trim().toLowerCase();
+      return empEmail === cleanEmail;
+    });
+
+    if (matched) {
+      if (matched.status === 'inactive') {
+        return {
+          exists: false,
+          error: 'El colaborador se encuentra inactivo en nómina. Comuníquese con la gerencia.'
+        };
+      }
+      return {
+        exists: true,
+        name: matched.name || 'Colaborador',
+        role: matched.role || 'waiter'
+      };
+    }
+  } catch (dbErr) {
+    console.warn('Firestore employee lookup warning:', dbErr);
+  }
+
+  // 5. Query backend API if available
+  try {
+    const res = await fetch('/api/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.exists) {
+        return { exists: true, name: data.name, role: data.role };
+      }
+    }
+  } catch {}
+
+  return {
+    exists: false,
+    error: 'No encontramos ninguna cuenta asociada a este correo electrónico.'
+  };
+}
+
 export async function loginStaff(rawEmail: string, rawPin: string): Promise<AuthResult> {
   const cleanEmail = rawEmail.trim().toLowerCase();
   const cleanPin = rawPin.trim();
