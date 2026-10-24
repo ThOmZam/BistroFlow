@@ -666,7 +666,7 @@ export default function Sidebar({
         <>
           <nav 
             aria-label="Navegación Móvil"
-            className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white border border-slate-200/90 shadow-[0_12px_28px_rgba(0,0,0,0.12),0_4px_10px_rgba(0,0,0,0.06)] rounded-full p-1.5 grid grid-cols-5 items-center w-[92vw] max-w-[400px] select-none ring-1 ring-black/[0.04]"
+            className="md:hidden fixed bottom-2.5 sm:bottom-3 left-1/2 -translate-x-1/2 z-50 bg-white border border-slate-200/90 shadow-[0_8px_20px_rgba(0,0,0,0.1),0_2px_6px_rgba(0,0,0,0.04)] rounded-full p-1 grid grid-cols-5 items-center w-[88vw] max-w-[345px] select-none ring-1 ring-black/[0.04]"
           >
             {mobilePrimaryTabs.map((item) => {
               const isSelected = activeView === item.id && !isMobileMoreOpen;
@@ -681,25 +681,25 @@ export default function Sidebar({
                     onViewChange(item.id);
                   }}
                   style={isSelected ? { backgroundColor: safeBrandColor, color: '#ffffff' } : undefined}
-                  className={`relative flex flex-col items-center justify-center h-[48px] rounded-full transition-all duration-200 cursor-pointer ${
+                  className={`relative flex flex-col items-center justify-center h-[38px] rounded-full transition-all duration-200 cursor-pointer ${
                     isSelected 
-                      ? 'bg-[#2563EB] text-white shadow-md shadow-blue-500/25' 
-                      : 'text-slate-700 hover:text-slate-900 hover:bg-slate-50'
+                      ? 'bg-[#2563EB] text-white shadow-xs shadow-blue-500/25' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
                   <div className="relative flex items-center justify-center">
                     <IconComponent 
-                      size={18} 
-                      className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-700 stroke-[1.9]'} 
+                      size={16} 
+                      className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.9]'} 
                     />
                     {hasBadge && (
-                      <span className="absolute -top-1 -right-2 text-[9px] min-w-[16px] h-4 px-1 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-white shadow-xs">
+                      <span className="absolute -top-1 -right-2 text-[8px] min-w-[14px] h-[14px] px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-bold ring-1.5 ring-white shadow-xs">
                         {typeof item.badge === 'number' && item.badge > 99 ? '99+' : item.badge}
                       </span>
                     )}
                   </div>
-                  <span className={`text-[10px] tracking-tight mt-0.5 leading-none ${
-                    isSelected ? 'text-white font-bold' : 'text-slate-700 font-semibold'
+                  <span className={`text-[9px] tracking-tight mt-0.5 leading-none ${
+                    isSelected ? 'text-white font-bold' : 'text-slate-600 font-semibold'
                   }`}>
                     {item.label}
                   </span>
@@ -711,23 +711,23 @@ export default function Sidebar({
             <button
               onClick={() => setIsMobileMoreOpen(prev => !prev)}
               style={isMoreSelected || isMobileMoreOpen ? { backgroundColor: safeBrandColor, color: '#ffffff' } : undefined}
-              className={`relative flex flex-col items-center justify-center h-[48px] rounded-full transition-all duration-200 cursor-pointer ${
+              className={`relative flex flex-col items-center justify-center h-[38px] rounded-full transition-all duration-200 cursor-pointer ${
                 isMoreSelected || isMobileMoreOpen
-                  ? 'bg-[#2563EB] text-white shadow-md shadow-blue-500/25' 
-                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-50'
+                  ? 'bg-[#2563EB] text-white shadow-xs shadow-blue-500/25' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               <div className="relative flex items-center justify-center">
                 <Sparkles 
-                  size={18} 
-                  className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-700 stroke-[1.9]'} 
+                  size={16} 
+                  className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.9]'} 
                 />
                 {moreHasBadge && (
-                  <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white shadow-xs" />
+                  <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-rose-500 ring-1 ring-white shadow-xs" />
                 )}
               </div>
-              <span className={`text-[10px] tracking-tight mt-0.5 leading-none ${
-                isMoreSelected || isMobileMoreOpen ? 'text-white font-bold' : 'text-slate-700 font-semibold'
+              <span className={`text-[9px] tracking-tight mt-0.5 leading-none ${
+                isMoreSelected || isMobileMoreOpen ? 'text-white font-bold' : 'text-slate-600 font-semibold'
               }`}>
                 Más
               </span>
