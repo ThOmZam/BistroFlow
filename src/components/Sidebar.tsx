@@ -88,6 +88,7 @@ export default function Sidebar({
   const [cajaPendingCount, setCajaPendingCount] = useState(0);
   const [kitchenActiveCount, setKitchenActiveCount] = useState(0);
   const [chatMessagesCount, setChatMessagesCount] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
 
   // Update chat read timestamp when entering chat view
   useEffect(() => {
@@ -141,11 +142,23 @@ export default function Sidebar({
       setChatMessagesCount(unreadCount);
     }, () => {});
 
+    // 5. Count low stock items in ingredients for Stock badge
+    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snap) => {
+      const low = snap.docs.filter(d => {
+        const data = d.data();
+        const stock = Number(data.stock ?? 0);
+        const minStock = Number(data.minStock ?? 5);
+        return stock <= minStock;
+      });
+      setLowStockCount(low.length);
+    }, () => {});
+
     return () => {
       unsubTables();
       unsubSessions();
       unsubKitchen();
       unsubChats();
+      unsubIngredients();
     };
   }, [activeView]);
 
@@ -244,7 +257,7 @@ export default function Sidebar({
     { id: 'dashboard', label: 'Inicio', icon: LayoutGrid, badge: 0 },
     { id: 'waiter', label: 'POS', icon: Store, badge: tableWaitingBillCount },
     { id: 'caja', label: 'Caja', icon: Wallet, badge: cajaPendingCount },
-    { id: 'inventory', label: 'Stock', icon: Package, badge: 0 },
+    { id: 'inventory', label: 'Stock', icon: Package, badge: lowStockCount },
   ];
 
   const primaryIds = mobilePrimaryTabs.map(t => t.id);
@@ -380,7 +393,10 @@ export default function Sidebar({
 
   const sidebarTheme = (settings as any)?.sidebarTheme || localStorage.getItem('restaurant_sidebar_theme') || 'minimalist';
   const bgTheme = (settings as any)?.bgTheme || localStorage.getItem('restaurant_bg_theme') || 'kinetic';
-  const brandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
+  const rawBrandColor = (settings as any)?.brandColor || localStorage.getItem('restaurant_brand_color') || '#2563eb';
+  const isWhiteOrLight = !rawBrandColor || rawBrandColor.toLowerCase() === '#ffffff' || rawBrandColor.toLowerCase() === '#fff' || rawBrandColor.toLowerCase() === 'white';
+  const safeBrandColor = isWhiteOrLight ? '#2563eb' : rawBrandColor;
+  const brandColor = rawBrandColor;
 
   const isDarkSidebar = sidebarTheme === 'dark' || bgTheme === 'dark_luxury';
   const isBrandSidebar = sidebarTheme === 'brand';
@@ -638,17 +654,20 @@ export default function Sidebar({
           {!isCollapsed && (
             <div className="pt-2 text-center select-none">
               <p className="text-[9px] font-black tracking-widest text-slate-400 uppercase">
-                {restaurantName || 'BISTROFLOW'} POS • <span className="text-blue-600 font-black">PRO</span>
+                {restaurantName || 'BISTROFLOW'} POS • <span className="text-blue-600 font-black">PRO</span> • <span className="text-slate-500 font-mono">v1.2.5</span>
               </p>
             </div>
           )}
         </div>
       </motion.aside>
 
-      {/* Mobile Suspended Floating Pill Navigation Dock (Menú Flotante Píldora) */}
+      {/* Mobile Suspended Floating Pill Navigation Dock (Menú Flotante Píldora - Exact match from reference) */}
       {!isInsideTable && (
         <>
-          <nav className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/95 text-slate-800 backdrop-blur-xl border border-slate-200/90 shadow-[0_12px_35px_rgba(0,0,0,0.12)] rounded-full px-2 py-1.5 flex items-center justify-between gap-1 w-[94vw] max-w-md ring-1 ring-slate-900/5 select-none">
+          <nav 
+            aria-label="Navegación Móvil"
+            className="md:hidden fixed bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white border border-slate-200/90 shadow-[0_12px_28px_rgba(0,0,0,0.12),0_4px_10px_rgba(0,0,0,0.06)] rounded-full p-1.5 grid grid-cols-5 items-center w-[92vw] max-w-[400px] select-none ring-1 ring-black/[0.04]"
+          >
             {mobilePrimaryTabs.map((item) => {
               const isSelected = activeView === item.id && !isMobileMoreOpen;
               const hasBadge = !!item.badge;
@@ -661,31 +680,29 @@ export default function Sidebar({
                     setIsMobileMoreOpen(false);
                     onViewChange(item.id);
                   }}
-                  style={isSelected ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
-                  className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
+                  style={isSelected ? { backgroundColor: safeBrandColor, color: '#ffffff' } : undefined}
+                  className={`relative flex flex-col items-center justify-center h-[48px] rounded-full transition-all duration-200 cursor-pointer ${
                     isSelected 
-                      ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full px-2.5 py-1.5 font-medium'
+                      ? 'bg-[#2563EB] text-white shadow-md shadow-blue-500/25' 
+                      : 'text-slate-700 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5">
-                    <div className="relative flex items-center justify-center">
-                      <IconComponent 
-                        size={18} 
-                        className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.8]'} 
-                      />
-                      {hasBadge && (
-                        <span className="absolute -top-1.5 -right-2 text-[7px] min-w-3.5 h-3.5 px-0.5 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-white">
-                          {item.badge}
-                        </span>
-                      )}
-                    </div>
-                    {isSelected && (
-                      <span className="text-xs font-bold tracking-tight whitespace-nowrap">
-                        {item.label}
+                  <div className="relative flex items-center justify-center">
+                    <IconComponent 
+                      size={18} 
+                      className={isSelected ? 'text-white stroke-[2.2]' : 'text-slate-700 stroke-[1.9]'} 
+                    />
+                    {hasBadge && (
+                      <span className="absolute -top-1 -right-2 text-[9px] min-w-[16px] h-4 px-1 bg-rose-500 text-white rounded-full flex items-center justify-center font-black ring-2 ring-white shadow-xs">
+                        {typeof item.badge === 'number' && item.badge > 99 ? '99+' : item.badge}
                       </span>
                     )}
                   </div>
+                  <span className={`text-[10px] tracking-tight mt-0.5 leading-none ${
+                    isSelected ? 'text-white font-bold' : 'text-slate-700 font-semibold'
+                  }`}>
+                    {item.label}
+                  </span>
                 </button>
               );
             })}
@@ -693,29 +710,27 @@ export default function Sidebar({
             {/* 5th Pill button: "Más" */}
             <button
               onClick={() => setIsMobileMoreOpen(prev => !prev)}
-              style={isMoreSelected || isMobileMoreOpen ? { backgroundColor: brandColor, color: '#ffffff' } : undefined}
-              className={`flex items-center justify-center transition-all duration-200 cursor-pointer ${
+              style={isMoreSelected || isMobileMoreOpen ? { backgroundColor: safeBrandColor, color: '#ffffff' } : undefined}
+              className={`relative flex flex-col items-center justify-center h-[48px] rounded-full transition-all duration-200 cursor-pointer ${
                 isMoreSelected || isMobileMoreOpen
-                  ? 'text-white rounded-full px-3.5 py-1.5 shadow-md font-bold scale-[1.03]' 
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full px-2.5 py-1.5 font-medium'
+                  ? 'bg-[#2563EB] text-white shadow-md shadow-blue-500/25' 
+                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
-              <div className="flex items-center gap-1.5">
-                <div className="relative flex items-center justify-center">
-                  <Sparkles 
-                    size={18} 
-                    className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-600 stroke-[1.8]'} 
-                  />
-                  {moreHasBadge && (
-                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
-                  )}
-                </div>
-                {(isMoreSelected || isMobileMoreOpen) && (
-                  <span className="text-xs font-bold tracking-tight whitespace-nowrap">
-                    Más
-                  </span>
+              <div className="relative flex items-center justify-center">
+                <Sparkles 
+                  size={18} 
+                  className={isMoreSelected || isMobileMoreOpen ? 'text-white stroke-[2.2]' : 'text-slate-700 stroke-[1.9]'} 
+                />
+                {moreHasBadge && (
+                  <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white shadow-xs" />
                 )}
               </div>
+              <span className={`text-[10px] tracking-tight mt-0.5 leading-none ${
+                isMoreSelected || isMobileMoreOpen ? 'text-white font-bold' : 'text-slate-700 font-semibold'
+              }`}>
+                Más
+              </span>
             </button>
           </nav>
 

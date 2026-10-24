@@ -104,11 +104,11 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
     delivery_sales: { label: 'Ventas Delivery', span: 'col-span-1 md:col-span-6 lg:col-span-3' },
     pickup_sales: { label: 'Ventas Pickup', span: 'col-span-1 md:col-span-6 lg:col-span-3' },
     service_time: { label: 'Prom. Ciclo Servicio', span: 'col-span-1 md:col-span-6 lg:col-span-3' },
-    alerts: { label: 'Alertas', span: 'col-span-1 md:col-span-12 lg:col-span-8' },
-    salon: { label: 'Estado Salón', span: 'col-span-1 md:col-span-12 lg:col-span-4' },
-    caja: { label: 'Estado Caja', span: 'col-span-1 md:col-span-12 lg:col-span-4' },
-    cocina: { label: 'Estado Cocina', span: 'col-span-1 md:col-span-12 lg:col-span-4' },
-    chat: { label: 'Chat Interno', span: 'col-span-1 md:col-span-12 lg:col-span-4' }
+    alerts: { label: 'Alertas', span: 'col-span-2 md:col-span-12 lg:col-span-8' },
+    salon: { label: 'Estado Salón', span: 'col-span-2 md:col-span-12 lg:col-span-4' },
+    caja: { label: 'Estado Caja', span: 'col-span-2 md:col-span-12 lg:col-span-4' },
+    cocina: { label: 'Estado Cocina', span: 'col-span-2 md:col-span-12 lg:col-span-4' },
+    chat: { label: 'Chat Interno', span: 'col-span-2 md:col-span-12 lg:col-span-4' }
   };
 
 
@@ -890,7 +890,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
       {/* Draggable KPI Grid */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={dashboardLayout} strategy={rectSortingStrategy}>
-          <div className="grid grid-cols-1 md:grid-cols-12 lg:grid-cols-12 gap-6 mb-10">
+          <div className="grid grid-cols-2 md:grid-cols-12 lg:grid-cols-12 gap-3 sm:gap-4 md:gap-6 mb-8 sm:mb-10">
             {dashboardLayout.map(widgetId => {
               const config = WIDGET_CONFIGS[widgetId] || { span: 'col-span-1 md:col-span-6 lg:col-span-3' };
               
@@ -899,177 +899,177 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                   key={widgetId} 
                   id={widgetId} 
                   isEditingLayout={isEditingLayout} 
-                  className={`h-full relative group transition-all ${config.span} ${isEditingLayout ? 'cursor-grab active:cursor-grabbing ring-4 ring-indigo-500/20 ring-offset-4 rounded-[40px] z-10' : ''}`}
+                  className={`h-full relative group transition-all ${config.span} ${isEditingLayout ? 'cursor-grab active:cursor-grabbing ring-4 ring-indigo-500/20 ring-offset-4 rounded-2xl sm:rounded-[40px] z-10' : ''}`}
                 >
                   {isEditingLayout && (
-                    <div className="absolute inset-0 bg-indigo-50/20 backdrop-blur-[1px] border-2 border-indigo-400 border-dashed rounded-[32px] z-10 flex items-center justify-center cursor-grab active:cursor-grabbing pointer-events-none">
-                      <span className="text-indigo-700 font-bold text-sm uppercase tracking-widest bg-white px-4 py-2 rounded-full shadow-md pointer-events-auto cursor-grab active:cursor-grabbing">Mover Panel</span>
+                    <div className="absolute inset-0 bg-indigo-50/20 backdrop-blur-[1px] border-2 border-indigo-400 border-dashed rounded-2xl sm:rounded-[32px] z-10 flex items-center justify-center cursor-grab active:cursor-grabbing pointer-events-none">
+                      <span className="text-indigo-700 font-bold text-xs sm:text-sm uppercase tracking-widest bg-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-md pointer-events-auto cursor-grab active:cursor-grabbing">Mover Panel</span>
                     </div>
                   )}
 
                   {widgetId === 'revenue' || widgetId === 'tables' || widgetId === 'validations' || widgetId === 'deliveries' || widgetId === 'salon_sales' || widgetId === 'delivery_sales' || widgetId === 'pickup_sales' || widgetId === 'service_time' ? (
-                    <div className={`${isEditingLayout ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`${isEditingLayout ? 'opacity-50 pointer-events-none' : ''} h-full`}>
                       {widgetId === 'revenue' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-emerald-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
-                              <DollarSign size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-emerald-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <DollarSign size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-emerald-500">Ventas</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-emerald-500 truncate">Ventas</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Venta Acumulada ({activeCurrency})</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Venta Acumulada ({activeCurrency})</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(dashboardMetrics.totalSales)}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(dashboardMetrics.totalSales)}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">{formatBs(toBolivares(dashboardMetrics.totalSales))}</span>
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">{formatBs(toBolivares(dashboardMetrics.totalSales))}</span>
                           </div>
                         </div>
                       )}
                       
                       {widgetId === 'tables' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-indigo-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                              <Users size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-indigo-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <Users size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-indigo-500">Mesas</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-indigo-500 truncate">Mesas</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Mesas Ocupadas</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Mesas Ocupadas</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${dashboardMetrics.activeTables}</span>
-                              <span className="text-sm font-bold text-slate-400">/ ${tables.length}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{dashboardMetrics.activeTables}</span>
+                              <span className="text-xs sm:text-sm font-bold text-slate-400">/ {tables.length}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">${Math.round((dashboardMetrics.activeTables / Math.max(1, tables.length)) * 100)}% de ocupación</span>
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">{Math.round((dashboardMetrics.activeTables / Math.max(1, tables.length)) * 100)}% ocupación</span>
                           </div>
                         </div>
                       )}
 
                       {widgetId === 'validations' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-amber-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl">
-                              <Receipt size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-amber-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-amber-50 text-amber-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <Receipt size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-amber-500">Caja</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-amber-500 truncate">Caja</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Caja por Validar</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Por Validar</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${dashboardMetrics.validationsPending}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{dashboardMetrics.validationsPending}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              ${dashboardMetrics.validationsPending === 0 ? 'Todo conciliado y al día' : 'Pagos pendientes de revisión'}
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              {dashboardMetrics.validationsPending === 0 ? 'Todo al día' : 'Pendientes de revisión'}
                             </span>
                           </div>
                         </div>
                       )}
 
                       {widgetId === 'deliveries' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-orange-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-orange-50 text-orange-600 rounded-2xl">
-                              <ShoppingBag size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-orange-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-orange-50 text-orange-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <ShoppingBag size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-orange-500">Envíos</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-orange-500 truncate">Envíos</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Pedidos Delivery</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Delivery Activos</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${dashboardMetrics.activeDeliveries}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{dashboardMetrics.activeDeliveries}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              ${dashboardMetrics.activeDeliveries === 0 ? 'Sin envíos en curso' : 'En curso hoy'}
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              {dashboardMetrics.activeDeliveries === 0 ? 'Sin envíos en curso' : 'En curso hoy'}
                             </span>
                           </div>
                         </div>
                       )}
                       
                       {widgetId === 'salon_sales' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-indigo-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                              <Users size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-indigo-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <Users size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-indigo-500">Mesa</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-indigo-500 truncate">Salón</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Salón</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Ventas Salón</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.salon)}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.salon)}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              ${dashboardMetrics.salonCount} pedidos
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              {dashboardMetrics.salonCount} pedidos
                             </span>
                           </div>
                         </div>
                       )}
                       
                       {widgetId === 'pickup_sales' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-orange-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-orange-50 text-orange-600 rounded-2xl">
-                              <ShoppingBag size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-orange-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-orange-50 text-orange-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <ShoppingBag size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-orange-500">Pickup</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-orange-500 truncate">Pickup</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Retiro</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Ventas Retiro</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.pickup)}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.pickup)}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              ${dashboardMetrics.pickupCount} pedidos
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              {dashboardMetrics.pickupCount} pedidos
                             </span>
                           </div>
                         </div>
                       )}
                       
                       {widgetId === 'delivery_sales' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-violet-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-violet-50 text-violet-600 rounded-2xl">
-                              <Smartphone size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-violet-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-violet-50 text-violet-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <Smartphone size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-violet-500">Delivery</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-violet-500 truncate">Delivery</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Ventas Delivery</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Ventas Delivery</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.delivery)}</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{formatPrice(salesByChannel.delivery)}</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              ${dashboardMetrics.deliveryCount} pedidos
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              {dashboardMetrics.deliveryCount} pedidos
                             </span>
                           </div>
                         </div>
                       )}
                       
                       {widgetId === 'service_time' && (
-                        <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className="absolute -right-6 -top-6 w-24 h-24 bg-blue-50 rounded-full group-hover:scale-110 transition-transform"></div>
-                          <div className="flex items-center gap-3 mb-4 relative z-10">
-                            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-                              <Clock size={20} className="stroke-[2.5px]" />
+                        <div className="bg-white p-3.5 sm:p-5 md:p-6 rounded-2xl sm:rounded-[32px] shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className="absolute -right-4 -top-4 sm:-right-6 sm:-top-6 w-16 h-16 sm:w-24 sm:h-24 bg-blue-50 rounded-full group-hover:scale-110 transition-transform"></div>
+                          <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-4 relative z-10">
+                            <div className="p-2 sm:p-3 bg-blue-50 text-blue-600 rounded-xl sm:rounded-2xl shrink-0">
+                              <Clock size={16} className="sm:w-5 sm:h-5 stroke-[2.5px]" />
                             </div>
-                            <span className="text-xs font-black tracking-widest uppercase text-blue-500">Tiempo</span>
+                            <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-blue-500 truncate">Tiempo</span>
                           </div>
                           <div className="relative z-10 mt-auto">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Prom. Ciclo Servicio</span>
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 sm:mb-1 block truncate">Prom. Ciclo Servicio</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-4xl font-black text-slate-800 tracking-tighter">${avgServiceTime}</span>
-                              <span className="text-sm font-bold text-slate-400 block ml-1">min</span>
+                              <span className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{avgServiceTime}</span>
+                              <span className="text-xs sm:text-sm font-bold text-slate-400 block ml-0.5">min</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 mt-2 block">
-                              Tiempo mesa abierta hasta cobro
+                            <span className="text-[10px] sm:text-xs font-bold text-slate-400 mt-1 sm:mt-2 block truncate">
+                              Mesa abierta a cobro
                             </span>
                           </div>
                         </div>
@@ -1145,11 +1145,11 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                             <div className="space-y-4 mb-8">
                               <div className="flex justify-between items-center bg-indigo-700/50 p-4 rounded-2xl border border-indigo-500/30">
                                 <span className="font-medium text-indigo-100 text-sm">Ocupación:</span>
-                                <span className="font-black text-xl">${Math.round((dashboardMetrics.activeTables / Math.max(1, tables.length)) * 100)}%</span>
+                                <span className="font-black text-xl">{Math.round((dashboardMetrics.activeTables / Math.max(1, tables.length)) * 100)}%</span>
                               </div>
                               <div className="flex justify-between items-center bg-indigo-700/50 p-4 rounded-2xl border border-indigo-500/30">
                                 <span className="font-medium text-indigo-100 text-sm">Mesas Libres:</span>
-                                <span className="font-black text-xl">${tables.length - dashboardMetrics.activeTables}</span>
+                                <span className="font-black text-xl">{tables.length - dashboardMetrics.activeTables}</span>
                               </div>
                             </div>
                             
@@ -1184,11 +1184,11 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                             <div className="space-y-4 mb-8">
                               <div className="flex justify-between items-center bg-amber-600/50 p-4 rounded-2xl border border-amber-400/30">
                                 <span className="font-medium text-amber-100 text-sm">Por Validar:</span>
-                                <span className="font-black text-xl">${dashboardMetrics.validationsPending}</span>
+                                <span className="font-black text-xl">{dashboardMetrics.validationsPending}</span>
                               </div>
                               <div className="flex justify-between items-center bg-amber-600/50 p-4 rounded-2xl border border-amber-400/30">
                                 <span className="font-medium text-amber-100 text-sm">Tasa del Día:</span>
-                                <span className="font-black text-xl">${exchangeRate} Bs</span>
+                                <span className="font-black text-xl">{exchangeRate} Bs</span>
                               </div>
                             </div>
                             
@@ -1223,11 +1223,11 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                             <div className="space-y-4 mb-8">
                               <div className="flex justify-between items-center bg-rose-600/50 p-4 rounded-2xl border border-rose-400/30">
                                 <span className="font-medium text-rose-100 text-sm">Órdenes Activas:</span>
-                                <span className="font-black text-xl">${kitchenOrders.filter(o => o.status !== 'completed').length}</span>
+                                <span className="font-black text-xl">{kitchenOrders.filter(o => o.status !== 'completed').length}</span>
                               </div>
                               <div className="flex justify-between items-center bg-rose-600/50 p-4 rounded-2xl border border-rose-400/30">
                                 <span className="font-medium text-rose-100 text-sm">Estado General:</span>
-                                <span className="font-black text-sm px-3 py-1 bg-white/20 rounded-full uppercase tracking-wider">${kitchenOrders.filter(o => o.status !== 'completed').length > 10 ? 'Alta Demanda' : 'Operativo'}</span>
+                                <span className="font-black text-sm px-3 py-1 bg-white/20 rounded-full uppercase tracking-wider">{kitchenOrders.filter(o => o.status !== 'completed').length > 10 ? 'Alta Demanda' : 'Operativo'}</span>
                               </div>
                             </div>
                             
@@ -1265,7 +1265,7 @@ export default function DashboardView({ currentUser, onViewChange }: { currentUs
                             <div className="space-y-4 mb-8">
                               <div className="flex justify-between items-center bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
                                 <span className="font-medium text-slate-300 text-sm">Mensajes Nuevos:</span>
-                                <span className="font-black text-xl">${chatsCount}</span>
+                                <span className="font-black text-xl">{chatsCount}</span>
                               </div>
                               <div className="flex justify-between items-center bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
                                 <span className="font-medium text-slate-300 text-sm">Equipo Conectado:</span>

@@ -702,7 +702,7 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
 
   // Filter lists based on states
   const pendingSessions = activeSessions.filter(
-    s => s.paymentStatus === 'pending_validation' && (s.pendingPayment || s.paymentReceiptImage || s.paymentReference)
+    s => s.paymentStatus === 'pending_validation'
   );
   
   const creditSessions = activeSessions.filter(
@@ -810,16 +810,12 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
   };
 
   const executeApprovePayment = async (session: any) => {
-    if (!activeShift) {
-      playErrorSound();
-      showToast('⚠️ Operación bloqueada: Es obligatorio abrir un turno de caja antes de validar pagos.');
-      setIsOpeningShiftModalOpen(true);
-      return;
-    }
-
     setIsProcessing(true);
     try {
-      const isDelivery = session.type === 'delivery' || session.tableId === 'delivery';
+      const shiftId = activeShift?.id || 'turn_principal';
+      const shiftName = activeShift?.shiftName || 'Turno Principal';
+
+      const isDelivery = session.type === 'delivery' || session.tableId === 'delivery' || session.tableId?.startsWith('delivery');
       
       const accounts = session.accounts || [{ id: 'default', name: 'Cuenta 1', status: 'active' }];
       const accountId = session.pendingPayment?.accountId || accounts[0]?.id || 'default';
@@ -842,7 +838,7 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
         'finance',
         reviewerName,
         `${actionType} (${tableLabel})`,
-        `Turno: ${activeShift.shiftName} - Cliente: ${payerName} - Total: $${totalAmount.toFixed(2)} - Método: ${paymentMethod.toUpperCase()}`
+        `Turno: ${shiftName} - Cliente: ${payerName} - Total: $${totalAmount.toFixed(2)} - Método: ${paymentMethod.toUpperCase()}`
       );
 
       // Record transaction
@@ -852,28 +848,28 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
           await addDoc(collection(db, 'transactions'), {
             sessionId: session.id,
             accountId: accountId,
-            shiftId: activeShift.id,
-            shiftName: activeShift.shiftName,
+            shiftId: shiftId,
+            shiftName: shiftName,
             amount: mp.amountUSD,
             amountCents: Math.round(mp.amountUSD * 100),
             method: mp.method,
             reference: mp.reference || null,
             timestamp: new Date().toISOString(),
             approvedBy: 'Caja'
-          });
+          }).catch(() => {});
         }
       } else {
         await addDoc(collection(db, 'transactions'), {
           sessionId: session.id,
           accountId: accountId,
-          shiftId: activeShift.id,
-          shiftName: activeShift.shiftName,
+          shiftId: shiftId,
+          shiftName: shiftName,
           amount: totalAmount,
           amountCents: Math.round(totalAmount * 100),
           method: paymentMethod,
           timestamp: new Date().toISOString(),
           approvedBy: 'Caja'
-        });
+        }).catch(() => {});
       }
 
       const creditClientData = session.pendingPayment?.creditClient || session.creditClient;
@@ -953,7 +949,7 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
         });
 
         if (session.tableId && session.tableId !== 'delivery' && !session.tableId?.startsWith('delivery')) {
-          await updateDoc(doc(db, 'tables', session.tableId), { status: 'occupied' });
+          await updateDoc(doc(db, 'tables', session.tableId), { status: 'occupied' }).catch(() => {});
         }
       }
 
@@ -961,37 +957,47 @@ export default function CajaView({ currentUser, onViewChange }: { currentUser?: 
       if (isDelivery) {
         const isDirectPrint = (settings as any)?.kitchenMode === 'direct_print';
         const targetStatus = isDirectPrint ? 'enviado' : 'pending';
-        const ordersRef = collection(db, 'sessions', session.id, 'accounts', 'default', 'orders');
-        const orderSnaps = await getDocs(ordersRef);
-        const promises = orderSnaps.docs.map(orderDoc => {
-          return updateDoc(doc(db, 'sessions', session.id, 'accounts', 'default', 'orders', orderDoc.id), {
-            status: targetStatus
-          });
-        });
-        await Promise.all(promises);
+        
+        const accountsToUpdate = accounts.length > 0 ? accounts : [{ id: 'default' }];
+        let allItemsToPrint: any[] = [];
+
+        for (const acc of accountsToUpdate) {
+          const accId = acc.id || 'default';
+          const ordersRef = collection(db, 'sessions', session.id, 'accounts', accId, 'orders');
+          const orderSnaps = await getDocs(ordersRef).catch(() => ({ docs: [] } as any));
+          
+          if (orderSnaps.docs && orderSnaps.docs.length > 0) {
+            const promises = orderSnaps.docs.map((orderDoc: any) => {
+              return updateDoc(doc(db, 'sessions', session.id, 'accounts', accId, 'orders', orderDoc.id), {
+                status: targetStatus
+              }).catch(() => {});
+            });
+            await Promise.all(promises);
+
+            const itemsFromAcc = orderSnaps.docs.map((d: any) => {
+              const data = d.data();
+              return {
+                itemName: data.name || data.itemName || 'Platillo',
+                quantity: data.quantity || 1,
+                note: data.notes || data.note || '',
+                excludedIngredients: data.excludedIngredients || [],
+                extras: data.extras || []
+              };
+            });
+            allItemsToPrint = [...allItemsToPrint, ...itemsFromAcc];
+          }
+        }
 
         // Auto-print thermal kitchen ticket if direct print mode or autoPrint is active
-        if (isDirectPrint || (settings as any)?.autoPrintKitchenTicket !== false) {
-          const itemsToPrint = orderSnaps.docs.map(d => {
-            const data = d.data();
-            return {
-              itemName: data.name || data.itemName || 'Platillo',
-              quantity: data.quantity || 1,
-              note: data.notes || data.note || '',
-              excludedIngredients: data.excludedIngredients || [],
-              extras: data.extras || []
-            };
+        if ((isDirectPrint || (settings as any)?.autoPrintKitchenTicket !== false) && allItemsToPrint.length > 0) {
+          printKitchenTicket({
+            tableName: `DELIVERY/LLEVAR: ${session.customerName || 'Cliente'}`,
+            waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja',
+            timestamp: new Date().toISOString(),
+            items: allItemsToPrint,
+            paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
+            restaurantName: (settings as any)?.restaurantName || 'BISTROFLOW'
           });
-          if (itemsToPrint.length > 0) {
-            printKitchenTicket({
-              tableName: `DELIVERY/LLEVAR: ${session.customerName || 'Cliente'}`,
-              waiterName: currentUser?.name || localStorage.getItem('demo_user_name') || 'Caja',
-              timestamp: new Date().toISOString(),
-              items: itemsToPrint,
-              paperWidth: (settings as any)?.kitchenPaperWidth || '80mm',
-              restaurantName: (settings as any)?.restaurantName || 'BISTROFLOW'
-            });
-          }
         }
       }
 

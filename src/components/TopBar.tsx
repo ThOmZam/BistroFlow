@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useCurrency } from '../context/CurrencyContext';
 import { useBookmarks } from '../lib/bookmarks';
+import { APP_VERSION } from '../types';
 
 interface TopBarProps {
   onOpenSearch: () => void;
@@ -122,28 +123,22 @@ export default function TopBar({
     >
       {/* Left: Mobile Brand Header & Desktop Omnipresent Search Bar */}
       <div className="flex items-center gap-2.5 flex-1 min-w-0 max-w-full md:max-w-md lg:max-w-xl">
-        {/* Mobile-only Branding Header (Logo + Restaurant Name + Active Section) */}
-        <div className="flex md:hidden items-center gap-2 min-w-0 shrink-0">
-          {logoUrl ? (
-            <img 
-              src={logoUrl} 
-              alt={restaurantName} 
-              className="w-8 h-8 rounded-xl object-cover border border-slate-200/90 shrink-0 shadow-2xs" 
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center font-black shadow-2xs shrink-0 text-xs">
-              {restaurantName ? restaurantName.charAt(0).toUpperCase() : 'Q'}
-            </div>
+        {/* Mobile-only Branding Header & Quick Status Pills (matching screenshot reference) */}
+        <div className="flex md:hidden items-center gap-1.5 min-w-0 overflow-x-auto no-scrollbar py-0.5">
+          {currentUser && (
+            <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+              {currentUser.role}
+            </span>
           )}
-          <div className="min-w-0 leading-tight">
-            <div className="text-xs font-black text-slate-900 tracking-tight truncate max-w-[100px] xs:max-w-[130px]">
-              {restaurantName}
-            </div>
-            {currentViewInfo && (
-              <span className="text-[10px] font-extrabold text-indigo-600 uppercase tracking-wider block truncate max-w-[90px]">
-                {currentViewInfo.label}
-              </span>
-            )}
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 shrink-0">
+            {APP_VERSION}
+          </span>
+          <div 
+            title="Moneda y tasa de cambio"
+            className="flex items-center gap-1 bg-emerald-50 border border-emerald-200/90 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-800 shrink-0"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+            <span>1$ = Bs. {currentRateBs.toFixed(2)}</span>
           </div>
         </div>
 
@@ -176,24 +171,22 @@ export default function TopBar({
           onClick={onOpenSearch}
           type="button"
           title="Buscar en el sistema..."
-          className="flex md:hidden items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 rounded-xl transition-all cursor-pointer border border-slate-200/90 shadow-2xs active:scale-95"
+          className="flex md:hidden items-center justify-center w-8 h-8 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-indigo-600 rounded-full transition-all cursor-pointer border border-slate-200/90 shadow-2xs active:scale-95"
         >
-          <Search size={16} className="text-indigo-600 shrink-0" />
-          <span className="hidden xs:inline text-xs font-bold text-slate-700">Buscar</span>
+          <Search size={15} className="text-indigo-600 shrink-0" />
         </button>
 
-        {/* Currency Exchange Rate Badge (Compact on Mobile, Full on Desktop) */}
+        {/* Currency Exchange Rate Badge (Desktop only) */}
         <div 
           title="Moneda y tasa de cambio configuradas por el Administrador"
-          className="flex items-center gap-1 sm:gap-2 bg-emerald-50 border border-emerald-200/90 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs select-none shadow-2xs"
+          className="hidden md:flex items-center gap-2 bg-emerald-50 border border-emerald-200/90 px-3 py-1.5 rounded-full text-xs select-none shadow-2xs"
         >
-          <Lock size={12} className="text-emerald-700 shrink-0 hidden sm:inline" />
+          <Lock size={12} className="text-emerald-700 shrink-0" />
           <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-            <span className="hidden sm:inline">Tasa {activeCurrency}: </span>
-            <span className="sm:hidden">Bs.</span>
+            Tasa {activeCurrency}:
           </span>
           <span className="font-mono font-black text-emerald-900 text-xs">
-            <span className="hidden sm:inline">Bs. </span>{currentRateBs.toFixed(2)}
+            Bs. {currentRateBs.toFixed(2)}
           </span>
         </div>
 

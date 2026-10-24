@@ -1,5 +1,6 @@
 {
   "name": "Q' Sandwich - Menú Digital & POS",
+  "version": "1.2.5",
   "description": "Explora nuestro catálogo digital y realiza tu pedido en línea de forma rápida y sencilla.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["real-time-sync", "inventory-management", "kds", "pos", "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

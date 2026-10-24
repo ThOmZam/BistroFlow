@@ -1,3 +1,4 @@
+export const APP_VERSION = "v1.2.5";
 export type Role = 'admin' | 'waiter' | 'cook' | 'client' | 'finance';
 export type TableStatus = 'free' | 'occupied' | 'waiting_bill';
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'enviado';
